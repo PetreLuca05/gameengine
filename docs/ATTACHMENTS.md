@@ -362,7 +362,10 @@ resolution sharpens the geometry, textures and shadow-map lookups, not those inp
 ADS DoF switches on exactly while the aim is complete (`ads_dof`):
 
 - a fixed far focus (`ads_dof_focus`, 80 m) at `ads_dof_fstop`;
-- viewmodel pixels get the optic's `ads_dof_near_blur` (irons: `ads_dof_near_blur`);
+- viewmodel pixels get the optic's `ads_dof_near_blur` (irons: the `ads_dof_near_blur` cvar, 3.5 px;
+  red dot 3.5, 4x 4.5, 8x 5): the gather kernel spans that blur while aimed, so the weapon gets a
+  visible soft blur (2026-10-20: 1.2 - 2.5 px over the scene's max-CoC kernel got 3 - 4 taps and
+  showed nothing); the sights draw after the DoF, so the lens picture and the dot stay sharp;
 - the user's DoF mode applies again the first frame the aim is incomplete.
 
 ## Dev room

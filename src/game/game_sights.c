@@ -173,13 +173,16 @@ void sights_frame(const RenderCamera *cam, bool first_person) {
         if (a) {
             Xform opt = xf_mul(item, attach_placement(wd, a));
             rs->kind = S.kind;
-            rs->lens_pos = xf_point(opt, a->lens_pos);
+            // The optic as the arms layer draws it (the body's item stays at the hip: ADS is only in
+            // the arms layer): the lens through the arms camera, for the arms projection the sight
+            // shaders hit it with.
+            rs->lens_pos = render_arms_point(xf_point(opt, a->lens_pos));
             rs->lens_radius = a->lens_radius;
             rs->objective_pos = render_viewmodel_to_world(xf_point(opt, a->objective_pos));
             rs->objective_radius = a->objective_radius;
-            rs->fwd = xf_dir(opt, v3(0, 0, -1));
-            rs->up = xf_dir(opt, v3(0, 1, 0));
-            rs->right = xf_dir(opt, v3(1, 0, 0));
+            rs->fwd = render_arms_dir(xf_dir(opt, v3(0, 0, -1)));
+            rs->up = render_arms_dir(xf_dir(opt, v3(0, 1, 0)));
+            rs->right = render_arms_dir(xf_dir(opt, v3(1, 0, 0)));
             rs->axis_fwd = rs->fwd;
             rs->axis_up = rs->up;
             rs->axis_right = rs->right;
@@ -203,7 +206,7 @@ void sights_frame(const RenderCamera *cam, bool first_person) {
                 vec3 sw = render_viewmodel_to_world(chars_fp_sight_world());
                 rs->dot_point = v3_madd(cam->pos, v3_norm(v3_sub(sw, cam->pos)), fmaxf(a->parallax_m, 1.0f));
             } else {
-                rs->dot_point = render_viewmodel_to_world(v3_madd(rs->lens_pos, rs->fwd, fmaxf(a->parallax_m, 1.0f)));
+                rs->dot_point = render_viewmodel_to_world(v3_madd(xf_point(opt, a->lens_pos), xf_dir(opt, v3(0, 0, -1)), fmaxf(a->parallax_m, 1.0f)));
             }
             rs->reticle_moa = a->reticle.moa;
             rs->reticle_outer_moa = a->reticle.outer_moa;
@@ -693,7 +696,7 @@ void sights_register(void) {
     S.ads_dof = cvar_reg_bool("ads_dof", true, CVAR_TIER, "ADS depth of field once fully aimed: the world stays sharp, the weapon gets a slight blur");
     S.dof_focus = cvar_reg_float("ads_dof_focus", 80.0f, 5.0f, 1000.0f, CVAR_LOCKED, "ADS depth of field: fixed focus distance (m)");
     S.dof_fstop = cvar_reg_float("ads_dof_fstop", 4.0f, 0.5f, 32.0f, CVAR_LOCKED, "ADS depth of field: f-stop");
-    S.iron_blur = cvar_reg_float("ads_dof_near_blur", 1.5f, 0.0f, 16.0f, CVAR_LOCKED, "ADS near-field (weapon) blur with iron sights, CoC pixels (optics: their own value)");
+    S.iron_blur = cvar_reg_float("ads_dof_near_blur", 3.5f, 0.0f, 16.0f, CVAR_LOCKED, "ADS near-field (weapon) blur with iron sights, CoC pixels (optics: their own value)");
     cmd_register("sight_test", cmd_sight_test, "sight_test align [weapon|all] [quit] | sweep | fov | parallax | aspect | net | dump: attachment / sight tests");
     cmd_register("sight_test_report", cmd_sight_test_report, "end sight_test fov and print the result");
     cmd_register("sight_pip_res", cmd_sight_pip_res, "sight_pip_res [optic multiplier]: scope PiP resolution per sight (pip_resolution x r_scope_pip_scale, bounded by the fidelity level) and the PiP size now; a value sets it live (not saved)");

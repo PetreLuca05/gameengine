@@ -164,6 +164,10 @@ static void exec_dof_gather(VkCommandBuffer cmd, void *u) {
     memset(&pc, 0, sizeof(pc));
     static const u32 taps[3] = { 16, 32, 48 };   // r_dof_quality (Engine Fidelity: Medium / High / Modern)
     pc.u[0] = taps[DG_CLAMP(P.set.dof_quality, 0, 2)];
+    // ADS: only the weapon blurs, by its own near blur: the kernel spans that (half px), so every tap
+    // lands inside it (spanning the scene's max CoC, a few px of weapon blur got 3 - 4 taps: none visible).
+    float af, as, an;
+    if (post_sights_ads_dof(&af, &as, &an)) pc.p[0] = fmaxf(an * 0.5f, 1.0f);
     post_push_constants(cmd, &pc, 128);
     u32 w, h;
     fg_extent(C.far, &w, &h);

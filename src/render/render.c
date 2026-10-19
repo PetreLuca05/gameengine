@@ -1502,7 +1502,7 @@ int render_shadow_cascade_lag(float lag_deg[4], float allow_deg[4], float texel_
 }
 
 // The arms layer's screen size (docs/CAMERA_HOLDPOINT.md "Screen size"): 1 without a layer.
-static float arms_screen_scale(void) { return R->arms.valid && R->arms.screen_scale > 0.0f ? clampf(R->arms.screen_scale, 0.25f, 1.0f) : 1.0f; }
+static float arms_screen_scale(void) { return R->arms.valid && R->arms.screen_scale > 0.0f ? clampf(R->arms.screen_scale, 0.25f, 2.0f) : 1.0f; }
 
 // Arms camera space -> the world camera's view space at the same pixel and depth (the arms FOV and
 // the screen size against the world FOV).
@@ -3421,6 +3421,18 @@ vec3 render_viewmodel_to_world(vec3 p) {
     vec3 v = mat4_mul_point(arms_to_view(), mat4_mul_point(R->arms.valid ? R->arms.view : view, p));
     return mat4_mul_point(mat4_inverse_rigid(view), v);
 }
+
+// An arms-layer point (its real world position) where the arms camera draws it, in the world camera's
+// frame - before the FOV / screen mapping: what the arms projection (vm_proj) sees, e.g. the sight's
+// lens for the sight shaders. The body's item stays at the hip (ADS is never in the model), so the
+// drawn optic is only here.
+vec3 render_arms_point(vec3 p) {
+    if (!R->arms.valid) return p;
+    mat4 view = mat4_fps_view(R->cam.pos, R->cam.yaw, R->cam.pitch, R->cam.roll);
+    return mat4_mul_point(mat4_inverse_rigid(view), mat4_mul_point(R->arms.view, p));
+}
+
+vec3 render_arms_dir(vec3 d) { return v3_norm(v3_sub(render_arms_point(d), render_arms_point(v3(0, 0, 0)))); }
 
 mat4 render_view_proj(void) { return R->view_proj; }
 mat4 render_view_matrix(void) { return R->view; }

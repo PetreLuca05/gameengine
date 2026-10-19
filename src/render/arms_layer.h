@@ -21,8 +21,8 @@
 //   equip    a newly selected item comes up from below the view (out of the arms frustum) to its hold
 //   aim      a rotation about the eye that puts the barrel where the world camera shows the shot
 //            (sway, the ADS counter of the camera kick, the Hands FOV against the world FOV)
-//   screen   the layer's picture scaled about a point on the screen (the bottom edge): smaller on
-//            screen, the same place; back to 1 aimed (arms_layer_screen_clip / _view, the renderer)
+//   screen   the layer's picture scaled about a point on the screen (the bottom edge): bigger or
+//            smaller on screen, the same place; back to 1 aimed (arms_layer_screen_clip / _view, the renderer)
 #ifndef DG_ARMS_LAYER_H
 #define DG_ARMS_LAYER_H
 
@@ -59,7 +59,7 @@ typedef struct ArmsLayerDef {
                                       // the arms + item only, the body is the world camera's
     float znear;                      // the arms projection's near plane (m)
     float weapon_fov[WEAPON_FOV_COUNT];   // Weapon Field of View presets: narrow, default, wide (hip, horizontal deg at 16:9)
-    float screen_scale;               // the layer's size on screen at the hip (0.25 .. 1; 1 aimed) ...
+    float screen_scale;               // the layer's size on screen at the hip (0.25 .. 2; 1 aimed) ...
     vec2 screen_anchor;               // ... about this screen point (fractions: x from the left, y from the top; 1 = the bottom edge)
 } ArmsLayerDef;
 

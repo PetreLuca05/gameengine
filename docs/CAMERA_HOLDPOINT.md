@@ -158,14 +158,14 @@ in that camera's space places the drawn arms + item, in this order (`src/render/
 FOV aimed. It changes nothing but the arms projection, and the fidelity levels don't bound it.
 
 **Screen size** (`screen`, 2026-10-20): at the hip the arms + item picture is drawn at `screen.scale`
-(0.75) of its size about `screen.anchor` (screen fractions from the top left: 0.75, 1 = on the bottom
-edge where the guns leave the screen), so a gun keeps its place and is just smaller; what leaves the
-bottom edge still does. It goes back to 1 aimed with the camera weight (the sight's own ADS progress),
+(1.125: first 0.75, then 1.5x that; 0.25 .. 2) of its size about `screen.anchor` (screen fractions
+from the top left: 0.75, 1 = on the bottom edge where the guns leave the screen), so a gun keeps its
+place and is just bigger or smaller; what leaves the bottom edge still does. It goes back to 1 aimed with the camera weight (the sight's own ADS progress),
 so the sight lands on the screen centre at its own size. It is a 2D scale after the arms projection
 (`arms_layer_screen_clip`, in `vm_proj`); nothing in 3D moves, the depth is unchanged, and
 `render_viewmodel_to_world` / `vm_apparent` apply the same map (`arms_layer_screen_view`), so the
 muzzle flash, tracers and shadows stay on the drawn gun. The framing below (the fit, the reference
-points) is measured before it: the layout the screen size then shrinks.
+points) is measured before it: the layout the screen size then scales.
 
 **The shoulder seam** (`seam.on`, off): the body is drawn by the world camera, the arms by the arms
 camera. When on, arm vertices within `seam.r0` of an upper-arm joint keep the world camera's screen
@@ -176,6 +176,10 @@ and item: with its own position a blend would stretch the arm between the two ca
 **Everything else follows the arms camera:**
 - `render_viewmodel_to_world` maps an arms-layer point to where it appears (muzzle flash, tracers,
   sights).
+- `render_arms_point` / `render_arms_dir` map the optic (lens, axes) through the arms camera for the
+  sight shaders, which hit the lens with the arms projection. The body's item stays at the hip (ADS
+  is never in the model), so the optic taken from it put the lens at the hip: the scope picture and
+  the red dot vanished (fixed 2026-10-20).
 - `vm_apparent` does the same in the shaders for the world shadows on the arms.
 - **Shadows:** the arms and the item cast into the viewmodel tile and, with the whole body, into the
   world cascades from their real transforms.

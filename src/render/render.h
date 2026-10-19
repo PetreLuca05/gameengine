@@ -675,6 +675,10 @@ void render_poll_shader_hot_reload(void);
 // Queries
 bool render_world_to_screen(vec3 world, vec2 *out_px); // false if behind camera
 vec3 render_viewmodel_to_world(vec3 viewmodel_point);   // same pixel under the world FOV (muzzle flash / tracers)
+// An arms-layer point / direction where the arms camera draws it, in the world camera's frame (before
+// the FOV / screen mapping: what the arms projection sees; the sight shaders' lens).
+vec3 render_arms_point(vec3 p);
+vec3 render_arms_dir(vec3 d);
 float render_vm_fov(void);   // the viewmodel (arms + held item) projection FOV this frame
 // First-person arms layer (docs/CAMERA_HOLDPOINT.md "Rule 3", src/render/arms_layer.c): every
 // MAT_VIEWMODEL draw (the arms from the shoulders down, the held item) is seen through this camera

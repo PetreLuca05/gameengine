@@ -425,7 +425,7 @@
 		"wide":	85
 	},
 	"screen":	{
-		"scale":	0.75,
+		"scale":	1.125,
 		"anchor":	[0.75, 1]
 	}
 }
