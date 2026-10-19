@@ -77,7 +77,9 @@ bool spawn_particle(uint emitter, vec3 pos, vec4 rot, vec3 n, vec3 incoming, flo
     float frame = variant != 0xFFFu ? float(variant) : ((((e.modes.x >> 16) & EF_FRAME_RANDOM) != 0u) ? floor(rand01(s) * float(frames)) : 0.0);
     // Sub-tick spawn time: particles spawned earlier in the frame start slightly older / further.
     p += v * time_offset;
-    p_pos_age[idx] = vec4(p, time_offset);
+    // This frame's update (vfx_update.comp) adds dt before the first draw: start dt younger, so every
+    // particle is drawn at least once (a muzzle flash's parts live 4-18 ms, under a 60 Hz tick).
+    p_pos_age[idx] = vec4(p, time_offset - vf.cam_right.w);
     p_vel_life[idx] = vec4(v, life);
     p_misc[idx] = vec4(size, r, spin, frame);
     // Colors above 1 (HDR tints) are scaled into the emissive multiplier instead of the rgba8.

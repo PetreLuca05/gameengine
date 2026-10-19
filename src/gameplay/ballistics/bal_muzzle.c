@@ -20,7 +20,7 @@ vec3 bal_blackbody_rgb(float kelvin) {
 
 float bal_flash_exposure_gain(float ev, float ev_night, float daylight) {
     // Undo the camera's adaptation relative to night (the tonemapper scales by 2^-EV), then apply
-    // the eye's: an adapted daylight eye sees the same flash at ~0.15x.
+    // the eye's (kept readable: BAL_FLASH_DAY_RATIO, not the real ~0.15x).
     return exp2f(ev - ev_night) * lerpf(1.0f, BAL_FLASH_DAY_RATIO, saturate(daylight));
 }
 

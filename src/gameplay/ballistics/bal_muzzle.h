@@ -45,11 +45,11 @@ void bal_muzzle_compose(const BalMuzzleIn *in, BalMuzzleOut *out);
 // is the adaptation. The tonemapper scales by 2^-EV (the engine's EV range is compressed, so that
 // alone is not enough); this gain cancels it relative to the night exposure and applies the
 // eye's adaptation from the daylight level (0 night .. 1 full sun): the night look as authored,
-// ~0.15x perceived in full daylight.
+// ~0.85x perceived in full daylight (the eye's real ~0.15x hides the flash against a lit scene).
 float bal_flash_exposure_gain(float ev, float ev_night, float daylight);
 // Perceived brightness relative to night (gain × 2^-(ev-ev_night)); used by the tests / debug.
 float bal_flash_perceived(float ev, float ev_night, float daylight);
-#define BAL_FLASH_DAY_RATIO 0.15f
+#define BAL_FLASH_DAY_RATIO 0.85f
 
 // Normalized linear RGB of a blackbody (Planck sampled at 610 / 550 / 465 nm, max = 1).
 vec3 bal_blackbody_rgb(float kelvin);

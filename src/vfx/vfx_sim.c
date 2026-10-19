@@ -544,7 +544,7 @@ static void tick_instance(VfxSystem *s, VfxInstance *in, float dt) {
                 if (bt >= t1 && !(bt == 0.0f && t0 == 0.0f)) break;
                 if (bt < t0 && t0 > 0) { in->bursts_done[k]++; continue; }
                 float c = vfx_range(sp->count, &st) * mul;
-                emit_count(s, in, k, e, c, fmaxf(0.0f, t1 - bt));
+                emit_count(s, in, k, e, c, 0.0f);   // drawn at age 0 on its first frame (a muzzle flash lives under a tick)
                 in->bursts_done[k]++;
             }
         } else {

@@ -493,12 +493,12 @@ static void test_muzzle(void) {
     BalMuzzleOut pis = compose("9x19_fmj", "bare", 0.102f, false);
     CHECK(pis.c[BFC_SPARKS].count > lng.c[BFC_SPARKS].count, "pistol sparks %.2f > rifle %.2f", pis.c[BFC_SPARKS].count, lng.c[BFC_SPARKS].count);
     CHECK(bare.c[BFC_MACH].rgb.z > compose("9x19_fmj", "bare", 0.102f, false).c[BFC_MACH].rgb.z, "high-velocity blue tinge");
-    // Exposure: the perceived daylight flash ≤ 0.2x night.
+    // Exposure: the perceived daylight flash dimmer than at night (BAL_FLASH_DAY_RATIO), never brighter.
     // Night (EV at the night floor, no daylight) vs full sun at a few day exposures.
     float night = bal_flash_perceived(-1.5f, -1.5f, 0.0f);
     for (float ev = 0.5f; ev <= 7.0f; ev += 1.5f) {
         float day = bal_flash_perceived(ev, -1.5f, 1.0f);
-        CHECK(day <= 0.2f * night, "day (EV %.1f) %.3f vs night %.3f", ev, day, night);
+        CHECK(day <= BAL_FLASH_DAY_RATIO * night + 1e-4f && day < night, "day (EV %.1f) %.3f vs night %.3f", ev, day, night);
     }
     CHECK(bal_flash_perceived(0.0f, -1.5f, 0.5f) > bal_flash_perceived(0.0f, -1.5f, 1.0f), "dusk in between");
     vec3 bb = bal_blackbody_rgb(2500);
