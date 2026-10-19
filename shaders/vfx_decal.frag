@@ -89,9 +89,12 @@ void main() {
         float wet = 1.0 - smoothstep(0.35, 0.85, rough);
         vec3 spec = frame.sun_color.rgb * frame.sun_dir.w * D * Fr * G / (4.0 * NdV) * shadow_at(wp + sn * 0.01);
         vec3 rv = reflect(-V, nn);
-        float Fv = 0.02 + 0.98 * pow(1.0 - NdV, 5.0);
-        vec3 env = frame.sky_flags.x > 0.5 ? textureLod(sky_env, env_uv(rv), rough * frame.sky_flags.z).rgb * frame.sky_flags.y
-                                           : frame.sky_ambient.rgb * frame.sky_ambient.w;
+        // The sky reflection grows at grazing angles only to 10 % (full Fresnel let the sky swamp the
+        // dark red: blood seen at an angle or from afar glowed blue), and none below the surface's horizon.
+        float Fv = 0.02 + 0.08 * pow(1.0 - NdV, 5.0);
+        float horizon = clamp(1.0 + 1.3 * dot(rv, sn), 0.0, 1.0);
+        vec3 env = (frame.sky_flags.x > 0.5 ? textureLod(sky_env, env_uv(rv), rough * frame.sky_flags.z).rgb * frame.sky_flags.y
+                                            : frame.sky_ambient.rgb * frame.sky_ambient.w) * horizon * horizon;
         col += (spec + env * Fv) * wet;
     }
     out_color = vec4(col * a, a);
