@@ -59,6 +59,15 @@ static FgRes tex(const char *name, VkFormat f, FgSize s) {
     return fg_texture(&d);
 }
 
+// The size class of the image coming in: the output once the AA / upscaler resolved it, else (a render
+// scale without an upscaler: the final pass stretches it) the render size. Sized to the output, these
+// passes read the render-size input at output coordinates: only its top-left part showed.
+static FgSize size_of(FgRes c) {
+    u32 w = 0, h = 0;
+    fg_extent(c, &w, &h);
+    return w && w != P.in.output_w ? FG_SIZE_RENDER : FG_SIZE_OUTPUT;
+}
+
 FgRes post_mb_build(FgRes color) {
     memset(&C, 0xff, sizeof(C));   // every FgRes = FG_NONE
     const PostSettings *s = &P.set;
@@ -69,7 +78,7 @@ FgRes post_mb_build(FgRes color) {
     C.tiles = fg_texture(&td);
     td.name = "mb_neighbor";
     C.neighbor = fg_texture(&td);
-    C.mb_out = tex("motion_blur", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_OUTPUT);
+    C.mb_out = tex("motion_blur", VK_FORMAT_R16G16B16A16_SFLOAT, size_of(color));
     int p0 = fg_pass("mb_tiles", exec_mb_tiles, NULL);
     fg_read(p0, P.in.velocity, FG_SAMPLED);
     fg_read(p0, P.in.depth, FG_SAMPLED);
@@ -203,14 +212,15 @@ FgRes post_dof_build(FgRes color) {
     bool ads_dof = post_sights_ads_dof(&af, &as, &an);
     if (!ads_dof && (s->dof <= 0 || (s->dof == 1 && !P.in.ads))) return color;
     C.dof_in = color;
-    C.coc = tex("dof_coc", VK_FORMAT_R16_SFLOAT, FG_SIZE_OUTPUT);
-    FgTexDesc hd = { "dof_half", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_OUTPUT, 0, 0, 0, 1, 0.5f };
+    FgSize sz = size_of(color);
+    C.coc = tex("dof_coc", VK_FORMAT_R16_SFLOAT, sz);
+    FgTexDesc hd = { "dof_half", VK_FORMAT_R16G16B16A16_SFLOAT, sz, 0, 0, 0, 1, 0.5f };
     C.half = fg_texture(&hd);
     hd.name = "dof_far";
     C.far = fg_texture(&hd);
     hd.name = "dof_near";
     C.near = fg_texture(&hd);
-    C.dof_out = tex("dof", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_OUTPUT);
+    C.dof_out = tex("dof", VK_FORMAT_R16G16B16A16_SFLOAT, sz);
     int pf = fg_pass("dof_focus", exec_dof_focus, NULL);
     fg_read(pf, P.in.depth, FG_SAMPLED);
     fg_read(pf, P.in.material, FG_SAMPLED);
