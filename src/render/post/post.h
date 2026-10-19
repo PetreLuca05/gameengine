@@ -55,6 +55,9 @@ void post_view_sky(int view, FgRes color, FgRes depth, mat4 inv_vp, vec3 cam);  
 // Weapon sight of this frame (post_sights.c): drawn after the DoF, before bloom.
 void post_set_sight(const RenderSight *s, FgRes pip, mat4 pip_from_view, mat4 vm_proj, float pip_fov);
 bool post_sights_ads_dof(float *focus, float *fstop, float *near_blur);   // ADS depth of field active (complete aim)
+// The weapon's sharp depth (m along the arms camera; 0 none) and the arms projection's depth terms
+// (m10, m14) for reading the viewmodel depth back as a distance.
+float post_sights_vm_focus(float *m10, float *m14);
 void post_sights_shutdown(void);
 void post_weather_shutdown(void);
 void post_fog_apply(void);                         // after the lit opaque pass

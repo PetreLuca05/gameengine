@@ -121,6 +121,7 @@ static void exec_dof_coc(VkCommandBuffer cmd, void *u) {
     pb_ubo(&b);
     pb_tex_fg(&b, 0, P.in.depth, P.point);
     pb_tex_fg(&b, 1, P.in.material, P.point);
+    pb_tex_fg(&b, 2, P.in.vm_depth >= 0 ? P.in.vm_depth : P.in.depth, P.point);
     pb_img_fg(&b, 8, C.coc);
     pb_buf(&b, 13, P.exposure_buf.buffer, 64, false);
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
@@ -131,6 +132,11 @@ static void exec_dof_coc(VkCommandBuffer cmd, void *u) {
         pc.p[0] = as;      // f-stop override
         pc.p[1] = an;      // near-field (viewmodel) blur, CoC px
         pc.u[0] = 1u;
+        // The weapon's front stays sharp, the blur grows towards the eye (viewmodel depth -> distance).
+        float m10, m14;
+        pc.p[2] = P.in.vm_depth >= 0 ? post_sights_vm_focus(&m10, &m14) : 0.0f;
+        pc.p[4] = m10;
+        pc.p[5] = m14;
     }
     post_push_constants(cmd, &pc, 128);
     u32 w, h;
@@ -211,6 +217,7 @@ FgRes post_dof_build(FgRes color) {
     int p0 = fg_pass("dof_coc", exec_dof_coc, NULL);
     fg_read(p0, P.in.depth, FG_SAMPLED);
     fg_read(p0, P.in.material, FG_SAMPLED);
+    if (P.in.vm_depth >= 0) fg_read(p0, P.in.vm_depth, FG_SAMPLED);
     fg_write(p0, C.coc, FG_STORAGE);
     int p1 = fg_pass("dof_down", exec_dof_down, NULL);
     fg_read(p1, color, FG_SAMPLED);

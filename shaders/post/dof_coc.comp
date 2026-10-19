@@ -3,12 +3,14 @@
 //   coc = A f (z - S) / (z (S - f)),  A = f / N,  converted from the sensor (mm) to pixels.
 // Negative = in front of the focus plane (near field). The viewmodel stays sharp. Mode 1 (ADS
 // only) fades the effect in with the ADS weight. ADS (aim complete): the world is sharp and only
-// the weapon gets the sight's near blur.
+// the weapon gets the sight's near blur, by its own depth: none at its front (the muzzle / front
+// sight, pc.p0.z m along the arms camera), growing towards the eye (the rear sight, the receiver).
 #extension GL_GOOGLE_include_directive : require
 #include "post_common.glsl"
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 0, binding = 0) uniform sampler2D depth_tex;
 layout(set = 0, binding = 1) uniform sampler2D material_tex;
+layout(set = 0, binding = 2) uniform sampler2D vm_depth_tex;   // the arms layer's own depth
 layout(set = 0, binding = 8, r16f) uniform writeonly image2D coc_out;
 layout(std430, set = 0, binding = 13) readonly buffer Exposure { float e[16]; } X;
 void main() {
@@ -29,6 +31,16 @@ void main() {
     px *= strength;
     // ADS: the world stays sharp, only the weapon (viewmodel) gets a slight near-field blur.
     if (ads) px = 0.0;
-    if ((gb_flags(textureLod(material_tex, uv, 0.0)) & GB_VIEWMODEL) != 0u) px = ads ? -pc.p0.y : 0.0;
+    if ((gb_flags(textureLod(material_tex, uv, 0.0)) & GB_VIEWMODEL) != 0u) {
+        float k = 1.0;
+        if (ads && pc.p0.z > 0.0) {
+            // view z = m14 / (-d - m10) through the arms projection; sharp from 90 % of the front's
+            // distance out, the full blur at 30 % and nearer.
+            float dv = textureLod(vm_depth_tex, uv, 0.0).r;
+            float dist = -pc.p1.y / (-dv - pc.p1.x);
+            k = clamp((0.9 * pc.p0.z - dist) / (0.6 * pc.p0.z), 0.0, 1.0);
+        }
+        px = ads ? -pc.p0.y * k : 0.0;
+    }
     imageStore(coc_out, p, vec4(clamp(px, -U.s_dof.w, U.s_dof.w)));
 }

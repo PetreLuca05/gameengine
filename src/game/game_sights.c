@@ -229,8 +229,13 @@ void sights_frame(const RenderCamera *cam, bool first_person) {
             rs->dof_near_blur = S.iron_blur->f;
         }
     }
-    // ADS depth of field: on exactly while the aim is complete; the user's mode applies otherwise.
+    // ADS depth of field: on exactly while the aim is complete; the user's mode applies otherwise. Its
+    // sharp point: the weapon's front (muzzle) as the arms camera draws it, its depth along the view.
     rs->ads_dof = S.ads_dof->i && S.complete && have;
+    if (rs->ads_dof && cam) {
+        vec3 mz = render_arms_point(xf_point(xf_make(pos, rot), wd->sockets.muzzle));
+        rs->dof_vm_focus = -mat4_mul_point(mat4_fps_view(cam->pos, cam->yaw, cam->pitch, cam->roll), mz).z;
+    }
     rs->dof_focus = S.dof_focus->f;
     rs->dof_fstop = S.dof_fstop->f;
     (void)cam;

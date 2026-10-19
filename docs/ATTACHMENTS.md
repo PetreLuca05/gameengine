@@ -366,6 +366,9 @@ ADS DoF switches on exactly while the aim is complete (`ads_dof`):
   red dot 3.5, 4x 4.5, 8x 5): the gather kernel spans that blur while aimed, so the weapon gets a
   visible soft blur (2026-10-20: 1.2 - 2.5 px over the scene's max-CoC kernel got 3 - 4 taps and
   showed nothing); the sights draw after the DoF, so the lens picture and the dot stay sharp;
+- by the weapon's own depth (the arms layer's depth buffer): none from 90 % of its front's distance
+  (the muzzle, `RenderSight.dof_vm_focus`) out, so the front sight stays sharp, the full blur at 30 % and
+  nearer (the rear sight, the receiver);
 - the user's DoF mode applies again the first frame the aim is incomplete.
 
 ## Dev room

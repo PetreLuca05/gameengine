@@ -61,6 +61,12 @@ bool post_sights_ads_dof(float *focus, float *fstop, float *near_blur) {
     return true;
 }
 
+float post_sights_vm_focus(float *m10, float *m14) {
+    *m10 = SG.vm_proj.m[10];
+    *m14 = SG.vm_proj.m[14];
+    return SG.s.ads_dof ? fmaxf(SG.s.dof_vm_focus, 0.0f) : 0.0f;
+}
+
 static vec3 view_point(vec3 p) { return mat4_mul_point(P.in.view, p); }
 static vec3 view_dir(vec3 d) {
     vec4 r = mat4_mul_v4(P.in.view, v4(d.x, d.y, d.z, 0.0f));

@@ -618,6 +618,7 @@ typedef struct RenderSight {
     // ADS depth of field (complete only): fixed far focus, near-field (weapon) blur.
     bool ads_dof;
     float dof_focus, dof_fstop, dof_near_blur;
+    float dof_vm_focus;    // m along the arms camera: the weapon's front (muzzle), sharp; nearer blurs (0: all of it)
     int debug;                    // sight_debug view
 } RenderSight;
 void render_set_sight(const RenderSight *s);   // every frame (kind NONE = no sight)
