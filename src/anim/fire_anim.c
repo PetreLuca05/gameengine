@@ -66,6 +66,7 @@ void fire_anim_class_defaults(FireAnimDef *d, int cls) {
     d->cam_delay = 2;
     d->cam_omega = 20.0f;
     d->cam_zeta = 0.42f;
+    d->cam_hip = 1.0f;
     d->fov_release = 7.0f / 60.0f;
     d->screen_release = 0.1f;
     d->blur_ticks = 2;
@@ -290,6 +291,7 @@ void fire_anim_parse(FireAnimDef *d, const cJSON *j) {
     d->cam_delay = (int)jf(ca, "delay_ticks", (float)d->cam_delay);
     d->cam_omega = jf(ca, "omega", d->cam_omega);
     d->cam_zeta = jf(ca, "zeta", d->cam_zeta);
+    d->cam_hip = clampf(jf(ca, "hip", d->cam_hip), 0.0f, 2.0f);
     d->fov_punch = jf(ca, "fov_punch", d->fov_punch);
     d->fov_release = jf(ca, "fov_release", d->fov_release);
     d->roll_twitch = jf(ca, "roll_twitch", d->roll_twitch);
@@ -369,6 +371,7 @@ char *fire_anim_to_json(const FireAnimDef *d) {
     put(ca, "delay_ticks", (float)d->cam_delay);
     put(ca, "omega", d->cam_omega);
     put(ca, "zeta", d->cam_zeta);
+    put(ca, "hip", d->cam_hip);
     put(ca, "fov_punch", d->fov_punch);
     put(ca, "fov_release", d->fov_release);
     put(ca, "roll_twitch", d->roll_twitch);
@@ -561,8 +564,9 @@ void fire_anim_shot(FireAnimState *s, const FireAnimDef *d, const FireShot *shot
     s->slide_locked = d->slide_lock_empty && shot->mag_left <= 0 && d->bolt_delay <= 0.0f;
     s->eject_pending = false;
     s->eject_done = false;
-    // Layer 5: perceptual punches (scaled with the shot).
+    // Layer 5: perceptual punches (scaled with the shot); the camera's share at the hip (cam_hip).
     float ps = scale * mult;
+    s->cam_k = lerpf(d->cam_hip, 1.0f, saturate(shot->ads_t));
     s->fov = fmaxf(s->fov * (1.0f - saturate(s->fov_t / fmaxf(1e-3f, d->fov_release))), d->fov_punch * d->fov_mult * ps);
     s->fov_t = -sub * (1.0f / 60.0f);
     s->roll_sign = rng_float(&rng) < 0.5f ? -1.0f : 1.0f;
@@ -699,9 +703,10 @@ void fire_anim_step(FireAnimState *s, const FireAnimDef *d, float dt, bool trigg
     o.trigger = s->trigger * d->trigger_pull;
     o.slide = s->slide;
     o.wobble_rot = v3((s->wobble[0].x - gun[FA_PITCH]) * d->wobble_gain, 0, (s->wobble[1].x - gun[FA_ROLL]) * d->wobble_gain);
-    o.cam_rot = v3(s->cam[FA_PITCH].x, s->cam[FA_YAW].x, s->cam[FA_ROLL].x + roll * perceptual);
-    o.cam_back = s->cam[FA_BACK].x;
-    o.fov_punch = fov * perceptual;
+    float ck = s->cam_k > 0.0f ? s->cam_k : 1.0f;
+    o.cam_rot = v3_scale(v3(s->cam[FA_PITCH].x, s->cam[FA_YAW].x, s->cam[FA_ROLL].x + roll * perceptual), ck);
+    o.cam_back = s->cam[FA_BACK].x * ck;
+    o.fov_punch = fov * perceptual * ck;
     o.roll_twitch = roll * perceptual;
     o.screen_kick = screen;
     o.blur = blur * perceptual;

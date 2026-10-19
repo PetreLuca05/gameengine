@@ -101,6 +101,7 @@ typedef struct FireAnimDef {
     float cam_gain[FA_CH];                // camera response per gun channel (from the shoulder chain)
     int cam_delay;                        // ticks (2-3)
     float cam_omega, cam_zeta;
+    float cam_hip;                        // the camera's share at the hip (its kick, roll twitch, FOV punch; 1 aimed)
     float fov_punch, fov_release;         // deg (positive = narrows), s
     float roll_twitch;                    // deg
     float screen_kick, screen_release;    // m toward the camera, s
@@ -167,6 +168,7 @@ typedef struct FireAnimState {
     float shoulder_hist[FA_CAM_DELAY_MAX + 1];
     FaSpring cam[FA_CH];
     float fov, fov_t, roll_tw, screen, blur;
+    float cam_k;                          // the last shot's camera share (cam_hip .. 1 by its ADS)
     int roll_ticks, blur_left;
     float roll_sign, roll_amp;
     u32 tick;

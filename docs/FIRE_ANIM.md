@@ -98,7 +98,7 @@ Class file `assets/weapons/fire_poses/<class>.json`. Every key also works in a w
 | `string_gap`, `ride_release` | s without a shot before a new string, s for the ride to return |
 | `body` | `hand_omega`, `hand_zeta`, `hand_max_err`, `shoulder_push / omega / zeta`, `trigger_pull` |
 | `mechanical` | `slide_travel`, `slide_time`, `lock_empty`, `bolt_delay` (manual cycle), `wobble_*`, `heat_per_shot`, `heat_decay`, `droop` |
-| `camera` | `gain.<channel>`, `delay_ticks`, `omega`, `zeta`, `fov_punch`, `fov_release`, `roll_twitch`, `screen_kick`, `screen_release`, `blur_ticks`, `chroma` |
+| `camera` | `gain.<channel>`, `delay_ticks`, `omega`, `zeta`, `hip` (the camera's share at the hip, 1 aimed: its kick, roll twitch and FOV punch; the pistol 0.5, 2026-10-20), `fov_punch`, `fov_release`, `roll_twitch`, `screen_kick`, `screen_release`, `blur_ticks`, `chroma` |
 
 Attachment `"fire"` block:
 
