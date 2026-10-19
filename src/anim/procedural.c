@@ -464,7 +464,7 @@ void proc_run(ProcState *st, const ProcInput *in0, Pose *pose, Xform *model) {
     // Before the hand solve: whatever moved above, the arm chains start from the clip's shoulders.
     keep_clavicles(in.skel, pose, model, clav, clav_clip);
     if (in.hold && in.item) proc_hold(st, &in, pose, model);
-    else st->has_item = false;
+    else { st->has_item = false; st->aim_valid = false; }
     if (in.hand_anchor_w > 0) proc_hand_anchors(st, &in, pose, model);
     if (in.foot_ik) proc_foot_legs(st, &in, pose, model, foot_off, anim_foot);
     st->prev_vel = in.velocity;

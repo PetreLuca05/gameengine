@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compares a ballistics LAN run (tools/tests/bal_net.sh): every client shot must leave from the same
 origin along the same barrel direction on the host (aim_debug 2 "aim: shot" / "aim: host p1 shot"
-lines, docs/AIM.md), every client-predicted hit must have a host hit with the same shot id within
+lines, docs/AIM.md) with no barrel claim clamped, every client-predicted hit must have a host hit with the same shot id within
 0.25 m (0.5 m for a later impact of the same bullet: a ricochet or a penetration amplifies a tiny
 difference), the host's shots must be replayed on the client, and the client must have scheduled
 cracks / reports for the host's bullets."""
@@ -52,6 +52,13 @@ def main():
         ok = do <= 0.002 and da <= 0.02
         fails += not ok
         print(f"shot {i}: origin {do * 1000:.1f} mm, direction {da:.4f} deg apart {'ok' if ok else 'FAIL'}")
+    # The hold aim (docs/AIM.md "Networking"): honest claims are never clamped by the host.
+    with open(host, errors="replace") as f:
+        clamps = sum(1 for line in f if "aim: host" in line and "(clamped)" in line)
+    print(f"host: {len(hs)} client shots checked, {clamps} barrel claims clamped")
+    if clamps:
+        print("FAIL: the host clamped honest barrel claims")
+        fails += 1
     seen = {}
     predicted = [h for h in ch if h[0] == "predict"]
     for p in predicted:

@@ -250,7 +250,7 @@ live tuning, and `crosshair_reload` re-reads `assets/ui/crosshair.json`. See [do
 | `wpn_recoil_debug 1/2` | recoil panel (accumulated / countered / recovery / cone / breath), 30-shot pattern preview, cone circle at the aim distance, impact crosses (green = inside the cone); 2 also logs every shot |
 | `wpn_recoil_scale`, `wpn_spread_scale` | gameplay multipliers (host, replicated) |
 | `wpn_visual_scale` | camera + viewmodel kick only (client) |
-| `crosshair_follow_kick 1` | crosshair pinned to the screen center instead of the true aim point |
+| `wpn_hold_aim_max 12`, `cam_kick_rot 0` | the most the hold turns the gun so its barrel line passes through the crosshair's aim point (0 = a fixed hold) / the fire camera layer's pitch / yaw (0: the camera stays on the aim line), docs/AIM.md |
 | `net_showstats 1` / F3 | ping, command RTT, loss, bandwidth, snapshot size, prediction error |
 | `r_grid 0/1` | unit grid on dev geometry |
 | `world_debug_chunks 1` | chunk bounds/state, structure stubs |

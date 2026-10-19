@@ -177,6 +177,13 @@ typedef struct ProcState {
     HoldPointOutput hp_out;
     Xform cam_model;           // camera (head bone + eye socket, view rotation), model space
     Xform item_cam;            // item target in camera space (pre-IK; the owner re-solves per frame)
+    // Gameplay pose of the held item (docs/AIM.md), model space like item_model, with the arm solve's
+    // reach shift applied (item_model x the desired item's inverse, normally identity): before the
+    // hold aim and after it (what the bullet follows), the hold aim's pivot, weight and limit.
+    Xform gp_item_model, aim_item_model;
+    vec3 aim_pivot_model;
+    float aim_w, aim_max;
+    bool aim_valid;            // the hold point solved the gameplay pose this evaluation (not the LOD2+ baked arms)
     u32 warned_styles;
     // Phone driven by a paired real phone (docs/PHONE.md): blend weight towards the device
     // rotation (eases in on pairing, back to the mouse aim on disconnect) and the last rotation.
@@ -225,6 +232,11 @@ typedef struct ProcInput {
     bool hp_phase_valid;       // deterministic hold point phases (players simulated here): clock (s) + stride
     double hp_clock;
     float hp_stride;
+    // Hold aim (docs/AIM.md "Hold aim"): the camera ray's aim point in camera space (the hold point's
+    // camera: x right, y up, -z forward) and the limits (rad). Guns only; off = the authored hold.
+    bool hp_aim_valid;
+    vec3 hp_aim_p;
+    float hp_aim_max_hip, hp_aim_max_ads;
     vec3 hand_anchor[2];       // world-space ledge anchors (mantle / hang), weight below
     float hand_anchor_w;
     // Seated (vehicles, docs/VEHICLES.md): the pelvis on the seat's hip point, thighs flexed, feet

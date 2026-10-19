@@ -115,6 +115,84 @@ vec3 aim_converge(vec3 muzzle, vec3 p, vec3 cam_dir) {
     return v3_dot(d, cam_dir) > 0.0f ? d : cam_dir;
 }
 
+// The shortest rotation taking unit a onto unit b (antiparallel: half a turn about an axis normal to a).
+static quat from_to(vec3 a, vec3 b) {
+    float d = v3_dot(a, b);
+    if (d < -0.999999f) {
+        vec3 ax = fabsf(a.x) < 0.9f ? v3_cross(a, v3(1, 0, 0)) : v3_cross(a, v3(0, 1, 0));
+        ax = v3_norm(ax);
+        quat q = { ax.x, ax.y, ax.z, 0.0f };
+        return q;
+    }
+    vec3 c = v3_cross(a, b);
+    quat q = { c.x, c.y, c.z, 1.0f + d };
+    return quat_norm(q);
+}
+
+// Unit `from` turned towards unit `to` by ang (rad) in their common plane.
+static vec3 turn_towards(vec3 from, vec3 to, float ang) {
+    vec3 perp = v3_sub(to, v3_scale(from, v3_dot(to, from)));
+    float pl = v3_len(perp);
+    if (pl < 1e-9f) return from;
+    vec3 pn = v3_scale(perp, 1.0f / pl);
+    return v3_norm(v3_add(v3_scale(from, dm_cosf(ang)), v3_scale(pn, dm_sinf(ang))));
+}
+
+float aim_line_miss(vec3 origin, vec3 dir, vec3 p) {
+    vec3 v = v3_sub(p, origin);
+    float t = fmaxf(0.0f, v3_dot(v, dir));
+    return v3_len(v3_madd(v, dir, -t));
+}
+
+float aim_reach_tol(float far) { return fmaxf(AIM_REACH_MIN, fmaxf(far, 0.0f) * dm_tanf(AIM_REACH_DEG * DG_DEG2RAD)); }
+
+AimHold aim_hold_solve(const AimHoldRaw *raw, vec3 p) {
+    AimHold h;
+    h.rot = quat_identity();
+    h.muzzle = raw->muzzle;
+    h.barrel = raw->barrel;
+    h.angle_deg = 0.0f;
+    h.clamped = false;
+    vec3 B = raw->barrel;
+    // P (nearly) at the muzzle: no turn, eased in so a P sliding past the threshold never snaps the gun.
+    float ahead = v3_dot(v3_sub(p, raw->muzzle), B);
+    float fade = clampf((ahead - AIM_HOLD_MIN_AHEAD) / AIM_HOLD_FADE, 0.0f, 1.0f);
+    float w = raw->w * fade * fade * (3.0f - 2.0f * fade);
+    if (raw->valid && w > 0.0f && raw->max_rad > 0.0f) {
+        // The bore line relative to the pivot C: its perpendicular offset b (M - C = b + s B). Turned by
+        // R it is {C + R b + s R B}: through P when R B = u = normalize(P - C - R b). R depends on u, a
+        // contraction (ratio ~|b| / |P - C|): a fixed number of iterations, so every machine stops at
+        // the same bits.
+        vec3 C = raw->pivot;
+        vec3 mc = v3_sub(raw->muzzle, C);
+        vec3 b = v3_madd(mc, B, -v3_dot(mc, B));
+        quat R = quat_identity();
+        vec3 u = B;
+        for (int i = 0; i < AIM_HOLD_ITERS; i++) {
+            vec3 t = v3_sub(v3_sub(p, C), quat_rotate(R, b));
+            float l = v3_len(t);
+            if (l < 1e-4f) break;
+            u = v3_scale(t, 1.0f / l);
+            R = from_to(B, u);
+        }
+        float ang = angle_between(B, u);
+        if (ang > raw->max_rad) {
+            // Out of reach: as far as the limit allows (the line then misses P: obstructed).
+            u = turn_towards(B, u, raw->max_rad);
+            ang = raw->max_rad;
+            h.clamped = true;
+        }
+        if (w < 1.0f) u = turn_towards(B, u, ang * w);
+        R = from_to(B, u);
+        h.rot = R;
+        h.muzzle = v3_add(C, quat_rotate(R, mc));
+        h.barrel = quat_rotate(R, B);
+        h.angle_deg = angle_between(B, h.barrel) * DG_RAD2DEG;
+    }
+    h.miss = aim_line_miss(h.muzzle, h.barrel, p);
+    return h;
+}
+
 float aim_obstruct_far(float cam_hit, float max_range) { return cam_hit >= 0.0f ? fminf(cam_hit, max_range) : max_range; }
 
 float aim_obstruct_margin(const AimObstructRule *r, float far, float parallax) {
@@ -127,11 +205,13 @@ float aim_parallax(float separation, float sin_graze, float far) {
     return fminf(fmaxf(separation, 0.0f) * cot, fmaxf(3.0f, 0.25f * fmaxf(far, 0.0f)));
 }
 
-AimClass aim_classify(float hit, float muzzle_depth, float far, float parallax, const AimObstructRule *r, bool friendly) {
-    if (hit < 0.0f) return AIM_CLEAR;
-    if (friendly) return AIM_FRIENDLY;
-    if (hit <= r->near) return AIM_BARREL;
-    return hit + muzzle_depth < far - aim_obstruct_margin(r, far, parallax) ? AIM_OBSTRUCTED : AIM_CLEAR;
+AimClass aim_classify(const AimClassIn *in, const AimObstructRule *r) {
+    if (in->friendly && in->hit >= 0.0f) return AIM_FRIENDLY;
+    if (in->recovered || (in->hit >= 0.0f && in->hit <= r->near)) return AIM_BARREL;
+    if (in->hit >= 0.0f && in->hit + in->depth < in->far - aim_obstruct_margin(r, in->far, in->parallax)) return AIM_OBSTRUCTED;
+    // The barrel line does not end at P (the gun was moved): the bullet lands where the line does.
+    if (in->miss > aim_reach_tol(in->far)) return AIM_OBSTRUCTED;
+    return AIM_CLEAR;
 }
 
 vec3 aim_recover_origin(vec3 eye, vec3 muzzle, float f, float margin) {

@@ -1500,6 +1500,38 @@ static int systems_for_lod(int lod) { return lod; }
 VehiclePoseHooks g_vehicle_pose;
 bool g_chars_force_phys_step;
 
+// Hold aim (docs/AIM.md "Where P comes from"): the camera ray's aim point P of this player, in the hold
+// point's camera space, so the gameplay hold turns the gun at it. From the first-person camera (the
+// simulated eye + last pose's camera socket where the player is simulated, else last pose's socket)
+// along the view (+ the sight offset), in the present world. Remote players on a client: the same
+// trace on the replica, cosmetic only (the shooter's own claims carry its P).
+static void hold_aim_input(World *w, CharacterInst *c, ProcInput *pi) {
+    const WeaponCvars *wc = weapons_cvars();
+    float max_deg = wc->hold_aim_max ? wc->hold_aim_max->f : 12.0f;
+    if (max_deg <= 0.0f || !c->is_player || c->slot < 0 || c->slot >= MAX_PLAYERS || !w->players[c->slot].active) return;
+    const Player *pl = &w->players[c->slot];
+    const PlayerMove *pm = &pl->sim.move;
+    bool sim_here = w->authority || c->local;
+    float yaw = pi->aim_yaw, pitch = clampf(pi->aim_pitch, -89.0f * DG_DEG2RAD, 89.0f * DG_DEG2RAD);
+    vec3 origin;
+    Xform sock;
+    if (sim_here && c->eye_cam_valid) origin = aim_cam_to_world(player_eye_pos(pm), pm->yaw, pm->pitch, c->eye_cam);
+    else if (c->have_pose && character_socket_world(c->def, "camera", c->pose_cur, &sock)) origin = sock.t;
+    else return;
+    vec3 dir = dir_from_angles(yaw, pitch);
+    const WeaponDef *d = sim_here ? weapon_equipped_def(w, c->slot) : NULL;
+    if (d && d->kind != WPN_MELEE) {
+        vec2 o = weapon_aim_offset_deg(d, &pl->sim.wpn, pm, weapon_sway_time(pl->last_cmd.seq));
+        dir = dir_from_angles(yaw - o.x * DG_DEG2RAD, pitch + o.y * DG_DEG2RAD);
+    }
+    float range = fmaxf(1.0f, d ? d->aim_max_range : c->item_weapon->aim_max_range);
+    float dist = weapons_aim_point(w, c->slot, origin, dir, range);
+    pi->hp_aim_valid = true;
+    pi->hp_aim_p = v3_scale(quat_rotate(quat_conj(aim_view_rot(yaw, pitch)), dir), dist);
+    pi->hp_aim_max_hip = max_deg * DG_DEG2RAD;
+    pi->hp_aim_max_ads = AIM_HOLD_ADS_MAX_DEG * DG_DEG2RAD;
+}
+
 static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, int local_slot) {
     (void)cam_pos;
     int lod = c->lod;
@@ -1721,6 +1753,8 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
 
         }
     }
+    // Hold aim (docs/AIM.md): guns held by the hold solve turn at the camera ray's aim point.
+    if (pi.hold && item && c->item_weapon && c->item_weapon->kind != WPN_MELEE) hold_aim_input(w, c, &pi);
     g_ray_ignore = (pi.seated && g_vehicle_pose.vehicle_body) ? g_vehicle_pose.vehicle_body(w, c->slot) : PHYS_INVALID_BODY;
     charrt_post(&c->rt, &pi);
     g_ray_ignore = PHYS_INVALID_BODY;
@@ -1798,17 +1832,42 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     c->item_prev = c->item_cur;
     c->item_cam_prev = c->item_cam_cur;
     if (c->rt.proc.has_item) c->item_cam_cur = c->rt.proc.item_cam;
+    c->ads_aim_prev = c->ads_aim_cur;
+    c->ads_aim_cur = quat_mul(c->rt.proc.hp_out.aim_hold, c->rt.proc.hp_out.ads_item.r);
     charrt_to_world(&c->rt, c->rt.final_model, root, c->def->scale, c->pose_cur);
     c->item_cur = c->rt.proc.has_item ? xf_mul(xf_make(root.t, root.r), xf_make(v3_scale(c->rt.proc.item_model.t, c->def->scale), c->rt.proc.item_model.r)) : c->item_cur;
     bool had_item = c->item_valid;
     c->item_valid = c->rt.proc.has_item;
-    // Aim model (docs/AIM.md): where the muzzle is relative to the simulated eye and view of this tick
-    // (the shooter's UserCmd claim; the host's reconstruction of it).
+    // Aim model (docs/AIM.md): the gameplay pose relative to the simulated eye and view of this tick:
+    // before the hold aim (the raw every machine re-aims at its P: the command's claim, the host's
+    // check, the crosshair) and after it (aimed at this tick's P). Presentation (sway, kick) is only in
+    // the drawn item_cur. Without a hold solve (LOD2+ baked arms) the drawn pose is all there is.
     c->muzzle_cam_valid = false;
+    c->aim_raw_valid = false;
     if (c->item_valid && c->item_weapon && c->item_weapon->kind != WPN_MELEE && c->is_player && c->slot >= 0 && c->slot < MAX_PLAYERS) {
         const PlayerMove *pm = &w->players[c->slot].sim.move;
-        c->muzzle_cam = aim_world_to_cam(player_eye_pos(pm), pm->yaw, pm->pitch, xf_point(c->item_cur, held_sockets(c)->muzzle));
-        c->barrel_cam = quat_rotate(quat_conj(aim_view_rot(pm->yaw, pm->pitch)), quat_rotate(c->item_cur.r, v3(0, 0, -1)));
+        vec3 eye = player_eye_pos(pm);
+        quat view_inv = quat_conj(aim_view_rot(pm->yaw, pm->pitch));
+        vec3 mz = v3_scale(held_sockets(c)->muzzle, c->rt.proc.item_scale > 0.0f ? c->rt.proc.item_scale : 1.0f);
+        const ProcState *ps = &c->rt.proc;
+        Xform aimed = c->item_cur;
+        if (ps->aim_valid) {
+            Xform rw = xf_make(root.t, root.r);
+            float sc = c->def->scale;
+            Xform gp = xf_mul(rw, xf_make(v3_scale(ps->gp_item_model.t, sc), ps->gp_item_model.r));
+            aimed = xf_mul(rw, xf_make(v3_scale(ps->aim_item_model.t, sc), ps->aim_item_model.r));
+            c->aim_raw.muzzle = aim_world_to_cam(eye, pm->yaw, pm->pitch, xf_point(gp, mz));
+            c->aim_raw.barrel = v3_norm(quat_rotate(view_inv, quat_rotate(gp.r, v3(0, 0, -1))));
+            c->aim_raw.pivot = aim_world_to_cam(eye, pm->yaw, pm->pitch, xf_point(rw, v3_scale(ps->aim_pivot_model, sc)));
+            c->aim_raw.w = ps->aim_w;
+            c->aim_raw.max_rad = ps->aim_max;
+            c->aim_raw.valid = true;
+            c->aim_raw_valid = true;
+            c->aim_raw_tick = w->chars->tick;
+        }
+        c->muzzle_cam = aim_world_to_cam(eye, pm->yaw, pm->pitch, xf_point(aimed, mz));
+        c->barrel_cam = v3_norm(quat_rotate(view_inv, quat_rotate(aimed.r, v3(0, 0, -1))));
+        c->drawn_barrel_cam = v3_norm(quat_rotate(view_inv, quat_rotate(c->item_cur.r, v3(0, 0, -1))));
         c->muzzle_cam_valid = true;
         c->muzzle_cam_tick = w->chars->tick;
     }
@@ -1828,7 +1887,7 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     // body keeps interpolating - snapping it whenever the hands were empty made the head, and the
     // first-person camera on it, move in tick-sized steps with no item selected).
     if (!c->have_pose) memcpy(c->pose_prev, c->pose_cur, sizeof(Xform) * (size_t)s->count);
-    if (!c->have_pose || !had_item) { c->item_prev = c->item_cur; c->item_cam_prev = c->item_cam_cur; }
+    if (!c->have_pose || !had_item) { c->item_prev = c->item_cur; c->item_cam_prev = c->item_cam_cur; c->ads_aim_prev = c->ads_aim_cur; }
     c->have_pose = true;
     // Client-side hitboxes from the local pose (predicted reactions, debug).
     if (!w->authority) {
@@ -2702,7 +2761,11 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         CG->fp_ads_pos = sqrtf(sight_c.x * sight_c.x + sight_c.y * sight_c.y);
         CG->fp_sight_cam = sight_c;
         CG->fp_sight_world = xf_point(root, xf_point(item, k->sight));
-        CG->fp_ads_ang = quat_angle_between(xf_mul(xf_inverse(cam_m), item).r, quat_identity()) * DG_RAD2DEG;
+        // ... and its rotation against the exact ADS item turned by the hold aim (about the sight: the
+        // sight stays on the axis while the barrel line goes through the aim point, docs/AIM.md),
+        // interpolated between the ticks like the item itself (the aim follows P every tick).
+        quat ads_want = quat_mul(g_fp_aim_off, quat_nlerp(c->ads_aim_prev, c->ads_aim_cur, it));
+        CG->fp_ads_ang = quat_angle_between(xf_mul(xf_inverse(cam_m), item).r, ads_want) * DG_RAD2DEG;
         CG->fp_item_cam = xf_mul(xf_inverse(cam_m), item);
         CG->fp_item_target = c->rt.proc.hp_out.item;   // the hold point's item (before any reach pull)
         CG->fp_hp_state = c->rt.proc.hp_out.state;
@@ -3119,6 +3182,28 @@ bool chars_barrel_cam(World *w, EntityId e, vec3 *dir, int *age_ticks) {
     if (!c || !c->muzzle_cam_valid || !c->item_valid || c->dead) return false;
     *dir = c->barrel_cam;
     if (age_ticks) *age_ticks = (int)(w->chars->tick - c->muzzle_cam_tick);
+    return true;
+}
+
+bool chars_aim_raw(World *w, EntityId e, AimHoldRaw *raw, int *age_ticks) {
+    CharacterInst *c = char_get(w, e);
+    if (!c || !c->aim_raw_valid || !c->muzzle_cam_valid || !c->item_valid || c->dead) return false;
+    *raw = c->aim_raw;
+    if (age_ticks) *age_ticks = (int)(w->chars->tick - c->aim_raw_tick);
+    return true;
+}
+
+bool chars_aim_info(World *w, EntityId e, CharAimInfo *out) {
+    CharacterInst *c = char_get(w, e);
+    memset(out, 0, sizeof(*out));
+    if (!c || !c->muzzle_cam_valid || !c->item_valid || c->dead) return false;
+    const HoldPointOutput *ho = &c->rt.proc.hp_out;
+    out->pull = ho->pull;
+    out->w = c->aim_raw_valid ? c->aim_raw.w : 0.0f;
+    out->max_deg = c->aim_raw_valid ? c->aim_raw.max_rad * DG_RAD2DEG : 0.0f;
+    out->angle_deg = ho->aim_angle_deg;
+    out->miss = ho->aim_miss;
+    out->drawn_barrel = c->drawn_barrel_cam;
     return true;
 }
 

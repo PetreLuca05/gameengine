@@ -15,6 +15,9 @@ void camera_fp_register_cvars(void) {
     c->clamp = cvar_reg_float("cam_head_clamp", 0.07f, 0.0f, 0.5f, CVAR_LOCKED, "max camera displacement from the ideal eye (m)");
     c->bob_scale = cvar_reg_float("cam_bob_scale", 0.0f, 0.0f, 2.0f, CVAR_LOCKED, "first-person camera stabilizer / landing dip / bob offset from the head eye (0 = camera exactly on the head)");
     c->kick_scale = cvar_reg_float("cam_kick_scale", 1.0f, 0.25f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "visual camera kick on shots (aim recoil is separate)");
+    // docs/AIM.md "Sway, recoil and the camera": a camera turned off the aim line would move the
+    // centred crosshair off the bullets' line, so the fire camera layer's pitch / yaw are off.
+    c->kick_rot = cvar_reg_float("cam_kick_rot", 0.0f, 0.0f, 1.0f, CVAR_LOCKED, "fire camera layer pitch / yaw (x the camera kick; 0 = the camera never leaves the aim line, roll twitch / FOV punch / push-back stay)");
     c->recon_smooth = cvar_reg_float("cam_recon_smooth_time", 0.1f, 0.0f, 1.0f, CVAR_LOCKED, "seconds to smooth prediction corrections of the camera");
     c->third = cvar_reg_bool("cam_third", false, CVAR_LOCKED, "third-person debug camera (same body / hold point math)");
     c->debug = cvar_reg_int("cam_debug", 0, 0, 2, CVAR_LOCKED, "1: draw eye / head / hold point / pivot / sockets / IK targets / collision + stats, 2: also log");

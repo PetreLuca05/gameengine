@@ -44,7 +44,7 @@
     "cam_weapon_fov": { "value": 0, "why": "Hands / weapon FOV follows the camera (the sight's ADS zoom still applies)." },
     "cl_ads_world_zoom": { "value": 1.5, "why": "ADS world zoom comes from the sight data, not a setting." },
     "crosshair_obstruct": { "value": 1, "why": "The crosshair shows where the bullet lands when the muzzle is blocked (docs/AIM.md)." },
-    "crosshair_follow_kick": { "value": 0, "why": "The crosshair shows the true aim point." },
+    "cam_kick_rot": { "value": 0, "why": "The fire camera layer never turns the camera off the aim line, so the centred crosshair stays on the bullets' line (docs/AIM.md)." },
     "cl_interp": { "value": 100, "why": "Entity interpolation delay (ms): the same view delay of remote players for everyone." },
     "cl_predict_impacts": { "value": 1, "why": "Own impacts shown at once (predicted) for everyone." },
     "cl_predict_hit_reactions": { "value": 1, "why": "Unconfirmed hit reactions shown the same for everyone." },

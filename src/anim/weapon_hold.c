@@ -125,6 +125,7 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     int ra = s->role[BR_R_ARM], rf = s->role[BR_R_FOREARM], rh = s->role[BR_R_HAND];
     int la = s->role[BR_L_ARM], lf = s->role[BR_L_FOREARM], lh = s->role[BR_L_HAND];
     int rsh = s->role[BR_R_SHOULDER], lsh = s->role[BR_L_SHOULDER];
+    st->aim_valid = false;
     if (sp2 < 0 || ra < 0 || rf < 0 || rh < 0) { st->has_item = false; return; }
 
     // Style switch blend (~0.2 s).
@@ -184,6 +185,13 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     hi.anchor = xf_make(it->anchor.t, quat_identity());   // the anchor is a point: the hold point's rotation orients the item
     hi.sight = xf_point(root, v3_scale(it->sight, rs));
     hi.pivot = xf_point(root, v3_scale(it->pivot, rs));
+    // Hold aim (guns): the bore line is the muzzle socket along the item's -Z, in the hold frame.
+    hi.muzzle = xf_point(root, v3_scale(it->muzzle, rs));
+    hi.barrel = quat_rotate(root.r, v3(0, 0, -1));
+    hi.aim_valid = in->hp_aim_valid;
+    hi.aim_p = in->hp_aim_p;
+    hi.aim_max_hip = in->hp_aim_max_hip;
+    hi.aim_max_ads = in->hp_aim_max_ads;
     hi.length = it->length * rs;
     hi.has_item = true;
     hi.ads = in->ads_t > 0.5f;
@@ -356,6 +364,20 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     // Camera-space target including the reach pull (the owner re-places the item per frame).
     st->item_cam = xf_mul(xf_inverse(cam), xf_make(v3_add(v3_madd(desired.t, back, shift), extra), desired.r));
     st->item_model = item;
+    // The gameplay pose (docs/AIM.md) through the same arm solve: whatever moved the drawn item off
+    // its hold point (the reach shift, a hand short of its grip) moves it too. Presentation (sway,
+    // kick) stays out of it.
+    {
+        Xform delta = xf_mul(item, xf_inverse(desired));
+        delta.s = v3(1, 1, 1);
+        Xform dc = xf_mul(delta, cam);
+        st->gp_item_model = xf_mul(xf_mul(dc, st->hp_out.gp_item), root);
+        st->aim_item_model = xf_mul(xf_mul(dc, st->hp_out.aim_item), root);
+        st->aim_pivot_model = xf_point(dc, st->hp_out.aim_pivot);
+        st->aim_w = st->hp_out.aim_w;
+        st->aim_max = st->hp_out.aim_max;
+        st->aim_valid = true;   // with or without the hold aim (wpn_hold_aim_max 0: weight 0)
+    }
     st->item_world = xf_mul(in->root, item);
     st->has_item = true;
 }
