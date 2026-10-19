@@ -9,7 +9,7 @@
   * a visibility table varies by level: lod.json tiers / eras other than 1, a grass asset whose
     per-level fades / density differ, a fidelity level table entry for a locked parameter;
   * the settings screen shows a cvar that is not CVAR_EDITABLE outside the dev-only Graphics > Debug
-    page / developer rows, or the Graphics tab has groups other than Engine Fidelity / Display /
+    page / developer rows, or the Graphics tab has groups other than Quality / Display /
     Comfort;
   * docs/SETTINGS_AUDIT.md's table is out of date.
 --write regenerates the doc table and the categories in settings_audit.json (run it after adding a
@@ -203,12 +203,12 @@ def main():
     # the settings screen
     ui = open(os.path.join(ROOT, "src", "ui", "screens", "scr_settings.c"), encoding="utf-8").read()
     gfx = func_body(ui, "tab_graphics_normal")
-    groups = re.findall(r'section\(c, "([^"]+)"\)', "".join(func_body(ui, f) for f in ("graphics_display", "graphics_comfort", "fidelity_card")))
+    groups = re.findall(r'section\(c, "([^"]+)"\)', "".join(func_body(ui, f) for f in ("graphics_quality", "graphics_display", "graphics_comfort")))
     calls = re.findall(r"(\w+)\(c\);", gfx)
-    if calls != ["graphics_header", "fidelity_card", "graphics_display", "graphics_comfort"]:
-        fails.append("scr_settings.c: the Graphics tab must be header, Engine Fidelity, Display, Comfort (has %s)" % ", ".join(calls))
-    if sorted(set(groups)) != ["Comfort", "Display", "Engine Fidelity"]:
-        fails.append("scr_settings.c: Graphics groups must be Engine Fidelity / Display / Comfort (has %s)" % ", ".join(sorted(set(groups))))
+    if calls != ["graphics_header", "graphics_quality", "graphics_display", "graphics_comfort"]:
+        fails.append("scr_settings.c: the Graphics tab must be header, Quality, Display, Comfort (has %s)" % ", ".join(calls))
+    if sorted(set(groups)) != ["Comfort", "Display", "Quality"]:
+        fails.append("scr_settings.c: Graphics groups must be Quality / Display / Comfort (has %s)" % ", ".join(sorted(set(groups))))
     shown = ""
     for fn in re.findall(r"\nstatic void (\w+)\(GuiCursor \*c\)", ui):
         if fn.startswith("row_") or fn == "section":

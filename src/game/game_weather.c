@@ -5,6 +5,7 @@
 // the per-level puddle mask (low points from a height bake + authored "puddles" boxes), the
 // renderer / sky / post / audio hooks, lens droplets, the debug overlay, the demo and the tests.
 #include "game_internal.h"
+#include "render/fidelity/fidelity.h"
 #include "world/weather.h"
 #include "world/season.h"
 #include "render/render.h"
@@ -478,8 +479,7 @@ void weather_host_tick(World *w) {
 static int quality(void) {
     int q = WX.quality->i;
     if (q >= 0) return q;
-    Cvar *pp = cvar_find("r_post_preset");
-    int p = pp ? pp->i : 2;
+    int p = game_quality_tier(FG_POST);   // the player's Post-processing quality
     return p <= 0 ? 1 : (p == 1 ? 2 : 3);
 }
 

@@ -1,5 +1,42 @@
 # Engine Fidelity
 
+## Player settings (2026-10-19: supersedes the levels as a player choice)
+
+The player picks **eight quality settings** in Settings → Graphics → Quality, each **Low / Medium /
+High / Ultra**, and **nothing else sets the quality features**: no level bounds, no first-run
+auto-detect or recommended level, no benchmark preset, no post preset, no remembered "custom"
+overrides, no per-feature sliders.
+
+| Setting | Cvar (0 Low .. 3 Ultra, archived) | Features (`FidGroup`) |
+|---|---|---|
+| Overall | — (sets the seven below; reads Custom when they differ) | |
+| Anti-aliasing | `r_quality_aa` | `aa` (FXAA, SMAA, TAA, TAA), `sharpen` |
+| Post-processing | `r_quality_post` | ao, contact shadows, ssr, ssgi, puddle reflections, volumetrics (+ local lights), dof (+ quality, ADS dof), bloom (+ quality), motion blur, chromatic aberration, vignette, film grain |
+| Shadows | `r_quality_shadows` | shadows, resolution, projection, cascades, soft quality, min radius, caster limit, far interval, light shadow quality |
+| Textures | `r_quality_textures` | texture quality, aniso, terrain quality |
+| Effects | `r_quality_effects` | vfx quality, vfx lighting, precipitation, water, scope picture scale |
+| Foliage | `r_quality_foliage` | foliage wind |
+| View distance | `r_quality_view_distance` | the shadow views' geometry error |
+
+- **Tier t** = the group's features at the **Low / Medium / High / Modern** table's value (this era;
+  where the table makes a feature unavailable: its off state). Anti-aliasing has its own steps,
+  because the tables jump from FXAA to TAA.
+- Applied as they are (`fid_group_apply`; the game binds the feature cvars without bound hooks,
+  `fid_bind_cvars`): Ultra shadows stay Ultra whatever else is set. The grouped features are
+  `CVAR_TIER` (not archived, set only by their group); the eight settings are the archived ones.
+- Applied when one changes and once after the config loads (`game_quality_apply`). Defaults: Ultra.
+- Render scale, the upscaler (+ ratio) and HDR output stay the player's own Display settings.
+- `r_fidelity` is locked at Modern: the level only says which table the dev tools read
+  (`bench_fidelity`, `fidelity_test`, `fidelity_check`, `shadow_preset`); they put the player's
+  values back when done. `fidelity_status` prints the eight tiers.
+- Removed: `r_fidelity_custom`, `r_fidelity_recommended`, `r_fidelity_bench`,
+  `r_fidelity_autodetect`, `r_fidelity_target_fps`, `fidelity_detect`, the recommendation dialog,
+  `r_post_preset`. Weather's lens droplets follow the Post-processing tier.
+- Tests: `test_fidelity` `test_groups` (every era x level x group x tier sets exactly its features,
+  reads back, no bound), `test_settings`.
+
+The rest of this page describes the levels as tables (and as they were before).
+
 > **Settings audit (docs/SETTINGS_AUDIT.md) supersedes parts of this page.** Levels trade cost for
 > quality only: foliage density, LOD / impostor / grass ranges, shadow distance and shadow types,
 > fog, exposure, lens effects and decal budgets are no longer features; they are locked values in
@@ -17,7 +54,7 @@ the level allows and can never exceed it.
 |---|---|
 | Tables | `assets/render/fidelity/{off,low,medium,high,modern}.json`, `eras.json` (era capability matrix) |
 | Bounds / apply (pure C) | `src/render/fidelity/fidelity.{h,c}` |
-| Game side | `src/game/game_fidelity.c` (level cvar, detection, `bench_fidelity`, checks, overlay) |
+| Game side | `src/game/game_fidelity.c` (the player's quality settings, the dev level, `bench_fidelity`, checks, overlay) |
 | Frame graph check | `src/render/graph/fg_check.{h,c}` (run on every graph by `fg.c`) |
 | Off output | `shaders/post/final_direct.frag`, `post_direct.glsl` |
 | UI | Settings → Graphics → Normal: "Overall graphics quality" (the level as a preset) + the simple qualities (`fid_group_*`); Debug (developer mode): the "Engine Fidelity" card and every per-feature row (`src/ui/screens/scr_settings.c`, docs/UI.md) |

@@ -73,7 +73,7 @@ void render_register_cvars(void) {
     r->r_brightness = cvar_reg_float("r_brightness", 1.0f, 0.85f, 1.15f, CVAR_ARCHIVE | CVAR_EDITABLE, "display brightness (after the tonemapper)");
     r->r_gamma = cvar_reg_float("r_gamma", 1.0f, 0.5f, 2.0f, CVAR_LOCKED, "gamma adjustment");
     r->r_grid = cvar_reg_bool("r_grid", true, CVAR_LOCKED, "draw unit grid on dev geometry");
-    r->r_vignette = cvar_reg_float("r_vignette", 0.25f, 0.0f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "vignette strength");
+    r->r_vignette = cvar_reg_float("r_vignette", 0.25f, 0.0f, 1.0f, CVAR_TIER, "vignette strength");
     r->r_shader_hotreload = cvar_reg_bool("r_shader_hotreload", true, CVAR_LOCKED, "watch shader sources and reload on change");
     r->r_culling = cvar_reg_bool("r_culling", true, CVAR_LOCKED, "frustum culling");
     r->r_vm_fov = cvar_reg_float("r_viewmodel_fov", 0.0f, 0.0f, 120.0f, CVAR_LOCKED, "viewmodel FOV (0 = same as world, keeps IK hands aligned)");

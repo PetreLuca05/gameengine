@@ -107,8 +107,10 @@ int fid_cost_cmp(const FidFeatureDef *d, float a, float b);
 // ---------------------------------------------------------------- runtime (cvars)
 // The level / era whose bounds the cvar hooks enforce. The era is read from r_era when it exists.
 void fid_attach_cvars(void);                  // install cvar.bound on every feature cvar (after registration)
+void fid_bind_cvars(void);                    // find the feature cvars without bounding them (the game: the player's quality settings)
 void fid_detach_cvars(void);
 void fid_set_level(int level);                // enforce this level's bounds (no defaults applied)
+void fid_init_level(int level);               // the level the tables / dev tools read, nothing clamped
 int fid_level(void);
 int fid_era(void);
 // Change level: every feature takes the new level's default, except the user's own choices that are
@@ -130,17 +132,17 @@ int fid_custom_count(void);
 int fid_check_table(int level, char *report, int size);   // features whose cvar != the table's default (0 = match)
 
 // ---------------------------------------------------------------- quality groups
-// The simple options of Settings → Graphics → Normal (docs/UI.md): one quality per concept
-// (shadows, textures ...), each a set of features. Tier t of a group = every feature of the group at
-// level t's table default (this era): a sub-level of Engine Fidelity, applied through the bounds
-// like any user change (so the overall level then reads "Custom" when it differs from its own
-// defaults). A tier is selectable when the current level allows every one of its values.
-typedef enum FidGroup { FG_POST, FG_SHADOWS, FG_TEXTURES, FG_EFFECTS, FG_FOLIAGE, FG_VIEW_DISTANCE, FG_COUNT } FidGroup;
+// The player's quality settings (Settings → Graphics → Quality, docs/ENGINE_FIDELITY.md "Player
+// settings"): one per concept, each a set of features, nothing else sets those features. Tier t of a
+// group (FID_LOW .. FID_MODERN = Low .. Ultra) = every feature of the group at level t's table value
+// (this era; unavailable there: its off state); anti-aliasing has its own steps (FXAA, SMAA, TAA,
+// TAA). Applied as they are: no level bound.
+typedef enum FidGroup { FG_POST, FG_SHADOWS, FG_TEXTURES, FG_EFFECTS, FG_FOLIAGE, FG_VIEW_DISTANCE, FG_AA, FG_COUNT } FidGroup;
 int fid_group_features(int group, const int **features);   // count + the feature list
 const char *fid_group_id(int group);                        // "post", "shadows" ...
-bool fid_group_tier_allowed(int group, int tier, int *req_level);   // *req: lowest level allowing it (-1: not in this era)
+bool fid_group_value(int group, int tier, int feature, float *v);   // false: the feature keeps its value (no off state)
 void fid_group_apply(int group, int tier);
-int fid_group_detect(int group);                            // the tier whose values every cvar has (the current level first, then the highest), -1 = custom
+int fid_group_detect(int group);                            // the highest tier whose values every cvar has, -1 = mixed
 
 // ---------------------------------------------------------------- frame graph passes
 // Scene / gameplay passes (geometry, sky, sights, phone, UI, output) vs post-processing passes.

@@ -1,15 +1,15 @@
-// Engine Fidelity, game side (docs/ENGINE_FIDELITY.md; tables and bounds: src/render/fidelity):
-//   * r_fidelity (0 Off .. 4 Modern, archived): applying a level sets every feature's default for it
-//     (the user's own lower choices kept, r_fidelity_custom), clamps every other graphics cvar to the
-//     level's bounds and rebuilds the frame graph live (no restart): the next frame's graph only
-//     schedules what the level has, the pool drops the images it no longer uses;
-//   * first-run auto-detect: every level measured for a moment (GPU frame time, ~2 s in all, behind
-//     an opaque "detecting" screen), the highest level inside the frame budget of r_fidelity_target_fps
-//     recommended once with "Apply recommended"; fidelity_detect re-runs it (Graphics menu button);
+// Graphics quality, game side (docs/ENGINE_FIDELITY.md "Player settings"; tables: src/render/fidelity):
+//   * the player's quality settings (Settings > Graphics > Quality) are the only thing that sets the
+//     quality features: r_quality_aa / _post / _shadows / _textures / _effects / _foliage /
+//     _view_distance (0 Low .. 3 Ultra, archived), each its group's features at that tier
+//     (fid_group_apply); Overall sets all seven. No level bounds, auto-detect, presets or remembered
+//     overrides: the frame graph follows live (no restart), the pool drops what it no longer uses;
+//   * r_fidelity (locked Modern): the tables' level, switched only by the dev tools below (which put
+//     the player's values back when done);
 //   * bench_fidelity <level|all> [frames]: the fixed devroom flythrough, per pass GPU ms logged;
 //   * fidelity_check / fidelity_test: frame graph validation (no dead passes, Off = zero post
 //     passes), cvars against the tables, 50 level switches without leaking GPU memory;
-//   * r_perf_overlay: FPS / frame time overlay with the level's budget.
+//   * r_perf_overlay: FPS / frame time overlay.
 #include "game_internal.h"
 #include "core/engine.h"
 #include "core/cvar.h"
@@ -24,29 +24,21 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef enum { RUN_NONE, RUN_DETECT, RUN_BENCH, RUN_TEST } RunKind;
+typedef enum { RUN_NONE, RUN_BENCH, RUN_TEST } RunKind;
 
-#define DETECT_WARM 4
-#define DETECT_FRAMES 6
-#define DETECT_SECONDS 0.4f
 #define BENCH_MAX_PASSES 96
 #define HIST 180
 
 static struct {
-    Cvar *level, *custom, *recommended, *bench, *autodetect, *target_fps, *overlay;
+    Cvar *level, *overlay;
+    Cvar *quality[FG_COUNT];           // the player's tier per group (0 Low .. 3 Ultra)
     bool ready, loading, quiet;
-    int trim_in;                       // frames until the pool trim after a level switch
-    // detect / bench / test runs (one at a time, a frame-driven state machine)
+    int trim_in;                       // frames until the pool trim after a quality / level switch
+    // bench / test runs (one at a time, a frame-driven state machine)
     RunKind run;
     int step, frame, levels[FID_LEVELS + 1], level_count, frames_per;
-    float t0;
-    float samples[64];
-    int nsamples;
-    float level_ms[FID_LEVELS];
-    bool popup;                        // detect: show the recommendation dialog when done
     bool quit_after;
     char saved_values[FF_COUNT][CVAR_STR_MAX];
-    char saved_custom[CVAR_STR_MAX];
     int saved_level;
     // bench
     char pass_names[BENCH_MAX_PASSES][32];
@@ -63,168 +55,101 @@ static struct {
     int hist_pos;
 } F;
 
-// ------------------------------------------------------------------ levels
+// ------------------------------------------------------------------ the player's quality settings
 
 int game_fidelity_level(void) { return fid_level(); }
-int game_fidelity_recommended(void) { return F.recommended ? F.recommended->i : -1; }
 bool game_fidelity_busy(void) { return F.run != RUN_NONE; }
 
-// Last benchmark of a level (ms GPU frame time, stored in r_fidelity_bench "off=2.1;low=3.4;..."), < 0 none.
-float game_fidelity_bench_ms(int level) {
-    if (!F.bench || level < 0 || level >= FID_LEVELS) return -1.0f;
-    char key[16];
-    snprintf(key, sizeof(key), "%s=", fid_level_id(level));
-    const char *p = strstr(F.bench->str, key);
-    return p ? (float)atof(p + strlen(key)) : -1.0f;
+int game_quality_tier(int group) {
+    if (group < 0 || group >= FG_COUNT || !F.quality[group]) return 3;
+    return DG_CLAMP(F.quality[group]->i, 0, 3);
 }
 
-static void store_bench_ms(int level, float ms) {
-    float v[FID_LEVELS];
-    for (int l = 0; l < FID_LEVELS; l++) v[l] = l == level ? ms : game_fidelity_bench_ms(l);
-    char buf[CVAR_STR_MAX] = "";
-    for (int l = 0; l < FID_LEVELS; l++)
-        if (v[l] >= 0) snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), "%s%s=%.2f", buf[0] ? ";" : "", fid_level_id(l), v[l]);
-    cvar_set_cv(F.bench, buf);
+void game_quality_set(int group, int tier) {
+    if (group >= 0 && group < FG_COUNT && F.quality[group]) cvar_set_int(F.quality[group], DG_CLAMP(tier, 0, 3));
 }
 
-static void after_level_change(int level) {
-    // The post preset reads back what the new level left (Custom when nothing matches).
-    Cvar *pp = cvar_find("r_post_preset");
-    CvarSource src = cvar_source_push(CVAR_SRC_FIDELITY);
-    if (pp) cvar_set_int(pp, game_post_detect_preset());
-    cvar_source_pop(src);
+int game_quality_overall(void) {
+    int t = game_quality_tier(0);
+    for (int g = 1; g < FG_COUNT; g++) if (game_quality_tier(g) != t) return -1;
+    return t;
+}
+
+void game_quality_set_overall(int tier) {
+    for (int g = 0; g < FG_COUNT; g++) game_quality_set(g, tier);
+}
+
+// Tier t of the settings (0 Low .. 3 Ultra) = the tables' level t + 1 (Low .. Modern).
+static void apply_group(int g) {
+    fid_group_apply(g, game_quality_tier(g) + FID_LOW);
     F.trim_in = 3;   // once the new graph has run: drop the pool images it no longer uses
 }
 
+void game_quality_apply(void) {
+    if (!F.ready) return;
+    for (int g = 0; g < FG_COUNT; g++) apply_group(g);
+}
+
+static void on_quality(Cvar *c) {
+    if (!F.ready || F.loading || F.run != RUN_NONE) return;
+    for (int g = 0; g < FG_COUNT; g++)
+        if (F.quality[g] == c) {
+            apply_group(g);
+            log_info("quality: %s %s", fid_group_id(g), (const char *[]){ "low", "medium", "high", "ultra" }[game_quality_tier(g)]);
+        }
+}
+
+static void after_level_change(int level) {
+    (void)level;
+    F.trim_in = 3;   // once the new graph has run: drop the pool images it no longer uses
+}
+
+// r_fidelity: only the dev tools switch it (a level's table values on every feature).
 static void on_level(Cvar *c) {
     if (!F.ready) return;
     int l = DG_CLAMP(c->i, 0, FID_LEVELS - 1);
-    if (F.loading || F.quiet) {   // config load / restore: bounds only, the values are the saved ones
-        fid_set_level(l);
+    if (F.loading || F.quiet) {   // config load / restore: the level the tables read, nothing applied
+        fid_init_level(l);
         return;
     }
     fid_apply(l);
     after_level_change(l);
-    log_info("fidelity: %s (%s)%s", fid_level_name(l), fid_level_desc(l), fid_custom_count() ? "" : "");
-    if (fid_custom_count()) log_info("fidelity: %d setting(s) kept below the level defaults", fid_custom_count());
-}
-
-static void on_custom(Cvar *c) {
-    if (F.ready && F.loading) fid_custom_load(c->str);
+    log_info("fidelity: %s (%s): every feature at its table value (dev; the quality settings re-apply on their next change)", fid_level_name(l), fid_level_desc(l));
 }
 
 void game_fidelity_set(int level) { cvar_set_int(F.level, DG_CLAMP(level, 0, FID_LEVELS - 1)); }
 
-// ------------------------------------------------------------------ snapshot (detect / bench restore)
+// ------------------------------------------------------------------ snapshot (bench / test restore)
 
 static void snapshot(void) {
     for (int f = 0; f < FF_COUNT; f++) {
         Cvar *c = cvar_find(fid_feature(f)->cvar);
         dg_strcpy(F.saved_values[f], CVAR_STR_MAX, c ? c->str : "");
     }
-    dg_strcpy(F.saved_custom, sizeof(F.saved_custom), F.custom->str);
     F.saved_level = F.level->i;
-    fid_set_tracking(false);
 }
 
 static void restore(void) {
     F.quiet = true;
     cvar_set_int(F.level, F.saved_level);
-    fid_set_level(F.saved_level);
+    fid_init_level(F.saved_level);
     CvarSource src = cvar_source_push(CVAR_SRC_FIDELITY);
     for (int f = 0; f < FF_COUNT; f++) {
         Cvar *c = cvar_find(fid_feature(f)->cvar);
         if (c && F.saved_values[f][0]) cvar_set_cv(c, F.saved_values[f]);
     }
     cvar_source_pop(src);
-    fid_custom_load(F.saved_custom);
-    cvar_set_cv(F.custom, F.saved_custom);
     F.quiet = false;
-    fid_set_tracking(true);
     after_level_change(F.saved_level);
 }
 
-// A level for a measurement: its defaults, no user choices (tracking is off).
+// A level for a measurement: its table values on every feature.
 static void measure_level(int l) {
     F.quiet = true;
     cvar_set_int(F.level, l);
     F.quiet = false;
-    fid_custom_load("");
     fid_apply(l);
     after_level_change(l);
-}
-
-static float median(float *v, int n) {
-    if (n <= 0) return 0.0f;
-    for (int i = 1; i < n; i++)
-        for (int k = i; k > 0 && v[k] < v[k - 1]; k--) { float t = v[k]; v[k] = v[k - 1]; v[k - 1] = t; }
-    return v[n / 2];
-}
-
-// GPU frame time when the timestamps work, else the CPU frame time.
-static float frame_ms(void) {
-    float g = render_gpu_frame_ms();
-    return g > 0.0f ? g : (float)g_engine.frame_dt * 1000.0f;
-}
-
-// ------------------------------------------------------------------ auto-detect
-
-void game_fidelity_detect(bool popup) {
-    if (F.run != RUN_NONE || !fid_loaded()) return;
-    snapshot();
-    F.run = RUN_DETECT;
-    F.popup = popup;
-    F.step = 0;
-    F.frame = 0;
-    F.level_count = 0;
-    for (int l = FID_MODERN; l >= FID_OFF; l--) F.levels[F.level_count++] = l;
-    measure_level(F.levels[0]);
-    log_info("fidelity: detecting (every level for a moment, target %.0f fps)", F.target_fps->f);
-}
-
-static void detect_done(void) {
-    restore();
-    float target = 1000.0f / fmaxf(F.target_fps->f, 10.0f);
-    int rec = FID_OFF;
-    for (int l = FID_MODERN; l >= FID_OFF; l--)
-        if (F.level_ms[l] > 0.0f && F.level_ms[l] <= target) { rec = l; break; }
-    // the GPU family's cap (Macs: docs/PLATFORM_MACOS.md "Fidelity on Macs")
-    FidGpuFamily fam = fid_gpu_family(render_device_vendor(), render_device_name(), render_device_portability());
-    if (rec > fid_gpu_level_cap(fam)) {
-        log_info("fidelity_detect: %s GPU: recommendation capped at %s (measured %s)", fid_gpu_family_name(fam), fid_level_name(fid_gpu_level_cap(fam)), fid_level_name(rec));
-        rec = fid_gpu_level_cap(fam);
-    }
-    cvar_set_int(F.recommended, rec);
-    for (int l = 0; l < FID_LEVELS; l++) store_bench_ms(l, F.level_ms[l]);
-    log_info("fidelity_detect: off %.2f, low %.2f, medium %.2f, high %.2f, modern %.2f ms -> recommended %s (budget %.1f ms at %.0f fps)",
-             F.level_ms[0], F.level_ms[1], F.level_ms[2], F.level_ms[3], F.level_ms[4], fid_level_name(rec), target, F.target_fps->f);
-    cvar_set_int(F.autodetect, 0);   // shown once
-    if (F.popup && rec != fid_level()) {
-        char title[64], text[256];
-        snprintf(title, sizeof(title), "Recommended graphics: %s", fid_level_name(rec));
-        snprintf(text, sizeof(text), "Engine Fidelity %s runs this machine at about %.0f fps (%.1f ms). You are on %s; change it any time in Settings > Graphics.",
-                 fid_level_name(rec), 1000.0f / fmaxf(F.level_ms[rec], 0.1f), F.level_ms[rec], fid_level_name(fid_level()));
-        screens_confirm(CONFIRM_FIDELITY, title, text, rec);
-    }
-}
-
-void game_fidelity_apply_recommended(void) {
-    int rec = game_fidelity_recommended();
-    if (rec >= 0) game_fidelity_set(rec);
-}
-
-static void detect_frame(void) {
-    if (F.frame >= DETECT_WARM) F.samples[F.nsamples < 64 ? F.nsamples++ : 63] = frame_ms();
-    if (F.frame == DETECT_WARM) F.t0 = (float)g_engine.real_time;
-    F.frame++;
-    bool enough = F.nsamples >= DETECT_FRAMES && (float)g_engine.real_time - F.t0 >= DETECT_SECONDS * 0.5f;
-    if (!enough && !(F.nsamples >= 3 && (float)g_engine.real_time - F.t0 >= DETECT_SECONDS)) return;
-    int l = F.levels[F.step];
-    F.level_ms[l] = median(F.samples, F.nsamples);
-    F.nsamples = 0;
-    F.frame = 0;
-    if (++F.step >= F.level_count) { F.run = RUN_NONE; detect_done(); return; }
-    measure_level(F.levels[F.step]);
 }
 
 // ------------------------------------------------------------------ bench_fidelity (fixed flythrough)
@@ -304,7 +229,6 @@ static void bench_finish_level(void) {
     for (int k = 0; k < F.pass_count; k++)
         log_info("  %-18s %8.3f ms%s", F.pass_names[k], F.pass_ms[k] / n, fid_pass_is_post(F.pass_names[k]) ? "  post" : "");
     F.bench_result[l] = gpu;
-    store_bench_ms(l, gpu);
 }
 
 static void bench_frame(void) {
@@ -363,7 +287,7 @@ static void cmd_check(int argc, const char **argv) {
     int t = fid_check_table(fid_level(), rep, sizeof(rep));
     check_graph(true);
     log_info("fidelity_check %s: exposure: auto (histogram) EV %.2f, Off metered EV %.2f", fid_level_id(fid_level()), render_exposure_ev(), render_direct_exposure_ev());
-    log_info("fidelity_check %s: cvars vs table: %d differ%s%s (user choices: %s)", fid_level_id(fid_level()), t, t ? ": " : "", t ? rep : "", F.custom->str[0] ? F.custom->str : "none");
+    log_info("fidelity_check %s: cvars vs table: %d differ%s%s", fid_level_id(fid_level()), t, t ? ": " : "", t ? rep : "");
 }
 
 // fidelity_test [quit]: every level applied fresh (graph valid, Off without post passes, every cvar
@@ -430,15 +354,15 @@ static void test_frame(void) {
     if (F.quit_after) g_engine.quit = true;
 }
 
-static void cmd_detect(int argc, const char **argv) { game_fidelity_detect(argc > 1 && !strcmp(argv[1], "popup")); }
-
 static void cmd_status(int argc, const char **argv) {
     (void)argc;
     (void)argv;
     int l = fid_level();
-    log_info("fidelity: %s, era %s, budget %.1f ms, post %s; recommended %s; user choices: %s", fid_level_name(l), fid_era_id(fid_era()), fid_level_budget_ms(l),
-             fid_level_post(l) ? "on" : "OFF (direct output)", game_fidelity_recommended() >= 0 ? fid_level_name(game_fidelity_recommended()) : "-",
-             F.custom->str[0] ? F.custom->str : "none");
+    static const char *const tn[4] = { "low", "medium", "high", "ultra" };
+    log_info("fidelity: tables %s, era %s, post %s; quality: aa %s, post %s, shadows %s, textures %s, effects %s, foliage %s, view distance %s", fid_level_name(l),
+             fid_era_id(fid_era()), fid_level_post(l) ? "on" : "OFF (direct output)", tn[game_quality_tier(FG_AA)], tn[game_quality_tier(FG_POST)],
+             tn[game_quality_tier(FG_SHADOWS)], tn[game_quality_tier(FG_TEXTURES)], tn[game_quality_tier(FG_EFFECTS)], tn[game_quality_tier(FG_FOLIAGE)],
+             tn[game_quality_tier(FG_VIEW_DISTANCE)]);
     for (int f = 0; f < FF_COUNT; f++) {
         FidBounds b = fid_bounds(l, fid_era(), f);
         const FidFeatureDef *d = fid_feature(f);
@@ -453,45 +377,48 @@ static void cmd_status(int argc, const char **argv) {
 void game_fidelity_init(void) {
     memset(&F, 0, sizeof(F));
     const u32 A = CVAR_ARCHIVE;
-    F.level = cvar_reg_int("r_fidelity", FID_MODERN, 0, FID_LEVELS - 1, A | CVAR_EDITABLE, "Engine Fidelity: 0 off (no post-processing), 1 low, 2 medium, 3 high, 4 modern");
-    F.custom = cvar_reg_string("r_fidelity_custom", "", A | CVAR_EDITABLE, "Engine Fidelity: settings the user chose away from the level defaults (internal)");
-    F.recommended = cvar_reg_int("r_fidelity_recommended", -1, -1, FID_LEVELS - 1, A | CVAR_EDITABLE, "Engine Fidelity level recommended by the last detection (-1 none)");
-    F.bench = cvar_reg_string("r_fidelity_bench", "", A | CVAR_EDITABLE, "Engine Fidelity: last measured GPU frame ms per level (internal)");
-    F.autodetect = cvar_reg_bool("r_fidelity_autodetect", true, A | CVAR_EDITABLE, "detect a recommended Engine Fidelity level at the next start (first run)");
-    F.target_fps = cvar_reg_float("r_fidelity_target_fps", 60.0f, 20.0f, 360.0f, A | CVAR_EDITABLE, "frame rate the Engine Fidelity recommendation aims for");
-    F.overlay = cvar_reg_bool("r_perf_overlay", false, A | CVAR_EDITABLE, "FPS / frame time overlay with the Engine Fidelity budget");
+    F.level = cvar_reg_int("r_fidelity", FID_MODERN, 0, FID_LEVELS - 1, CVAR_LOCKED,
+                           "Engine Fidelity tables' level (dev tools only: bench_fidelity, fidelity_test, shadow_preset); the player's quality settings set the features");
+    // The player's quality settings: 0 low, 1 medium, 2 high, 3 ultra (Settings > Graphics > Quality).
+    F.quality[FG_AA] = cvar_reg_int("r_quality_aa", 3, 0, 3, A | CVAR_EDITABLE, "anti-aliasing quality 0 low .. 3 ultra: FXAA, SMAA, TAA, TAA and sharpening");
+    F.quality[FG_POST] = cvar_reg_int("r_quality_post", 3, 0, 3, A | CVAR_EDITABLE,
+                                      "post-processing quality 0 low .. 3 ultra: AO, contact shadows, reflections, GI, volumetrics, depth of field, bloom, motion blur, lens finish");
+    F.quality[FG_SHADOWS] = cvar_reg_int("r_quality_shadows", 3, 0, 3, A | CVAR_EDITABLE, "shadow quality 0 low .. 3 ultra: sun / moon and lamp shadows (resolution, cascades, softness, casters)");
+    F.quality[FG_TEXTURES] = cvar_reg_int("r_quality_textures", 3, 0, 3, A | CVAR_EDITABLE, "texture quality 0 low .. 3 ultra: resolution, anisotropic filtering, terrain shading");
+    F.quality[FG_EFFECTS] = cvar_reg_int("r_quality_effects", 3, 0, 3, A | CVAR_EDITABLE, "effects quality 0 low .. 3 ultra: particles, lit particles, rain / snow, water, the scope picture");
+    F.quality[FG_FOLIAGE] = cvar_reg_int("r_quality_foliage", 3, 0, 3, A | CVAR_EDITABLE, "foliage quality 0 low .. 3 ultra: the foliage wind layers");
+    F.quality[FG_VIEW_DISTANCE] = cvar_reg_int("r_quality_view_distance", 3, 0, 3, A | CVAR_EDITABLE, "view distance quality 0 low .. 3 ultra: the shadow views' geometry detail");
+    for (int g = 0; g < FG_COUNT; g++) F.quality[g]->on_change = on_quality;
+    F.overlay = cvar_reg_bool("r_perf_overlay", false, A | CVAR_EDITABLE, "FPS / frame time overlay");
     cmd_register("bench_fidelity", cmd_bench, "bench_fidelity <off|low|medium|high|modern|all> [frames] [quit]: fixed flythrough, GPU ms per pass");
-    cmd_register("fidelity_detect", cmd_detect, "fidelity_detect [popup]: measure every Engine Fidelity level, recommend one");
     cmd_register("fidelity_check", cmd_check, "validate this frame's graph and the cvars against the current Engine Fidelity level");
     cmd_register("fidelity_test", cmd_test, "fidelity_test [quit]: every level (graph, Off post passes, table), 50 switches (GPU memory)");
     cmd_register("fidelity_status", cmd_status, "print the Engine Fidelity level, era and every feature's bounds");
     char dir[512], err[256] = "";
     platform_data_path("assets/render/fidelity", dir, sizeof(dir));
     if (!fid_load_dir(dir, err, sizeof(err))) {
-        log_error("fidelity: %s (Engine Fidelity disabled, every setting unbounded)", err);
+        log_error("fidelity: %s (no quality tables: the quality settings do nothing)", err);
         return;
     }
-    fid_attach_cvars();
+    fid_bind_cvars();   // no bounds: the player's quality settings are the only thing setting these
     for (int f = 0; f < FF_COUNT; f++)
         if (!cvar_find(fid_feature(f)->cvar)) log_warn("fidelity: feature %s has no cvar %s", fid_feature(f)->id, fid_feature(f)->cvar);
     F.ready = true;
     F.loading = true;   // until the saved settings are in (game_fidelity_settings_loaded)
     fid_set_tracking(false);
     F.level->on_change = on_level;
-    F.custom->on_change = on_custom;
-    fid_set_level(F.level->i);
+    fid_init_level(F.level->i);
     render_set_camera_override(fly_camera);
     log_info("fidelity: tables loaded (%d features x %d levels x %d eras)", FF_COUNT, FID_LEVELS, FID_ERAS);
 }
 
 // After the config (or none in --test runs) and before the command line / scripts.
 void game_fidelity_settings_loaded(bool first_run) {
+    (void)first_run;
     if (!F.ready) return;
-    fid_custom_load(F.custom->str);
-    fid_set_level(F.level->i);   // enforce the saved level's bounds on the saved values
+    fid_init_level(F.level->i);
     F.loading = false;
-    fid_set_tracking(true);
-    if (first_run) log_info("fidelity: first run, the recommended level is detected once the world is up");
+    game_quality_apply();   // the player's saved quality settings, as they are
 }
 
 void game_fidelity_frame(void) {
@@ -501,13 +428,9 @@ void game_fidelity_frame(void) {
     F.hist_pos = (F.hist_pos + 1) % HIST;
     if (F.trim_in > 0 && --F.trim_in == 0) render_graph_trim();
     switch (F.run) {
-    case RUN_DETECT: detect_frame(); break;
     case RUN_BENCH: bench_frame(); break;
     case RUN_TEST: test_frame(); break;
-    default:
-        // First run (r_fidelity_autodetect): once the world has rendered a few frames, never in tests.
-        if (F.autodetect->i && config_enabled() && g_engine.frame_index > 30 && game_world()) game_fidelity_detect(true);
-        break;
+    default: break;
     }
 }
 
@@ -516,14 +439,6 @@ void game_fidelity_frame(void) {
 void game_fidelity_draw(void) {
     if (!F.ready) return;
     float s = ui_scale();
-    if (F.run == RUN_DETECT) {
-        // "Offscreen": the measured frames are covered while every level runs.
-        ui_rect(0, 0, ui_width(), ui_height(), UI_RGBA(8, 9, 11, 255));
-        ui_textf(ui_width() * 0.5f, ui_height() * 0.5f - 20 * s, FONT_LARGE, UI_RGBA(235, 235, 230, 255), UI_ALIGN_CENTER, "Detecting graphics settings");
-        ui_textf(ui_width() * 0.5f, ui_height() * 0.5f + 16 * s, FONT_SMALL, UI_RGBA(160, 160, 160, 255), UI_ALIGN_CENTER, "Engine Fidelity %s  (%d / %d)",
-                 fid_level_name(F.levels[DG_MIN(F.step, F.level_count - 1)]), F.step + 1, F.level_count);
-        return;
-    }
     if (!F.overlay->i) return;
     int l = fid_level();
     float budget = fid_level_budget_ms(l), gpu = render_gpu_frame_ms(), cpu = (float)g_engine.frame_dt * 1000.0f;

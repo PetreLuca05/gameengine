@@ -276,22 +276,20 @@ void game_post_draw_photo_ui(void);
 void game_post_flash(float strength);
 bool game_post_photo_mode(void);
 void game_post_set_photo_mode(bool on);
-int game_post_detect_preset(void);
-const char *game_post_preset_name(int p);
-void game_post_apply_preset(int p);
 float game_post_bench_post_ms(void);
-bool game_post_preset_allowed(int p, int *req_level);   // Engine Fidelity bounds allow every value of the preset
 
 // game_fidelity.c (docs/ENGINE_FIDELITY.md)
 void game_fidelity_init(void);
 void game_fidelity_frame(void);
 void game_fidelity_draw(void);
 int game_fidelity_level(void);
-void game_fidelity_set(int level);
-int game_fidelity_recommended(void);
-float game_fidelity_bench_ms(int level);
+void game_fidelity_set(int level);          // dev tools: every feature at a level's table values
 bool game_fidelity_busy(void);
-void game_fidelity_detect(bool popup);
-void game_fidelity_apply_recommended(void);
+// The player's quality settings (Settings > Graphics > Quality, FidGroup): 0 Low .. 3 Ultra.
+int game_quality_tier(int group);
+void game_quality_set(int group, int tier);
+int game_quality_overall(void);             // the tier every group has, -1 = mixed (Custom)
+void game_quality_set_overall(int tier);
+void game_quality_apply(void);              // every group's features at its tier
 
 #endif

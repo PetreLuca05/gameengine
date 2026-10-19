@@ -63,15 +63,18 @@ Tabs: **Graphics | Controls | HUD | Audio | Phone** (`k_order` in `scr_settings.
 Character were merged into HUD, Post-processing into Graphics; their old indices still open the tab
 they moved to (`ui_screen settings:<n>`, `menu skin` opens HUD).
 
-**Graphics** is one page (docs/SETTINGS_AUDIT.md section 6): "Why can't I change X?" + Default, the
-Engine Fidelity card, **Display** and **Comfort**. There is no Debug page: the per-feature tiers are
-the engine's, set by the Engine Fidelity level (console only).
+**Graphics** is one page (docs/SETTINGS_AUDIT.md section 6): "Why can't I change X?" + Default,
+**Quality**, **Display** and **Comfort**. There is no Debug page.
+* Quality: **Overall** (Low / Medium / High / Ultra, Custom when the others differ) and **Anti-aliasing,
+  Post-processing, Shadows, Textures, Effects, Foliage, View distance**, each Low / Medium / High /
+  Ultra. They are the only thing that sets the quality features (docs/ENGINE_FIDELITY.md "Player
+  settings"): no level bounds, auto-detect, benchmark or presets.
 * Display: resolution, window mode, VSync (Apply / Revert, 15 s confirm), frame rate limit, render
   scale, **stretched resolution** (`r_stretch`, with the equivalent stretched resolution of this
   display), **upscaling** (every upscaler: Off / TAA-U / FSR 1 / FSR 2 and DLSS, both slots running
   FSR 1 for now, + its resolution), HDR10 (+ paper white), brightness, colour-blind filter, show FPS.
-* Comfort: field of view (or the server's), sprint FOV effect, motion blur (+ strength), depth of
-  field, film grain, chromatic aberration, vignette, sharpening, screen effects, **gore**.
+* Comfort: field of view (or the server's), sprint FOV effect, screen effects, **gore**. Motion blur,
+  depth of field, film grain, chromatic aberration, vignette and sharpening follow the qualities.
 * Head bob, camera shake, weapon sway and weapon kick are not settings: locked at the designed values.
 
 **HUD**: INTERFACE (UI scale, safe area) · CROSSHAIR · LAYOUT · COMPASS · KILLS · PINGS · WHEELS.

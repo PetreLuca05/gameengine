@@ -330,7 +330,7 @@ static void draw_confirm(bool top) {
     }
     GuiText b = { gui_s(TH->t_body), GW_REGULAR, TH->text_dim, GUI_LEFT, 0, false, false, 0 };
     gd_text_wrap(&b, r.x + pad, r.y + pad + gui_s(40), r.w - pad * 2, text, true);
-    float bw = gui_s(M->confirm_kind == CONFIRM_FIDELITY ? 200 : 150), bh = gui_s(TH->button_h + 4);
+    float bw = gui_s(150), bh = gui_s(TH->button_h + 4);
     GuiRect yes = { r.x + r.w - pad - bw, r.y + r.h - pad - bh, bw, bh };
     GuiRect no = { yes.x - bw - gui_s(10), yes.y, bw, bh };
     const char *yes_l = "Confirm", *no_l = "Cancel";
@@ -343,7 +343,6 @@ static void draw_confirm(bool top) {
     case CONFIRM_DISPLAY: yes_l = "Keep"; no_l = "Revert"; break;
     case CONFIRM_RESET_BINDS: yes_l = "Reset"; yes_kind = GB_DANGER; break;
     case CONFIRM_GRAPHICS_DEFAULTS: yes_l = "Reset"; yes_kind = GB_DANGER; break;
-    case CONFIRM_FIDELITY: yes_l = "Apply recommended"; no_l = "Keep current"; break;
     case CONFIRM_COMMAND: yes_l = "Run"; yes_kind = GB_DANGER; break;
     }
     bool y = gw_button(gui_id("confirm_yes"), yes, yes_l, yes_kind, true);
@@ -371,7 +370,6 @@ static void draw_confirm(bool top) {
         case CONFIRM_DISPLAY: settings_confirm_result(yes_pressed); break;
         case CONFIRM_RESET_BINDS: if (yes_pressed) input_reset_bindings(); break;
         case CONFIRM_GRAPHICS_DEFAULTS: if (yes_pressed) settings_graphics_defaults(); break;
-        case CONFIRM_FIDELITY: if (yes_pressed) game_fidelity_apply_recommended(); break;
         case CONFIRM_COMMAND: commands_tab_confirm_result(yes_pressed); break;
         }
     }

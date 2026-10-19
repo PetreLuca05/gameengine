@@ -252,11 +252,11 @@ static void test_audit_places(void) {
         if (!strcmp(ui, "Lobby rules")) CHECK(!strcmp(cls, "LOCKED+RULE"), "%s is a lobby rule but %s", e->string, cls);
         if (!strncmp(ui, "Graphics", 8)) {
             gfx++;
-            CHECK(!strcmp(ui, "Graphics (top)") || !strcmp(ui, "Graphics > Display") || !strcmp(ui, "Graphics > Comfort") || !strcmp(ui, "Graphics (dev)"),
-                  "%s: Graphics place '%s' is not Engine Fidelity / Display / Comfort", e->string, ui);
+            CHECK(!strcmp(ui, "Graphics (top)") || !strcmp(ui, "Graphics > Quality") || !strcmp(ui, "Graphics > Display") || !strcmp(ui, "Graphics > Comfort"),
+                  "%s: Graphics place '%s' is not Quality / Display / Comfort", e->string, ui);
         }
     }
-    CHECK(n > 400 && gfx > 20, "audit: %d cvars, %d in the Graphics tab", n, gfx);
+    CHECK(n > 400 && gfx > 15, "audit: %d cvars, %d in the Graphics tab", n, gfx);
 }
 
 int main(void) {

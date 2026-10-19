@@ -9,7 +9,7 @@
   },
   "ads_dof": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "ADS weapon blur: availability by level; r_dof 0 turns it off.",
    "category": "weapons"
   },
@@ -1431,19 +1431,19 @@
   },
   "r_aa": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Anti-aliasing mode: a quality / cost trade at the same visibility; picked by the level.",
    "category": "rendering"
   },
   "r_aniso": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Texture mips / anisotropic filtering: quality only.",
    "category": "rendering"
   },
   "r_ao": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "AO / contact shadows / SSR / SSGI / puddle reflections: lighting quality tiers. SSR only reflects pixels already on screen (no new information).",
    "category": "rendering"
   },
@@ -1533,7 +1533,7 @@
   },
   "r_bloom": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Bloom on / off follows the level; its strength is the Look's (r_bloom_intensity, locked).",
    "category": "rendering"
   },
@@ -1545,7 +1545,7 @@
   },
   "r_bloom_quality": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "DoF / bloom gather quality.",
    "category": "rendering"
   },
@@ -1574,9 +1574,9 @@
    "category": "rendering"
   },
   "r_chromatic": {
-   "class": "EDITABLE",
-   "ui": "Graphics > Comfort",
-   "reason": "Film grain, chromatic aberration, vignette, sharpening: cosmetic, each bounded by the level and the Look.",
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Set by the player's quality settings only (Anti-aliasing: sharpening; Post-processing: the rest), docs/ENGINE_FIDELITY.md \"Player settings\".",
    "category": "rendering"
   },
   "r_classic_impostor_px": {
@@ -1599,7 +1599,7 @@
   },
   "r_contact_shadows": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "AO / contact shadows / SSR / SSGI / puddle reflections: lighting quality tiers. SSR only reflects pixels already on screen (no new information).",
    "category": "rendering"
   },
@@ -1616,14 +1616,14 @@
    "category": "rendering"
   },
   "r_dof": {
-   "class": "EDITABLE",
-   "ui": "Graphics > Comfort",
-   "reason": "Depth of field Off / When aiming / Always: cosmetic, only ever blurs your own view. Off also turns off the ADS weapon blur.",
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Set by the player's quality settings only (Anti-aliasing: sharpening; Post-processing: the rest), docs/ENGINE_FIDELITY.md \"Player settings\".",
    "category": "rendering"
   },
   "r_dof_quality": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "DoF / bloom gather quality.",
    "category": "rendering"
   },
@@ -1658,45 +1658,15 @@
    "category": "rendering"
   },
   "r_fidelity": {
-   "class": "EDITABLE",
-   "ui": "Graphics (top)",
-   "reason": "Engine Fidelity level: the one quality choice a player makes.",
-   "category": "rendering"
-  },
-  "r_fidelity_autodetect": {
-   "class": "EDITABLE",
+   "class": "LOCKED",
    "ui": "—",
-   "reason": "Fidelity bookkeeping written by the game (benchmark results, recommendation, auto-detect, target fps).",
-   "category": "rendering"
-  },
-  "r_fidelity_bench": {
-   "class": "EDITABLE",
-   "ui": "—",
-   "reason": "Fidelity bookkeeping written by the game (benchmark results, recommendation, auto-detect, target fps).",
-   "category": "rendering"
-  },
-  "r_fidelity_custom": {
-   "class": "EDITABLE",
-   "ui": "—",
-   "reason": "Player tweaks of the EDITABLE fidelity features only (render scale, upscaler, motion blur, DoF, grain, CA, vignette, sharpening). TIER features are no longer stored here; old entries are dropped on load.",
-   "category": "rendering"
-  },
-  "r_fidelity_recommended": {
-   "class": "EDITABLE",
-   "ui": "—",
-   "reason": "Fidelity bookkeeping written by the game (benchmark results, recommendation, auto-detect, target fps).",
-   "category": "rendering"
-  },
-  "r_fidelity_target_fps": {
-   "class": "EDITABLE",
-   "ui": "—",
-   "reason": "Fidelity bookkeeping written by the game (benchmark results, recommendation, auto-detect, target fps).",
+   "reason": "The quality tables' level, dev tools only (bench_fidelity, fidelity_test, shadow_preset): the player's quality settings set the features.",
    "category": "rendering"
   },
   "r_film_grain": {
-   "class": "EDITABLE",
-   "ui": "Graphics > Comfort",
-   "reason": "Film grain, chromatic aberration, vignette, sharpening: cosmetic, each bounded by the level and the Look.",
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Set by the player's quality settings only (Anti-aliasing: sharpening; Post-processing: the rest), docs/ENGINE_FIDELITY.md \"Player settings\".",
    "category": "rendering"
   },
   "r_fog_scale": {
@@ -1713,7 +1683,7 @@
   },
   "r_foliage_wind": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Foliage shading tier: wind layers. Density and fade distances are locked.",
    "category": "rendering"
   },
@@ -1737,13 +1707,13 @@
   },
   "r_grass_sss": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Terrain / ground shading tiers (TERRAIN_SHADING.md): texture variation, parallax, transitions; no effect on what stands on it.",
    "category": "rendering"
   },
   "r_grass_tex": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Terrain / ground shading tiers (TERRAIN_SHADING.md): texture variation, parallax, transitions; no effect on what stands on it.",
    "category": "rendering"
   },
@@ -1821,7 +1791,7 @@
   },
   "r_light_shadow_quality": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Lamp / flashlight shadow tile size (256 / 512 px). Whether lamps are shadowed is locked.",
    "category": "rendering"
   },
@@ -1916,20 +1886,20 @@
    "category": "rendering"
   },
   "r_motion_blur": {
-   "class": "EDITABLE",
-   "ui": "Graphics > Comfort",
-   "reason": "Motion blur (camera / camera + objects) and its strength: comfort. The viewmodel's own blur spike follows Camera shake, so blur never masks the weapon's recoil.",
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Set by the player's quality settings only (Anti-aliasing: sharpening; Post-processing: the rest), docs/ENGINE_FIDELITY.md \"Player settings\".",
    "category": "rendering"
   },
   "r_motion_blur_strength": {
-   "class": "EDITABLE",
-   "ui": "Graphics > Comfort",
-   "reason": "Motion blur (camera / camera + objects) and its strength: comfort. The viewmodel's own blur spike follows Camera shake, so blur never masks the weapon's recoil.",
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Motion blur strength: fixed (the Post-processing quality turns motion blur on / off).",
    "category": "rendering"
   },
   "r_perf_overlay": {
    "class": "EDITABLE",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Performance overlay (frame times + budget): diagnostics only, shows nothing about the world.",
    "category": "rendering"
   },
@@ -1957,12 +1927,6 @@
    "reason": "Screen effects (damage / flash / low health): photosensitivity accessibility, 0.5 .. 1 (at 0 a flashbang did nothing).",
    "category": "rendering"
   },
-  "r_post_preset": {
-   "class": "TIER",
-   "ui": "—",
-   "reason": "Legacy post preset: follows the level.",
-   "category": "rendering"
-  },
   "r_post_profile": {
    "class": "LOCKED",
    "ui": "—",
@@ -1977,14 +1941,56 @@
   },
   "r_precip_quality": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Rain / snow shading tier (splash detail). The particle count is the same at every tier and never 0 (V8).",
    "category": "rendering"
   },
   "r_puddle_reflections": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "AO / contact shadows / SSR / SSGI / puddle reflections: lighting quality tiers. SSR only reflects pixels already on screen (no new information).",
+   "category": "rendering"
+  },
+  "r_quality_aa": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Quality",
+   "reason": "Anti-aliasing quality Low / Medium / High / Ultra: the only thing that sets its features (Overall sets all seven).",
+   "category": "rendering"
+  },
+  "r_quality_effects": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Quality",
+   "reason": "Effects quality Low / Medium / High / Ultra: the only thing that sets its features (Overall sets all seven).",
+   "category": "rendering"
+  },
+  "r_quality_foliage": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Quality",
+   "reason": "Foliage quality Low / Medium / High / Ultra: the only thing that sets its features (Overall sets all seven).",
+   "category": "rendering"
+  },
+  "r_quality_post": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Quality",
+   "reason": "Post-processing quality Low / Medium / High / Ultra: the only thing that sets its features (Overall sets all seven).",
+   "category": "rendering"
+  },
+  "r_quality_shadows": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Quality",
+   "reason": "Shadows quality Low / Medium / High / Ultra: the only thing that sets its features (Overall sets all seven).",
+   "category": "rendering"
+  },
+  "r_quality_textures": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Quality",
+   "reason": "Textures quality Low / Medium / High / Ultra: the only thing that sets its features (Overall sets all seven).",
+   "category": "rendering"
+  },
+  "r_quality_view_distance": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Quality",
+   "reason": "View distance quality Low / Medium / High / Ultra: the only thing that sets its features (Overall sets all seven).",
    "category": "rendering"
   },
   "r_render_scale": {
@@ -1995,7 +2001,7 @@
   },
   "r_scope_pip_scale": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Scope picture resolution: like render scale for the scope (sharpness, not content).",
    "category": "rendering"
   },
@@ -2007,19 +2013,19 @@
   },
   "r_shadow_cascade_border": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and the shadow types are locked.",
    "category": "rendering"
   },
   "r_shadow_cascades": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and the shadow types are locked.",
    "category": "rendering"
   },
   "r_shadow_caster_limit": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Grass / ground cover and small plants cast sun shadows only into the near cascade(s); trees, characters, buildings and the plants themselves are unchanged. The reach is about the same at every level (ground cover 10 .. 15 m, small plants 30 m; tests/test_shadow_casters.c), and a grass shadow farther away never hides or reveals anyone: cost only (PF-0013).",
    "category": "rendering"
   },
@@ -2031,7 +2037,7 @@
   },
   "r_shadow_far_interval": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "The two far sun cascades are re-rendered in turn (each every N frames) and keep the tile they were drawn with in between; forced after a cut or once the fit moved. Far shadows of moving casters lag up to N - 1 frames; nothing is hidden or revealed that the near cascades show: cost only (PF-0028).",
    "category": "rendering"
   },
@@ -2043,91 +2049,91 @@
   },
   "r_shadow_min_radius": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Small props (< radius) skip the sun shadow: cost only.",
    "category": "rendering"
   },
   "r_shadow_near_offset": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and the shadow types are locked.",
    "category": "rendering"
   },
   "r_shadow_projection": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and the shadow types are locked.",
    "category": "rendering"
   },
   "r_shadow_resolution": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and the shadow types are locked.",
    "category": "rendering"
   },
   "r_shadow_split2": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and the shadow types are locked.",
    "category": "rendering"
   },
   "r_shadow_split4_1": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and the shadow types are locked.",
    "category": "rendering"
   },
   "r_shadow_split4_2": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and the shadow types are locked.",
    "category": "rendering"
   },
   "r_shadow_split4_3": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and the shadow types are locked.",
    "category": "rendering"
   },
   "r_shadowmask_distance": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and the shadow types are locked.",
    "category": "rendering"
   },
   "r_shadowmask_mode": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and the shadow types are locked.",
    "category": "rendering"
   },
   "r_shadows": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Shadow mode: Hard vs Soft is a quality tier, but every level has at least Hard. Disable removed every sun shadow (enemy shadows, dark interiors), an advantage (V5).",
    "category": "rendering"
   },
   "r_sharpen": {
-   "class": "EDITABLE",
-   "ui": "Graphics > Comfort",
-   "reason": "Film grain, chromatic aberration, vignette, sharpening: cosmetic, each bounded by the level and the Look.",
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Set by the player's quality settings only (Anti-aliasing: sharpening; Post-processing: the rest), docs/ENGINE_FIDELITY.md \"Player settings\".",
    "category": "rendering"
   },
   "r_soft_shadow_quality": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and the shadow types are locked.",
    "category": "rendering"
   },
   "r_ssgi": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "AO / contact shadows / SSR / SSGI / puddle reflections: lighting quality tiers. SSR only reflects pixels already on screen (no new information).",
    "category": "rendering"
   },
   "r_ssr": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "AO / contact shadows / SSR / SSGI / puddle reflections: lighting quality tiers. SSR only reflects pixels already on screen (no new information).",
    "category": "rendering"
   },
@@ -2157,13 +2163,13 @@
   },
   "r_terrain_quality": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Terrain / ground shading tiers (TERRAIN_SHADING.md): texture variation, parallax, transitions; no effect on what stands on it.",
    "category": "rendering"
   },
   "r_terrain_tex_size": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Terrain / ground shading tiers (TERRAIN_SHADING.md): texture variation, parallax, transitions; no effect on what stands on it.",
    "category": "rendering"
   },
@@ -2181,7 +2187,7 @@
   },
   "r_texture_quality": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Texture mips / anisotropic filtering: quality only.",
    "category": "rendering"
   },
@@ -2217,13 +2223,13 @@
   },
   "r_vgeo_shadow_error_px": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Classic renderer shadow cost (shadow-view geometry error, scene content in the shadow maps): shading cost only, the locked LOD / impostor outcome is the same.",
    "category": "rendering"
   },
   "r_vgeo_shadows": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Classic renderer shadow cost (shadow-view geometry error, scene content in the shadow maps): shading cost only, the locked LOD / impostor outcome is the same.",
    "category": "rendering"
   },
@@ -2234,9 +2240,9 @@
    "category": "rendering"
   },
   "r_vignette": {
-   "class": "EDITABLE",
-   "ui": "Graphics > Comfort",
-   "reason": "Film grain, chromatic aberration, vignette, sharpening: cosmetic, each bounded by the level and the Look.",
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Set by the player's quality settings only (Anti-aliasing: sharpening; Post-processing: the rest), docs/ENGINE_FIDELITY.md \"Player settings\".",
    "category": "rendering"
   },
   "r_vm_shadow": {
@@ -2247,13 +2253,13 @@
   },
   "r_vol_local_lights": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Volumetric fog quality (froxel tiers, lamp scattering). Fog density is locked (r_fog_scale) and the distance-fog fallback uses the same density (V6).",
    "category": "rendering"
   },
   "r_volumetrics": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Volumetric fog quality (froxel tiers, lamp scattering). Fog density is locked (r_fog_scale) and the distance-fog fallback uses the same density (V6).",
    "category": "rendering"
   },
@@ -2265,7 +2271,7 @@
   },
   "r_water": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Water shading tier (reflections, ripples, caustics, waves). Refraction / turbidity are the same at every tier (V7).",
    "category": "rendering"
   },
@@ -2667,13 +2673,13 @@
   },
   "vfx_half_res": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Particle shading: half-res pass, lighting, sort budget, collisions. Emission counts are the same at every tier (V9).",
    "category": "vfx"
   },
   "vfx_lighting": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Particle shading: half-res pass, lighting, sort budget, collisions. Emission counts are the same at every tier (V9).",
    "category": "vfx"
   },
@@ -2685,7 +2691,7 @@
   },
   "vfx_quality": {
    "class": "TIER",
-   "ui": "Graphics (dev)",
+   "ui": "—",
    "reason": "Particle shading: half-res pass, lighting, sort budget, collisions. Emission counts are the same at every tier (V9).",
    "category": "vfx"
   },

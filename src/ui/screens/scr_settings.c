@@ -1,7 +1,6 @@
-// Settings modal (docs/UI.md "Settings", docs/SETTINGS_AUDIT.md): Graphics (Engine Fidelity, then
-// Display and Comfort: only personal / display / comfort settings; what changes visibility is the
-// same for every player and not here; the per-feature tiers are the engine's, set by the Engine
-// Fidelity level), Controls, HUD (crosshair, compass, kills, pings, wheels), Audio, Character,
+// Settings modal (docs/UI.md "Settings", docs/SETTINGS_AUDIT.md): Graphics (Quality: Overall and the
+// seven quality groups, the only thing that sets the quality features; Display and Comfort; what
+// changes visibility is the same for every player and not here), Controls, HUD (crosshair, compass, kills, pings, wheels), Audio, Character,
 // Phone. Display settings (resolution, window mode, vsync) wait for Apply and then ask to be
 // kept within 15 seconds (reverted otherwise); everything else applies immediately (cvars, saved
 // with the config when the modal closes).
@@ -131,7 +130,7 @@ void settings_confirm_result(bool keep) {
 // (itself back to its default) applies its table defaults to every feature, with the custom tweaks
 // cleared. Kept: the display (Apply / Revert, confirmed) and the fidelity benchmark results. Tier
 // and locked cvars are not the player's (docs/SETTINGS_AUDIT.md).
-static const char *const k_gfx_keep[] = { "r_width", "r_height", "r_mode", "r_vsync", "r_fidelity_bench", "r_fidelity_recommended", "r_fidelity_autodetect", "r_fidelity_custom" };
+static const char *const k_gfx_keep[] = { "r_width", "r_height", "r_mode", "r_vsync" };
 static const char *const k_gfx_extra[] = { "cl_fov", "cl_sprint_fov", "cl_showfps" };
 
 static bool gfx_cvar(const Cvar *c) {
@@ -150,11 +149,9 @@ void settings_graphics_defaults(void) {
         cvar_reset(c);
         n++;
     }
-    fid_custom_load("");
-    cvar_set("r_fidelity_custom", "");
-    fid_apply(fid_level());
+    game_quality_apply();   // the quality settings' defaults on their features
     S.pending = read_display();
-    log_info("settings: %d graphics settings back to their defaults (Engine Fidelity %s)", n, fid_level_name(fid_level()));
+    log_info("settings: %d graphics settings back to their defaults", n);
 }
 
 // ------------------------------------------------------------------ rows
@@ -306,63 +303,40 @@ static void row_fid_slider(GuiCursor *c, const char *label, int f, float lo, flo
 
 // ------------------------------------------------------------------ Graphics
 
-// Engine Fidelity: picking a level applies its table defaults to every feature with the user's
-// tweaks cleared; any single change afterwards (render scale, motion blur ...) reads "Custom"
-// (fid_custom_count: features away from the level's defaults).
-static void overall_quality_set(int level) {
-    fid_custom_load("");
-    cvar_set("r_fidelity_custom", "");
-    if (level != fid_level()) game_fidelity_set(level);
-    else fid_apply(level);
+// Quality (docs/ENGINE_FIDELITY.md "Player settings"): Overall and seven groups, each Low / Medium /
+// High / Ultra. These are the only thing that sets the quality features: Overall sets all seven (it
+// reads Custom when they differ), a group sets its own features at that tier.
+static const char *const k_tiers[5] = { "Low", "Medium", "High", "Ultra", "Custom" };
+
+static void quality_row(GuiCursor *c, const char *label, int group, const char *hint) {
+    int sel = game_quality_tier(group);
+    if (row_combo(c, label, k_tiers, 4, &sel, hint)) game_quality_set(group, sel);
 }
 
-static void fidelity_card(GuiCursor *c) {
-    if (!fid_loaded()) {
-        section(c, "Engine Fidelity");
-        gw_label(gc_row(c, gui_s(22)), "Fidelity tables missing (assets/render/fidelity): every setting is unbounded.", gui_s(TH->t_body - 2), GW_REGULAR, TH->text_faint, GUI_LEFT);
-        return;
+static void graphics_quality(GuiCursor *c) {
+    section(c, "Quality");
+    {
+        int all = game_quality_overall(), sel = all < 0 ? 4 : all;
+        bool en[5] = { true, true, true, true, false };
+        const char *notes[5] = { "", "", "", "", "" };
+        GuiRect r = gw_setting_row(c, "Overall", "Sets every quality below. Custom: they differ.", rid("gfx_overall"));
+        r.y += gui_s(3);
+        r.h -= gui_s(6);
+        if (gw_dropdown_ex(rid("gfx_overall"), r, k_tiers, 5, &sel, en, notes) && sel < 4) game_quality_set_overall(sel);
     }
-    c->y += gui_s(10);
-    float row = gui_s(TH->row_h), line = gui_s(22), bh = gui_s(TH->button_h + 4);
-    float card_h = gui_s(26) + row + line * 2 + bh + gui_s(30);
-    GuiRect card = { c->area.x - gui_s(10), c->y - gui_s(4), c->area.w + gui_s(20), card_h };
-    gd_round_border(card, gui_s(TH->radius_panel), 1, UI_RGBA(255, 255, 255, 10), gui_rgba_mul(TH->accent, 0.55f));
-    gw_section(gc_row(c, gui_s(26)), "Engine Fidelity");
-    int lvl = fid_level(), rec = game_fidelity_recommended(), custom = fid_custom_count();
-    const char *items[FID_LEVELS + 1], *notes[FID_LEVELS + 1];
-    bool en[FID_LEVELS + 1];
-    for (int l = 0; l < FID_LEVELS; l++) { items[l] = fid_level_name(l); notes[l] = l == rec ? "Recommended" : ""; en[l] = true; }
-    items[FID_LEVELS] = "Custom";
-    notes[FID_LEVELS] = "";
-    en[FID_LEVELS] = custom > 0;
-    int sel = custom ? FID_LEVELS : lvl;
-    GuiRect r = gw_setting_row(c, "Engine Fidelity",
-                               "How good everything looks and how fast it runs. Every level shows the same world: the same foliage, fog, shadows and view distances for every player.",
-                               rid("gfx_overall"));
-    r.y += gui_s(3);
-    r.h -= gui_s(6);
-    if (gw_dropdown_ex(rid("gfx_overall"), r, items, FID_LEVELS + 1, &sel, en, notes) && sel < FID_LEVELS) overall_quality_set(sel);
-    char buf[200];
-    if (custom) snprintf(buf, sizeof(buf), "Custom: %s with %d changed setting%s.", fid_level_name(lvl), custom, custom == 1 ? "" : "s");
-    else dg_strcpy(buf, sizeof(buf), fid_level_desc(lvl));
-    gw_label(gc_row(c, line), buf, gui_s(TH->t_body - 2), GW_REGULAR, TH->text_dim, GUI_LEFT);
-    float ms = game_fidelity_bench_ms(lvl);
-    if (game_fidelity_busy()) snprintf(buf, sizeof(buf), "Measuring...");
-    else if (ms > 0) snprintf(buf, sizeof(buf), "Last benchmark: %.0f fps%s%s", 1000.0f / ms, rec >= 0 ? "  \xC2\xB7  recommended: " : "", rec >= 0 ? fid_level_name(rec) : "");
-    else snprintf(buf, sizeof(buf), "Not measured yet: Run benchmark finds the best level for this PC.");
-    gw_label(gc_row(c, line), buf, gui_s(TH->t_body - 2), GW_REGULAR, TH->text_faint, GUI_LEFT);
-    GuiRect br = gc_row(c, bh);
-    float bw = gui_s(190), gap = gui_s(10);
-    GuiRect b1 = { br.x, br.y, bw, br.h }, b2 = { br.x + bw + gap, br.y, bw, br.h };
-    if (gw_button(rid("q_detect"), b1, "Run benchmark", GB_SECONDARY, !game_fidelity_busy())) game_fidelity_detect(false);
-    if (gw_button(rid("q_apply_rec"), b2, "Apply recommended", GB_PRIMARY, rec >= 0 && (rec != lvl || custom) && !game_fidelity_busy())) overall_quality_set(rec);
-    c->y = card.y + card.h + gui_s(6);
+    quality_row(c, "Anti-aliasing", FG_AA, "Low FXAA, Medium SMAA, High and Ultra TAA (with sharpening from Medium).");
+    quality_row(c, "Post-processing", FG_POST, "Ambient occlusion, reflections, volumetrics, depth of field, bloom, motion blur, film grain, chromatic aberration, vignette.");
+    quality_row(c, "Shadows", FG_SHADOWS, "Sun, moon and lamp shadows: resolution, cascades, softness.");
+    quality_row(c, "Textures", FG_TEXTURES, "Texture resolution, filtering, terrain detail.");
+    quality_row(c, "Effects", FG_EFFECTS, "Particles, rain and snow, water, the scope picture.");
+    quality_row(c, "Foliage", FG_FOLIAGE, "Foliage wind animation (the amount of foliage is the same for everyone).");
+    quality_row(c, "View distance", FG_VIEW_DISTANCE, "Shadow detail of distant geometry (what you can see is the same for everyone).");
 }
 
 // The tab header: "Why can't I change X?" (hover: the fair-play reason) and Default.
 static const char k_why_fixed[] =
     "Settings that change what you can see compared with other players are the same for everyone, for fair play: foliage and grass, fog and weather, view, "
-    "shadow and detail distances, lens effects, exposure and brightness beyond a small range, the hands FOV. Engine Fidelity changes how good the "
+    "shadow and detail distances, lens effects, exposure and brightness beyond a small range, the hands FOV. The quality settings change how good the "
     "world looks and how fast it runs, never what you can see. The host's lobby rules may set some of them for a whole game.";
 
 static void graphics_header(GuiCursor *c) {
@@ -374,7 +348,7 @@ static void graphics_header(GuiCursor *c) {
     gw_label(why, "(i)  Why can't I change X?", gui_s(TH->t_small + 1), GW_SEMIBOLD, in.hovered ? TH->text : TH->text_dim, GUI_CENTER);
     if (in.hovered || in.focused) gui_tooltip(rid("gfx_why"), k_why_fixed);
     if (gw_button(rid("gfx_defaults"), def, "Default", GB_SECONDARY, true))
-        screens_confirm(CONFIRM_GRAPHICS_DEFAULTS, "Reset graphics settings?", "Every graphics setting goes back to its default, Engine Fidelity included. Resolution, window mode and VSync stay.", 0);
+        screens_confirm(CONFIRM_GRAPHICS_DEFAULTS, "Reset graphics settings?", "Every graphics setting goes back to its default, the qualities included. Resolution, window mode and VSync stay.", 0);
 }
 
 static void graphics_display(GuiCursor *c) {
@@ -464,15 +438,6 @@ static void graphics_comfort(GuiCursor *c) {
         }
     }
     row_slider_cvar(c, "Sprint FOV effect", "cl_sprint_fov", 0, 7, 0.5f, "%.1f\xC2\xB0", "The view widens a little while sprinting (0 = off).");
-    static const char *const mb[] = { "Off", "Camera", "Camera + objects" };
-    row_fid_combo(c, "Motion blur", FF_MOTION_BLUR, mb, NULL, 3, NULL);
-    if (cv("r_motion_blur") && cv("r_motion_blur")->i) row_slider_cvar(c, "Motion blur strength", "r_motion_blur_strength", 0.05f, 1, 0.05f, "%.2f", NULL);
-    static const char *const dof[] = { "Off", "When aiming", "Always" };
-    row_fid_combo(c, "Depth of field", FF_DOF, dof, NULL, 3, "Off also removes the slight blur on the weapon while aiming.");
-    row_fid_slider(c, "Film grain", FF_FILM_GRAIN, 0, 1, 0.01f, "%.2f", "Strength of the Look's film grain (0.04 = as the Look intends).");
-    row_fid_slider(c, "Chromatic aberration", FF_CHROMATIC, 0, 2, 0.05f, "%.2f", "Strength of the Look's chromatic aberration (0.15 = as the Look intends).");
-    row_fid_slider(c, "Vignette", FF_VIGNETTE, 0, 1, 0.05f, "%.2f", "Strength of the Look's vignette (0.25 = as the Look intends).");
-    row_fid_slider(c, "Sharpening", FF_SHARPEN, 0, 1, 0.05f, "%.2f", "0.35 = as the Look intends.");
     row_slider_cvar(c, "Screen effects", "r_post_feedback", 0.5f, 1, 0.05f, "%.2f", "Damage, flash and low-health effects (photosensitivity).");
     static const char *const gore[] = { "Off", "Low", "High" };
     row_combo_cvar(c, "Gore", "gore_level", gore, 3, "Off: neutral impact puffs (hits stay readable), no blood.");
@@ -480,7 +445,7 @@ static void graphics_comfort(GuiCursor *c) {
 
 static void tab_graphics_normal(GuiCursor *c) {
     graphics_header(c);
-    fidelity_card(c);
+    graphics_quality(c);
     graphics_display(c);
     graphics_comfort(c);
 }

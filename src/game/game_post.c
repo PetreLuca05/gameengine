@@ -1,6 +1,6 @@
 // Game side of the post-processing stack (src/render/post): every frame the final PostSettings
 // are blended from
-//   1. the Graphics settings (r_* cvars, quality presets Low / Medium / High / Ultra),
+//   1. the Graphics settings (r_* cvars, the Post-processing quality Low / Medium / High / Ultra),
 //   2. the level's post volumes (data/levels/<map>.json: "post" = global grade, "post_volumes" =
 //      boxes with a blend distance and a priority; higher priorities blend over lower ones),
 //   3. gameplay feedback (damage, low health, flash, hit markers, sprint, underwater, night
@@ -51,7 +51,7 @@ typedef struct PostVolume {
 } PostVolume;
 
 static struct {
-    Cvar *preset, *aa, *upscaler, *upscale, *sharpen, *ao, *contact, *ssr, *ssgi, *vol, *mb, *mb_strength, *dof, *bloom, *bloom_q,
+    Cvar *aa, *upscaler, *upscale, *sharpen, *ao, *contact, *ssr, *ssgi, *vol, *mb, *mb_strength, *dof, *bloom, *bloom_q,
         *bloom_int, *flare, *chromatic, *vignette, *grain, *tonemap, *exp_comp, *auto_exp, *brightness, *gamma, *colorblind, *lut,
         *debug, *compare, *paper, *maxnits, *feedback, *profile, *volumes_draw, *distortion, *underwater, *lens_dirt, *fog_scale,
         *dof_quality, *vol_lights;
@@ -77,75 +77,6 @@ static struct {
     char bench_label[32];
     PostSettings last;
 } GP;
-
-// ------------------------------------------------------------------ presets
-
-typedef struct PresetDef { int aa, ao, contact, ssr, ssgi, vol, mb, dof, bloom_q, flare; } PresetDef;
-static const PresetDef k_presets[4] = {
-    // aa: 0 off, 1 FXAA, 2 SMAA, 3 TAA
-    { 1, 0, 0, 0, 0, 0, 0, 0, 1, 0 },   // Low
-    { 3, 1, 1, 1, 0, 1, 1, 1, 1, 0 },   // Medium
-    { 3, 2, 2, 2, 0, 2, 1, 1, 2, 0 },   // High
-    { 3, 2, 2, 2, 1, 3, 2, 1, 2, 1 },   // Ultra
-};
-static const char *k_preset_names[5] = { "Low", "Medium", "High", "Ultra", "Custom" };
-
-static void apply_preset(int p) {
-    if (p < 0 || p > 3) return;
-    const PresetDef *d = &k_presets[p];
-    CvarSource src = cvar_source_push(CVAR_SRC_FIDELITY);   // tier cvars (docs/SETTINGS_AUDIT.md)
-    cvar_set_int(GP.aa, d->aa);
-    cvar_set_int(GP.ao, d->ao);
-    cvar_set_int(GP.contact, d->contact);
-    cvar_set_int(GP.ssr, d->ssr);
-    cvar_set_int(GP.ssgi, d->ssgi);
-    cvar_set_int(GP.vol, d->vol);
-    cvar_set_int(GP.mb, d->mb);
-    cvar_set_int(GP.dof, d->dof);
-    cvar_set_int(GP.bloom_q, d->bloom_q);
-    // (d->flare: the lens flare strength is the Look's, locked for every preset.)
-    cvar_set_int(GP.preset, p);
-    cvar_source_pop(src);
-}
-
-// Presets are applied through the Engine Fidelity bounds (docs/ENGINE_FIDELITY.md); one only reads
-// back when the level allows all of it (game_post_preset_allowed), otherwise Custom.
-static int pv(int f, int v) { return (int)lroundf(fid_clamp_current(f, (float)v)); }
-int game_post_detect_preset(void) {
-    for (int p = 0; p < 4; p++) {
-        const PresetDef *d = &k_presets[p];
-        if (!game_post_preset_allowed(p, NULL)) continue;
-        if (GP.aa->i == pv(FF_AA, d->aa) && GP.ao->i == pv(FF_AO, d->ao) && GP.contact->i == pv(FF_CONTACT_SHADOWS, d->contact) &&
-            GP.ssr->i == pv(FF_SSR, d->ssr) && GP.ssgi->i == pv(FF_SSGI, d->ssgi) && GP.vol->i == pv(FF_VOLUMETRICS, d->vol) &&
-            GP.mb->i == pv(FF_MOTION_BLUR, d->mb) && GP.dof->i == pv(FF_DOF, d->dof) && GP.bloom_q->i == pv(FF_BLOOM_QUALITY, d->bloom_q) &&
-            ((GP.flare->f > 0) == (d->flare != 0)))
-            return p;
-    }
-    return 4;
-}
-
-// Whether the current Engine Fidelity level (and era) allows every value of a preset; else the
-// lowest level that does (*req, -1 = none in this era).
-bool game_post_preset_allowed(int p, int *req) {
-    if (p < 0 || p > 3) return false;
-    const PresetDef *d = &k_presets[p];
-    const int f[9] = { FF_AA, FF_AO, FF_CONTACT_SHADOWS, FF_SSR, FF_SSGI, FF_VOLUMETRICS, FF_MOTION_BLUR, FF_DOF, FF_BLOOM_QUALITY };
-    const float v[9] = { (float)d->aa, (float)d->ao, (float)d->contact, (float)d->ssr, (float)d->ssgi, (float)d->vol, (float)d->mb, (float)d->dof, (float)d->bloom_q };
-    int need = 0, era = fid_era();
-    for (int i = 0; i < 9; i++) {
-        int l = fid_min_level_for(era, f[i], v[i]);
-        if (l < 0) { need = -1; break; }
-        need = DG_MAX(need, l);
-    }
-    if (req) *req = need;
-    return need >= 0 && need <= fid_level();
-}
-const char *game_post_preset_name(int p) { return k_preset_names[DG_CLAMP(p, 0, 4)]; }
-void game_post_apply_preset(int p) { apply_preset(p); }
-
-static void on_preset(Cvar *c) {
-    if (c->i >= 0 && c->i <= 3 && game_post_detect_preset() != c->i) apply_preset(c->i);
-}
 
 // ------------------------------------------------------------------ post volumes
 
@@ -385,8 +316,9 @@ static void cmd_post_status(int argc, const char **argv) {
     (void)argc;
     (void)argv;
     const PostSettings *s = &GP.last;
-    log_info("post: preset %s aa %d up %d scale %.2f ao %d contact %d ssr %d ssgi %d vol %d mb %d dof %d bloom %d tm %d ev %.2f hdr %d/%d",
-             game_post_preset_name(game_post_detect_preset()), s->aa, s->upscaler, s->render_scale, s->ao, s->contact_shadows, s->ssr, s->ssgi,
+    static const char *const tn[4] = { "low", "medium", "high", "ultra" };
+    log_info("post: quality %s aa %d up %d scale %.2f ao %d contact %d ssr %d ssgi %d vol %d mb %d dof %d bloom %d tm %d ev %.2f hdr %d/%d",
+             tn[game_quality_tier(FG_POST)], s->aa, s->upscaler, s->render_scale, s->ao, s->contact_shadows, s->ssr, s->ssgi,
              s->volumetrics, s->motion_blur, s->dof, s->bloom, s->tonemapper, render_exposure_ev(), render_hdr_supported(), render_hdr_active());
     log_info("post: fog density %.4f height %.1f falloff %.3f anisotropy %.2f shafts %.2f", s->fog_density, s->fog_height, s->fog_falloff, s->fog_anisotropy, s->sun_shafts);
 }
@@ -396,12 +328,10 @@ static void cmd_post_status(int argc, const char **argv) {
 void game_post_init(void) {
     memset(&GP, 0, sizeof(GP));
     const u32 A = CVAR_ARCHIVE;
-    GP.preset = cvar_reg_int("r_post_preset", 2, 0, 4, CVAR_TIER, "post quality preset: 0 low, 1 medium, 2 high, 3 ultra, 4 custom");
-    GP.preset->on_change = on_preset;
     GP.aa = cvar_find("r_aa");
     GP.upscaler = cvar_reg_int("r_upscaler", 0, 0, 4, A | CVAR_EDITABLE, "upscaler: 0 off, 1 TAA-U, 2 FSR 1, 3 FSR 2 (slot), 4 DLSS (slot)");
     GP.upscale = cvar_reg_float("r_upscale_ratio", 0.67f, 0.5f, 1.0f, A | CVAR_EDITABLE, "render resolution / output with an upscaler");
-    GP.sharpen = cvar_reg_float("r_sharpen", 0.35f, 0.0f, 1.0f, A | CVAR_EDITABLE, "contrast adaptive sharpening");
+    GP.sharpen = cvar_reg_float("r_sharpen", 0.35f, 0.0f, 1.0f, CVAR_TIER, "contrast adaptive sharpening");
     GP.ao = cvar_reg_int("r_ao", 2, 0, 2, CVAR_TIER, "ambient occlusion (GTAO): 0 off, 1 low, 2 high");
     GP.ao_full = cvar_reg_bool("r_ao_full_res", false, CVAR_LOCKED, "GTAO at full render resolution (default half: blurred and upsampled)");
     GP.ao_radius = cvar_reg_float("r_ao_radius", 0.9f, 0.1f, 4.0f, CVAR_LOCKED, "GTAO world-space radius (m)");
@@ -420,17 +350,17 @@ void game_post_init(void) {
     GP.ssr = cvar_reg_int("r_ssr", 2, 0, 2, CVAR_TIER, "screen-space reflections: 0 off, 1 half res, 2 full res");
     GP.ssgi = cvar_reg_int("r_ssgi", 0, 0, 1, CVAR_TIER, "screen-space diffuse GI");
     GP.vol = cvar_reg_int("r_volumetrics", 2, 0, 3, CVAR_TIER, "volumetric fog / light shafts: 0 off .. 3 ultra");
-    GP.mb = cvar_reg_int("r_motion_blur", 1, 0, 2, A | CVAR_EDITABLE, "motion blur: 0 off, 1 camera, 2 camera + objects");
-    GP.mb_strength = cvar_reg_float("r_motion_blur_strength", 0.5f, 0.0f, 1.0f, A | CVAR_EDITABLE, "shutter fraction (0.5 = 180 degrees)");
-    GP.dof = cvar_reg_int("r_dof", 1, 0, 2, A | CVAR_EDITABLE, "depth of field: 0 off, 1 aiming down sights, 2 always");
+    GP.mb = cvar_reg_int("r_motion_blur", 1, 0, 2, CVAR_TIER, "motion blur: 0 off, 1 camera, 2 camera + objects");
+    GP.mb_strength = cvar_reg_float("r_motion_blur_strength", 0.5f, 0.0f, 1.0f, CVAR_LOCKED, "shutter fraction (0.5 = 180 degrees)");
+    GP.dof = cvar_reg_int("r_dof", 1, 0, 2, CVAR_TIER, "depth of field: 0 off, 1 aiming down sights, 2 always");
     GP.bloom = cvar_find("r_bloom");
     GP.bloom_q = cvar_reg_int("r_bloom_quality", 2, 0, 2, CVAR_TIER, "bloom mip chain: 0 tiny (4 mips), 1 low (5), 2 high (7)");
     GP.bloom_int = cvar_find("r_bloom_intensity");
     GP.flare = cvar_reg_float("r_lens_flare", 0.0f, 0.0f, 2.0f, CVAR_LOCKED, "lens flare ghosts / halo");
     GP.lens_dirt = cvar_reg_float("r_lens_dirt", 0.0f, 0.0f, 2.0f, CVAR_LOCKED, "lens dirt on bloom");
-    GP.chromatic = cvar_reg_float("r_chromatic", 0.15f, 0.0f, 2.0f, A | CVAR_EDITABLE, "chromatic aberration");
+    GP.chromatic = cvar_reg_float("r_chromatic", 0.15f, 0.0f, 2.0f, CVAR_TIER, "chromatic aberration");
     GP.vignette = cvar_find("r_vignette");
-    GP.grain = cvar_reg_float("r_film_grain", 0.04f, 0.0f, 1.0f, A | CVAR_EDITABLE, "film grain");
+    GP.grain = cvar_reg_float("r_film_grain", 0.04f, 0.0f, 1.0f, CVAR_TIER, "film grain");
     GP.distortion = cvar_reg_float("r_lens_distortion", 0.0f, -1.0f, 1.0f, CVAR_LOCKED, "lens distortion (barrel > 0)");
     GP.tonemap = cvar_reg_int("r_tonemapper", 1, 0, 2, CVAR_LOCKED, "tonemapper: 0 ACES (fit), 1 AgX, 2 Khronos PBR Neutral");
     GP.exp_comp = cvar_reg_float("r_exposure", 0.0f, -4.0f, 4.0f, CVAR_LOCKED, "exposure compensation (EV)");
@@ -644,7 +574,7 @@ void game_post_frame(const PostFrameInfo *fi) {
 
 // ------------------------------------------------------------------ overlays
 
-// r_post_profile: GPU ms of every frame graph pass, the post total against the preset budget.
+// r_post_profile: GPU ms of every frame graph pass, the post total against the Post-processing quality's budget.
 void game_post_draw_overlay(void) {
     if (!GP.profile->i) return;
     float s = ui_scale();
@@ -656,12 +586,13 @@ void game_post_draw_overlay(void) {
         all += ms;
         if (!is_scene_pass(render_pass_name(i))) post += ms;
     }
-    int preset = game_post_detect_preset();
-    float budget = preset >= 2 ? 4.0f : 2.0f;
+    static const char *const tn[4] = { "Low", "Medium", "High", "Ultra" };
+    int tier = game_quality_tier(FG_POST);
+    float budget = tier >= 2 ? 4.0f : 2.0f;
     ui_rect(x - 10 * s, y - 8 * s, 290 * s, (float)(n + 4) * 15 * s + 16 * s, UI_RGBA(0, 0, 0, 170));
     u32 rw = 0, rh = 0;
     render_render_size(&rw, &rh);
-    ui_textf(x, y, FONT_SMALL, UI_RGBA(255, 220, 140, 255), UI_ALIGN_LEFT, "post %.2f ms / %.1f (%s)  all %.2f ms", post, budget, game_post_preset_name(preset), all);
+    ui_textf(x, y, FONT_SMALL, UI_RGBA(255, 220, 140, 255), UI_ALIGN_LEFT, "post %.2f ms / %.1f (%s)  all %.2f ms", post, budget, tn[tier], all);
     y += 15 * s;
     ui_textf(x, y, FONT_SMALL, UI_RGBA(200, 200, 200, 255), UI_ALIGN_LEFT, "render %ux%u  EV %.2f  %s", rw, rh, render_exposure_ev(), render_hdr_active() ? "HDR10" : "SDR");
     y += 15 * s;

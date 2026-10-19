@@ -601,6 +601,12 @@ void fid_attach_cvars(void) {
     S.attached = true;
 }
 
+void fid_bind_cvars(void) {
+    S.r_era = cvar_find("r_era");
+    for (int f = 0; f < FF_COUNT; f++) S.cv[f] = cvar_find(k_features[f].cvar);
+    S.attached = true;
+}
+
 void fid_detach_cvars(void) {
     for (int f = 0; f < FF_COUNT; f++) {
         if (S.cv[f] && S.cv[f]->bound == bound_hook) S.cv[f]->bound = NULL;
@@ -626,6 +632,8 @@ void fid_set_level(int level) {
     S.level = DG_CLAMP(level, 0, FID_LEVELS - 1);
     fid_enforce_all();
 }
+
+void fid_init_level(int level) { S.level = DG_CLAMP(level, 0, FID_LEVELS - 1); }
 
 void fid_enforce_all(void) {
     if (!fid_loaded()) return;
@@ -688,18 +696,19 @@ int fid_custom_count(void) { return fid_check_table(S.level, NULL, 0); }
 
 // ------------------------------------------------------------------ quality groups
 
-// Anti-aliasing, render scale, sharpening and motion blur have their own Normal rows; the lens
-// finish (flare, dirt, chromatic aberration, vignette, grain), exposure, the tonemapper, the
-// renderer switch, character / scope detail stay with the overall level (and the Debug tab).
+// Every quality feature belongs to one group. Render scale, the upscaler and HDR output are the
+// player's own Display settings; the tonemapper / exposure and the renderer switch are the engine's.
 static const int k_g_post[] = { FF_AO, FF_CONTACT_SHADOWS, FF_SSR, FF_SSGI, FF_PUDDLE_REFLECTIONS, FF_VOLUMETRICS, FF_VOL_LOCAL_LIGHTS,
-                                FF_DOF, FF_DOF_QUALITY, FF_ADS_DOF, FF_BLOOM, FF_BLOOM_QUALITY };
-static const int k_g_shadows[] = { FF_SHADOWS, FF_SHADOW_RESOLUTION, FF_SHADOW_CASCADES, FF_SOFT_SHADOW_QUALITY, FF_SHADOW_MIN_RADIUS, FF_SHADOW_CASTER_LIMIT, FF_LIGHT_SHADOW_QUALITY };
+                                FF_DOF, FF_DOF_QUALITY, FF_ADS_DOF, FF_BLOOM, FF_BLOOM_QUALITY, FF_MOTION_BLUR, FF_CHROMATIC, FF_VIGNETTE, FF_FILM_GRAIN };
+static const int k_g_shadows[] = { FF_SHADOWS, FF_SHADOW_RESOLUTION, FF_SHADOW_PROJECTION, FF_SHADOW_CASCADES, FF_SOFT_SHADOW_QUALITY, FF_SHADOW_MIN_RADIUS,
+                                   FF_SHADOW_CASTER_LIMIT, FF_SHADOW_FAR_INTERVAL, FF_LIGHT_SHADOW_QUALITY };
 static const int k_g_textures[] = { FF_TEXTURE_QUALITY, FF_ANISO, FF_TERRAIN_QUALITY };
-static const int k_g_effects[] = { FF_VFX_QUALITY, FF_VFX_LIGHTING, FF_PRECIP_QUALITY, FF_WATER };
+static const int k_g_effects[] = { FF_VFX_QUALITY, FF_VFX_LIGHTING, FF_PRECIP_QUALITY, FF_WATER, FF_SCOPE_PIP_SCALE };
 // Foliage / view distance: their density and ranges are locked (docs/SETTINGS_AUDIT.md); what is
 // left is shading cost (wind layers, the shadow-view geometry error).
 static const int k_g_foliage[] = { FF_FOLIAGE_WIND };
 static const int k_g_view[] = { FF_VGEO_SHADOW_ERROR_PX };
+static const int k_g_aa[] = { FF_AA, FF_SHARPEN };
 static const struct { const char *id; const int *f; int n; } k_groups[FG_COUNT] = {
     [FG_POST] = { "post", k_g_post, ARRAY_COUNT(k_g_post) },
     [FG_SHADOWS] = { "shadows", k_g_shadows, ARRAY_COUNT(k_g_shadows) },
@@ -707,7 +716,10 @@ static const struct { const char *id; const int *f; int n; } k_groups[FG_COUNT] 
     [FG_EFFECTS] = { "effects", k_g_effects, ARRAY_COUNT(k_g_effects) },
     [FG_FOLIAGE] = { "foliage", k_g_foliage, ARRAY_COUNT(k_g_foliage) },
     [FG_VIEW_DISTANCE] = { "view_distance", k_g_view, ARRAY_COUNT(k_g_view) },
+    [FG_AA] = { "aa", k_g_aa, ARRAY_COUNT(k_g_aa) },
 };
+// Anti-aliasing per tier (r_aa: 0 off, 1 FXAA, 2 SMAA, 3 TAA): the tables jump from FXAA to TAA.
+static const float k_aa_tier[FID_LEVELS] = { 0, 1, 2, 3, 3 };
 
 int fid_group_features(int g, const int **f) {
     if (g < 0 || g >= FG_COUNT) { if (f) *f = NULL; return 0; }
@@ -716,35 +728,27 @@ int fid_group_features(int g, const int **f) {
 }
 const char *fid_group_id(int g) { return g >= 0 && g < FG_COUNT ? k_groups[g].id : "?"; }
 
-// A feature the current level locks without an off state (render scale style) takes no part.
-static bool group_locked(int f) {
-    FidBounds b = fid_bounds(S.level, fid_era(), f);
-    return b.avail == FID_UNAVAILABLE && !k_features[f].has_off;
-}
-
-bool fid_group_tier_allowed(int g, int tier, int *req) {
-    if (req) *req = -1;
-    if (g < 0 || g >= FG_COUNT || tier < 0 || tier >= FID_LEVELS) return false;
-    int era = fid_era(), need = 0;
-    for (int i = 0; i < k_groups[g].n; i++) {
-        int f = k_groups[g].f[i];
-        if (group_locked(f)) continue;
-        int l = fid_min_level_for(era, f, fid_bounds(tier, era, f).def);
-        if (l < 0) return false;
-        need = DG_MAX(need, l);
+bool fid_group_value(int g, int tier, int f, float *v) {
+    (void)g;
+    tier = DG_CLAMP(tier, 0, FID_LEVELS - 1);
+    if (f == FF_AA) { *v = k_aa_tier[tier]; return true; }
+    FidBounds b = fid_bounds(tier, fid_era(), f);
+    if (b.avail == FID_UNAVAILABLE) {
+        if (!k_features[f].has_off) return false;
+        *v = k_features[f].off;
+        return true;
     }
-    if (req) *req = need;
-    return need <= S.level;
+    *v = b.def;
+    return true;
 }
 
-// A user change (tracked as the user's choice, clamped by the bound hook like a menu set).
+// The player's choice: set as it is (a tier feature, the fidelity source; no level bound in the game).
 void fid_group_apply(int g, int tier) {
     if (!fid_loaded() || g < 0 || g >= FG_COUNT || tier < 0 || tier >= FID_LEVELS) return;
-    int era = fid_era();
     for (int i = 0; i < k_groups[g].n; i++) {
         int f = k_groups[g].f[i];
-        if (!S.cv[f] || group_locked(f)) continue;
-        float v = fid_bounds(tier, era, f).def;
+        float v;
+        if (!S.cv[f] || !fid_group_value(g, tier, f, &v)) continue;
         if (fabsf(v - fid_cvar_value(f)) < 1e-5f) continue;
         char buf[32];
         fmt_value(&k_features[f], v, buf, sizeof(buf));
@@ -755,21 +759,19 @@ void fid_group_apply(int g, int tier) {
 }
 
 static bool group_matches(int g, int tier) {
-    int era = fid_era();
     for (int i = 0; i < k_groups[g].n; i++) {
         int f = k_groups[g].f[i];
-        float v = fid_cvar_value(f);
-        if (isnan(v) || group_locked(f)) continue;
-        if (fabsf(v - fid_clamp_current(f, fid_bounds(tier, era, f).def)) > 1e-3f) return false;
+        float v = fid_cvar_value(f), want;
+        if (isnan(v) || !fid_group_value(g, tier, f, &want)) continue;
+        if (fabsf(v - want) > 1e-3f) return false;
     }
     return true;
 }
 
 int fid_group_detect(int g) {
     if (!fid_loaded() || g < 0 || g >= FG_COUNT) return -1;
-    if (group_matches(g, S.level)) return S.level;
     for (int t = FID_LEVELS - 1; t >= 0; t--)
-        if (fid_group_tier_allowed(g, t, NULL) && group_matches(g, t)) return t;
+        if (group_matches(g, t)) return t;
     return -1;
 }
 

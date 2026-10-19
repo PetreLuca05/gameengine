@@ -336,56 +336,64 @@ static void test_graph_check(void) {
     CHECK(fgc_history_partner("taa_hist_a", "taa_hist_b") && fgc_history_partner("depth_prev", "depth_prev") && !fgc_history_partner("ao_hist_a", "ssr_hist_b"), "history partners");
 }
 
-// Settings > Graphics > Normal qualities (fid_group_*): at every level x era, the level's own tier
-// reads back after fid_apply; tiers up to the level apply and read back as themselves (or a tier
-// with the same values), tiers above it are greyed with the level they need; a group change makes
-// the level read Custom; re-applying the level clears it.
+// The player's quality settings (fid_group_*, docs/ENGINE_FIDELITY.md "Player settings"): as in the
+// game (cvars bound, no level bounds), at every era x level x group x tier the group's features take
+// the tier's values whatever the level, the tier reads back as itself (or a tier with the same
+// values), nothing outside the group moves; anti-aliasing steps FXAA, SMAA, TAA, TAA.
 static void test_groups(void) {
+    fid_detach_cvars();
+    fid_bind_cvars();
+    int seen[FF_COUNT] = { 0 };
+    for (int g = 0; g < FG_COUNT; g++) {
+        const int *fs;
+        int n = fid_group_features(g, &fs);
+        CHECK(n > 0 && fs, "group %s has features", fid_group_id(g));
+        for (int i = 0; i < n; i++) seen[fs[i]]++;
+    }
+    for (int f = 0; f < FF_COUNT; f++) CHECK(seen[f] <= 1, "%s in at most one group (%d)", fid_feature(f)->id, seen[f]);
     for (int e = 0; e < FID_ERAS; e++) {
         set_era(e);
         for (int l = 0; l < FID_LEVELS; l++) {
-            fid_custom_load("");
-            fid_apply(l);
+            fid_init_level(l);
             for (int g = 0; g < FG_COUNT; g++) {
                 const int *fs;
-                CHECK(fid_group_features(g, &fs) > 0 && fs, "group %s has features", fid_group_id(g));
-                CHECK(fid_group_detect(g) == l, "era %s %s: group %s reads %d", fid_era_id(e), fid_level_id(l), fid_group_id(g), fid_group_detect(g));
-                for (int t = 0; t < FID_LEVELS; t++) {
-                    int req = -2;
-                    bool ok = fid_group_tier_allowed(g, t, &req);
-                    if (t <= l) CHECK(ok && req <= l, "era %s %s: %s tier %d allowed (req %d)", fid_era_id(e), fid_level_id(l), fid_group_id(g), t, req);
-                    else CHECK(ok == (req >= 0 && req <= l), "era %s %s: %s tier %d greyed with req %d", fid_era_id(e), fid_level_id(l), fid_group_id(g), t, req);
-                    if (!ok) continue;
+                int n = fid_group_features(g, &fs);
+                for (int t = FID_LOW; t < FID_LEVELS; t++) {
+                    float before[FF_COUNT];
+                    for (int f = 0; f < FF_COUNT; f++) before[f] = fid_cvar_value(f);
                     fid_group_apply(g, t);
+                    for (int i = 0; i < n; i++) {
+                        float want;
+                        if (!fid_group_value(g, t, fs[i], &want)) continue;
+                        CHECK(fabsf(val(fs[i]) - want) < 1e-3f, "era %s level %s: %s tier %d sets %s to %g (has %g)", fid_era_id(e), fid_level_id(l), fid_group_id(g), t,
+                              fid_feature(fs[i])->id, want, val(fs[i]));
+                    }
                     int got = fid_group_detect(g);
-                    CHECK(got >= 0, "era %s %s: %s tier %d reads back (got %d)", fid_era_id(e), fid_level_id(l), fid_group_id(g), t, got);
-                    if (got >= 0 && got != t) {   // equal values: the same tier under another name
-                        int n = fid_group_features(g, &fs);
-                        for (int i = 0; i < n; i++)
-                            CHECK(fabsf(fid_bounds(got, e, fs[i]).def - fid_bounds(t, e, fs[i]).def) < 1e-3f || fid_bounds(l, e, fs[i]).avail == FID_UNAVAILABLE,
-                                  "%s tier %d read as %d: same %s", fid_group_id(g), t, got, fid_feature(fs[i])->id);
+                    CHECK(got >= t, "era %s level %s: %s tier %d reads back (got %d)", fid_era_id(e), fid_level_id(l), fid_group_id(g), t, got);
+                    for (int f = 0; f < FF_COUNT; f++) {
+                        bool in = false;
+                        for (int i = 0; i < n; i++) in |= fs[i] == f;
+                        if (!in && !isnan(before[f])) CHECK(fabsf(fid_cvar_value(f) - before[f]) < 1e-5f, "%s tier %d leaves %s alone", fid_group_id(g), t, fid_feature(f)->id);
                     }
                     CHECK(g_era->i == e, "era %s survives %s tier %d (r_era %d)", fid_era_id(e), fid_group_id(g), t, g_era->i);
                 }
-                fid_custom_load("");
-                fid_apply(l);
             }
         }
     }
     set_era(FID_ERA_MODERN);
-    fid_custom_load("");
-    fid_apply(FID_MODERN);
-    CHECK(fid_custom_count() == 0, "Modern: no custom values");
-    fid_group_apply(FG_SHADOWS, FID_LOW);
-    CHECK(fid_custom_count() > 0 && fid_group_detect(FG_SHADOWS) == FID_LOW, "Low shadows on Modern: Custom (%d), shadows Low", fid_custom_count());
-    CHECK(val(FF_SHADOW_RESOLUTION) == fid_bounds(FID_LOW, FID_ERA_MODERN, FF_SHADOW_RESOLUTION).def, "shadow resolution at Low's default");
-    CHECK(fid_group_detect(FG_TEXTURES) == FID_MODERN, "textures untouched");
-    fid_custom_load("");
-    fid_apply(FID_MODERN);
-    CHECK(fid_custom_count() == 0 && fid_group_detect(FG_SHADOWS) == FID_MODERN, "re-applying Modern clears it");
-    fid_apply(FID_MEDIUM);
-    int req = -1;
-    CHECK(!fid_group_tier_allowed(FG_POST, FID_MODERN, &req) && req > FID_MEDIUM, "Medium: Ultra post greyed (requires %d)", req);
+    fid_init_level(FID_MODERN);
+    static const float aa[FID_LEVELS] = { 0, 1, 2, 3, 3 };
+    for (int t = FID_LOW; t < FID_LEVELS; t++) {
+        fid_group_apply(FG_AA, t);
+        CHECK(val(FF_AA) == aa[t], "anti-aliasing tier %d = %g (has %g)", t, aa[t], val(FF_AA));
+    }
+    // No level bound: Ultra shadows on the Low tables' level stay Ultra.
+    fid_init_level(FID_LOW);
+    fid_group_apply(FG_SHADOWS, FID_MODERN);
+    CHECK(val(FF_SHADOW_RESOLUTION) == fid_bounds(FID_MODERN, FID_ERA_MODERN, FF_SHADOW_RESOLUTION).def, "Ultra shadows on Low: Ultra's resolution");
+    fid_init_level(FID_MODERN);
+    fid_detach_cvars();
+    fid_attach_cvars();
     fid_apply(FID_MODERN);
 }
 
