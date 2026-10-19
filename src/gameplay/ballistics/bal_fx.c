@@ -42,7 +42,7 @@ static struct {
 // The flash varies shot to shot (docs/BALLISTICS.md "Muzzle flash"): the flame and its light show on
 // FLASH_CHANCE of the shots, each at its own size (1 +- FLASH_SIZE_VAR); the smoke, vapour, sparks,
 // blast and dust come with every shot.
-#define FLASH_CHANCE 0.3f
+#define FLASH_CHANCE 0.7f
 #define FLASH_SIZE_VAR 0.3f
 
 static float cv(Cvar **c, const char *name, float def) {

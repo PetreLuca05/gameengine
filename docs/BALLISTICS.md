@@ -201,7 +201,7 @@ Inputs: the cartridge, `barrel_length` (L), the device, the heat of recent fire,
 (two 0.5 m rays from the muzzle), and the scene exposure.
 
 **Shot to shot** (`bal_fx.c`, 2026-10-20): the flame (primary, mach, secondary, prongs, port vents)
-and its light show on 3 shots in 10 (`FLASH_CHANCE`), each at its own size (x 0.7 .. 1.3,
+and its light show on 7 shots in 10 (`FLASH_CHANCE`), each at its own size (x 0.7 .. 1.3,
 `FLASH_SIZE_VAR`); the smoke, vapour, sparks, blast and dust come with every shot. Visual only (a
 local RNG, never replicated); `muzzle_preview` always shows the full flash.
 
