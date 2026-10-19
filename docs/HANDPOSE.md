@@ -25,7 +25,7 @@ case with the same code (`src/anim/handpose.c`).
 
 | Area | Code | Data |
 |---|---|---|
-| Grips, cases, resolution, limits, presets, mirror, contact solver, JSON, migration (pure) | `src/anim/handpose.{c,h}` | `assets/handposes/{items,cases,styles}/*.json` |
+| Grips, cases, resolution, joint ranges (free), presets, mirror, JSON, migration (pure) | `src/anim/handpose.{c,h}` | `assets/handposes/{items,cases,styles}/*.json` |
 | Discovery / stub creation (pure) | `src/editor/handpose/hp_discover.c` | |
 | Startup scan, hot reload, commands, saving, runtime case lookup | `src/editor/handpose/hp_system.c` | |
 | Control rig: controls, hierarchy, transforms -> data (pure) | `src/editor/handpose/hp_rig.c` | |
@@ -51,8 +51,7 @@ case with the same code (`src/anim/handpose.c`).
   "hands": ["left", "right"], "reviewed": false, "auto_placed": false,
   "root":  { "pos": [0, 0, 0], "q": [0, 0, 0, 1], "scale": 1 },
   "left":  { "ik": { "pos": [x, y, z], "q": [x, y, z, w] }, "pole": [x, y, z], "ik_weight": 1,
-             "fingers": { "index": [[curl, spread, twist], [..], [..]], ... },
-             "contacts": [{ "finger": "index", "point": [x, y, z] }] },
+             "fingers": { "index": [[curl, spread, twist], [..], [..]], ... } },
   "right": { ... }
 }
 ```
@@ -63,8 +62,10 @@ case with the same code (`src/anim/handpose.c`).
 | `ik` | the palm target of the hand **in item space** (a child of the root: moving the root carries both hands). Unset = the item's `grip_r` / `grip_l` socket. Attachments: in the attachment's grip frame. A legacy `wrist` offset is folded into it on load. |
 | `pole` | elbow direction (camera space, relative to the aim yaw). Unset = the hold style's `elbow_r` / `elbow_l`. |
 | `ik_weight` | multiplies the hold's hand IK weight. |
-| `fingers` | per finger (thumb: CMC, MCP, IP; fingers: MCP, PIP, DIP) curl / spread / twist degrees, clamped to the joint limits on load, on every edit and when resolving. Set per finger as a whole. `"curl": [5 values]` is a shorthand. |
-| `contacts` | fingertip targets on the item (item space) for the contact solver. |
+| `fingers` | per finger (thumb: CMC, MCP, IP; fingers: MCP, PIP, DIP) curl / spread / twist degrees. Every joint rotates freely on every axis: any value within a full turn (-180 .. 180; a value outside it is kept at the end). Set per finger as a whole. `"curl": [5 values]` is a shorthand. |
+
+There is no automatic finger placement: the fingers go only where the grip puts them. A
+`contacts` key in older files (the removed contact solver's fingertip targets) is ignored.
 
 Sparse: a field the grip does not set is inherited from its `inherits` chain (item -> style). The
 runtime puts the item's chain on top of the hold style in use (`handpose_resolve_over`), resolved
@@ -132,7 +133,7 @@ The editor shows a **control skeleton** over the character for both arms. Hierar
 ```
 Root (item root / case anchor)          translate / rotate / scale (scale: grips only, uniform)
 |- IK_hand_L                            translate / rotate   (moves the whole left arm via IK)
-|  |- L_thumb_1-2-3, L_index_1-2-3, L_middle_1-2-3, L_ring_1-2-3, L_pinky_1-2-3   rotate (limits)
+|  |- L_thumb_1-2-3, L_index_1-2-3, L_middle_1-2-3, L_ring_1-2-3, L_pinky_1-2-3   rotate (free)
 |- IK_hand_R                            translate / rotate
 |  |- R_... fingers (as left)
 |- Pole_L                               translate (elbow direction)
@@ -142,9 +143,10 @@ Root (item root / case anchor)          translate / rotate / scale (scale: grips
 - The arms move only through the IK controls (shoulder -> elbow -> wrist solved by the existing
   two-bone IK, the clavicle reaching first); the pole sets the elbow direction. No shoulder /
   elbow / wrist FK.
-- Finger bones rotate only, per joint, within the joint limits: rotation X = curl, Y = spread, Z =
-  twist (the gizmo's rotation is decomposed onto the joint's axes, `hp_rig_finger_axes`). A
-  per-finger **curl** slider (N-panel) drives the three joints together.
+- Finger bones rotate only, per joint, freely on every axis: rotation X = curl, Y = spread, Z =
+  twist, any value within a full turn (the gizmo's rotation is decomposed onto the joint's axes,
+  `hp_rig_finger_axes`; typed values are taken as typed). No automatic placement. A per-finger
+  **curl** slider (N-panel) drives the three joints together.
 - The **root** is the base of the whole alignment: the IK controls are its children, the fingers
   children of the hands. The item mesh is not selectable: it moves only through the root.
 - Colours: root orange, left hand blue, right red, poles magenta; selected white (the active one
@@ -175,7 +177,7 @@ view is an orbit camera (or first person).
   unreachable: saving is refused), Save / Undo / Redo / Leave, the preview state (grips: the grip is
   the same in every state - the state only places the item), and for the active control:
   Location X / Y / Z, Rotation X / Y / Z (Euler, plus the quaternion; fingers: curl / spread /
-  twist with their limits), Scale (the root of a grip). Drag to scrub, double-click to type,
+  twist, free on every axis), Scale (the root of a grip). Drag to scrub, double-click to type,
   per-channel locks (loc / rot / scale), reset location / rotation / scale, copy / paste transform,
   the finger curl slider. **Hand**: finger presets, mirror L <-> R, IK weight. **Muzzle** (guns):
   the muzzle socket in mm and its helpers (below). **View**: orbit / first person, focus on the
@@ -325,26 +327,27 @@ With the muzzle selected, `hpe xform move` moves it like `G`.
 
 - `tests/test_handpose_rig.c` (ctest `handpose_rig`): the rig hierarchy, moving the root moves both
   hands' IK targets by the same transform (grip and case), the root scale, IK moves never move the
-  root / the other hand, fingers only rotate and stay within their limits (gizmo and typed values),
+  root / the other hand, fingers only rotate, freely on every axis (gizmo and typed values),
   locks, the item is not a control, mirror, undo / redo round trips 28 operations, the modal
   transforms (constraints, second press, plane, typed values, snapping, pivots, cancel, view plane
   grab, screen rotation sign, scale, Shift precision).
 - `tests/test_handpose.c` (ctest `handpose`): the style files reproduce the removed curl tables bone
   for bone, inheritance, lossless grip / case round trips, the schema 0 / 1 migration (the hip grip
-  kept, differences reported, interactables / vehicles -> cases), the case timeline (phase mapping,
-  blending, deterministic scrubbing), the universal grip bit-identical in 8 hold states x 2
-  runtimes, hand glue with random grip + root tweaks for every weapon, every held item and every
-  case keyframe, discovery (grips + case stubs, never over a file, orphans).
-- `tests/test_hp_edit.c` (ctest `hp_edit`): field provenance, seeding, reset, limits, presets,
-  mirror, contacts, the root, case keys as targets, undo / redo (coalescing, bounds, reorder, cases,
+  kept, differences reported, interactables / vehicles -> cases), free finger joints (load, resolve,
+  case keys; old `contacts` ignored), the case timeline (phase mapping, blending, deterministic
+  scrubbing), the universal grip bit-identical in 8 hold states x 2 runtimes, hand glue with random
+  grip + root tweaks for every weapon, every held item and every case keyframe, discovery (grips +
+  case stubs, never over a file, orphans).
+- `tests/test_hp_edit.c` (ctest `hp_edit`): field provenance, seeding, reset, free finger joints,
+  presets, mirror, the root, case keys as targets, undo / redo (coalescing, bounds, reorder, cases,
   a grip step carrying its gun's muzzle). The muzzle: the 0.1 mm rounding and the number format; the
   text patch (in place, inserted, one-line and empty objects, CRLF kept, refusals); the bore / tip
   helpers; every shipped weapon file patched (exactly one line changes) and read back.
-- `tools/tests/hp_scene.cfg`: the editor end to end (rig, transforms, finger, root, undo / redo,
-  save, the frozen world for 600 ticks: `hpe freeze: PASS`, the door knob keyed at contact /
-  release with onion skin, the car with the wheel moved, the ledge, the phone), screenshots
-  `t_hp_scene_*.png`. `tools/tests/hp_gameplay.cfg`: hip / ADS / sprint first and third person,
-  the car and the motorcycle, `vehicle_test glue`.
+- `tools/tests/hp_scene.cfg`: the editor end to end (rig, transforms, finger, finger joints typed
+  past the old limits, root, undo / redo, save, the frozen world for 600 ticks: `hpe freeze: PASS`,
+  the door knob keyed at contact / release with onion skin, the car with the wheel moved, the
+  ledge, the phone), screenshots `t_hp_scene_*.png`. `tools/tests/hp_gameplay.cfg`: hip / ADS /
+  sprint first and third person, the car and the motorcycle, `vehicle_test glue`.
 - `tools/tests/hp_muzzle.cfg` + `hp_muzzle_check.py`: the rifle's muzzle selected, moved by a typed
   grab (`G -Z 3 cm`), typed exactly, snapped to the tip and the bore, undo / redo, a suppressor
   mounted, saved into `handpose_editor_dir`. The check asserts each value, that one tick after an

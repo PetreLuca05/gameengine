@@ -1,9 +1,10 @@
 // Hand pose tests (docs/HANDPOSE.md), run from the build output dir (assets/ and data/ resolve):
 // the style files reproduce the removed curl tables (bone for bone), grip inheritance, lossless
 // save / load of grips and cases, the schema 1 migration (the hip grip kept, differences reported,
-// interactables / vehicles -> cases), mirror, joint limits, the contact solver, the universal grip
-// (bit-identical in every hold state and on every client), hand glue for every weapon with randomly
-// tweaked grips and roots, and discovery (grips + case stubs).
+// interactables / vehicles -> cases), mirror, free finger joints (a full turn on every axis: load,
+// edit, resolve; old "contacts" keys ignored), the universal grip (bit-identical in every hold
+// state and on every client), hand glue for every weapon with randomly tweaked grips and roots,
+// and discovery (grips + case stubs).
 #include "anim/anim_library.h"
 #include "anim/character_rt.h"
 #include "anim/handpose.h"
@@ -207,18 +208,14 @@ static void test_inheritance(void) {
 
 static void random_layer(Rng *r, HandPoseLayer *l) {
     handpose_layer_clear(l);
-    l->set = (u16)(rng_next(r) & 0x3FF);
+    l->set = (u16)(rng_next(r) & 0x1FF);
     l->socket = xf_make(v3(frand(r, -0.2f, 0.2f), frand(r, -0.2f, 0.2f), frand(r, -0.4f, 0.1f)),
                         quat_norm((quat){ frand(r, -1, 1), frand(r, -1, 1), frand(r, -1, 1), frand(r, 0.1f, 1) }));
     l->wrist = xf_make(v3(frand(r, -0.02f, 0.02f), frand(r, -0.02f, 0.02f), frand(r, -0.02f, 0.02f)), handpose_euler_deg_to_quat(v3(frand(r, -20, 20), frand(r, -20, 20), 0)));
     l->pole = v3(frand(r, -1, 1), frand(r, -1, 0), frand(r, -1, 1));
     l->ik_weight = frand(r, 0, 1);
     for (int f = 0; f < 5; f++)
-        for (int k = 0; k < 3; k++) l->j[f][k] = handpose_clamp_joint(f, k, (HandJoint){ frand(r, -30, 110), frand(r, -40, 40), frand(r, -30, 30) });
-    if (l->set & HPL_CONTACTS) {
-        l->contact_count = (u8)(1 + rng_next(r) % 4);
-        for (int c = 0; c < l->contact_count; c++) l->contacts[c] = (HandContact){ (u8)(c + 1), v3(frand(r, -0.05f, 0.05f), frand(r, -0.05f, 0.05f), frand(r, -0.3f, 0)) };
-    }
+        for (int k = 0; k < 3; k++) l->j[f][k] = handpose_clamp_joint(f, k, (HandJoint){ frand(r, -180, 180), frand(r, -180, 180), frand(r, -180, 180) });
 }
 
 static bool layer_equal(const HandPoseLayer *a, const HandPoseLayer *b) {
@@ -231,11 +228,6 @@ static bool layer_equal(const HandPoseLayer *a, const HandPoseLayer *b) {
     if ((a->set & HPL_IKW) && a->ik_weight != b->ik_weight) return false;
     for (int f = 0; f < 5; f++)
         if ((a->set & HPL_FINGER(f)) && memcmp(a->j[f], b->j[f], sizeof(a->j[f]))) return false;
-    if (a->set & HPL_CONTACTS) {
-        if (a->contact_count != b->contact_count) return false;
-        for (int c = 0; c < a->contact_count; c++)
-            if (a->contacts[c].finger != b->contacts[c].finger || memcmp(&a->contacts[c].point, &b->contacts[c].point, sizeof(vec3))) return false;
-    }
     return true;
 }
 
@@ -437,9 +429,9 @@ static void test_case_timeline(void) {
     printf("  case timeline: phase mapping, blending, deterministic scrubbing (%d evaluations)\n", 77 * 2 + 200);
 }
 
-// ------------------------------------------------------------------ mirror / limits
+// ------------------------------------------------------------------ mirror / free joints
 
-static void test_mirror_limits(void) {
+static void test_mirror_free_joints(void) {
     Rng r = { 99, 3 };
     for (int i = 0; i < 100; i++) {
         HandPoseLayer l, m, mm;
@@ -473,65 +465,60 @@ static void test_mirror_limits(void) {
     }
     printf("  mirror: L/R fingertips with the same pose differ by %.2f mm from mirrored (rig asymmetry)\n", worst * 1000);
     CHECK(worst < 0.006f, "mirror on the rig: fingertips %.1f mm from mirrored", worst * 1000);
-    // Limits.
-    HandJoint big = handpose_clamp_joint(HF_INDEX, 1, (HandJoint){ 500, 90, -90 });
-    HandJoint lo, hi;
-    handpose_joint_limits(HF_INDEX, 1, &lo, &hi);
-    CHECK(big.curl == hi.curl && big.spread == hi.spread && big.twist == lo.twist, "joint limits not enforced");
-    HandPoseLayer l;
-    handpose_layer_clear(&l);
-    cJSON *o = cJSON_Parse("{ \"schema\": 2, \"right\": { \"fingers\": { \"thumb\": [[999, -999, 999], [0, 0, 0], [0, 0, 0]] } } }");
+    // Free joints: every axis of every joint spans a full turn; values far past the old anatomical
+    // limits survive the clamp, only values outside +-180 are kept at its ends.
+    for (int f = 0; f < HAND_FINGERS; f++)
+        for (int k = 0; k < HAND_FINGER_JOINTS; k++) {
+            HandJoint lo, hi;
+            handpose_joint_limits(f, k, &lo, &hi);
+            CHECK(lo.curl == -180 && lo.spread == -180 && lo.twist == -180 && hi.curl == 180 && hi.spread == 180 && hi.twist == 180,
+                  "%s joint %d: range %.0f..%.0f / %.0f..%.0f / %.0f..%.0f, not a full turn", handpose_finger_name(f), k, lo.curl, hi.curl, lo.spread, hi.spread, lo.twist, hi.twist);
+            HandJoint v = { 150, -120, 170 }, c = handpose_clamp_joint(f, k, v);
+            CHECK(!memcmp(&c, &v, sizeof(v)), "%s joint %d: a free value was clamped (%.1f %.1f %.1f)", handpose_finger_name(f), k, c.curl, c.spread, c.twist);
+        }
+    HandJoint big = handpose_clamp_joint(HF_INDEX, 1, (HandJoint){ 500, -999, 181 });
+    CHECK(big.curl == 180 && big.spread == -180 && big.twist == 180, "values not kept within +-180 (%.1f %.1f %.1f)", big.curl, big.spread, big.twist);
+    // Load: 150 deg curl (old limit 70) and wide spread / twist survive; 999 is kept at 180. An old
+    // "contacts" key (the removed contact solver) loads fine and is dropped.
+    cJSON *o = cJSON_Parse("{ \"schema\": 2, \"right\": { \"fingers\": { \"thumb\": [[150, -120, 170], [999, -999, 0], [0, 0, 0]] },"
+                           " \"contacts\": [{ \"finger\": \"index\", \"point\": [0, 0, -0.1] }] } }");
     HandPoseEntry e;
     memset(&e, 0, sizeof(e));
+    dg_strcpy(e.id, sizeof(e.id), "free_joints");
     char err[64];
-    handpose_entry_parse(&e, o, err, sizeof(err), NULL);
-    handpose_joint_limits(HF_THUMB, 0, &lo, &hi);
-    CHECK(e.grip[1].j[HF_THUMB][0].curl == hi.curl && e.grip[1].j[HF_THUMB][0].spread == lo.spread, "limits not enforced on load");
+    CHECK(handpose_entry_parse(&e, o, err, sizeof(err), NULL), "a grip with an old contacts key doesn't load (%s)", err);
+    const HandJoint *t0 = &e.grip[1].j[HF_THUMB][0], *t1 = &e.grip[1].j[HF_THUMB][1];
+    CHECK(t0->curl == 150 && t0->spread == -120 && t0->twist == 170, "free values clamped on load (%.1f %.1f %.1f)", t0->curl, t0->spread, t0->twist);
+    CHECK(t1->curl == 180 && t1->spread == -180, "values outside a turn not kept within +-180 on load (%.1f %.1f)", t1->curl, t1->spread);
+    CHECK(e.grip[1].set == HPL_FINGER(HF_THUMB), "the contacts key set a layer bit (%x)", e.grip[1].set);
+    char *txt = handpose_entry_write(&e);
+    CHECK(txt && !strstr(txt, "contacts") && strstr(txt, "150"), "write: contacts written back or free values lost:\n%s", txt ? txt : "(null)");
+    free(txt);
     cJSON_Delete(o);
+    // Resolve: the free values reach the resolved pose (grip and case key) unchanged.
+    HandPoseDB db;
+    handpose_db_init(&db);
+    int ei = handpose_add(&db, "free_joints", HPC_ITEM);
+    db.e[ei].grip[1] = e.grip[1];
+    db.e[ei].grip[1].j[HF_INDEX][1] = (HandJoint){ 160, 45, -90 };
+    db.e[ei].grip[1].set |= HPL_FINGER(HF_INDEX);
+    int ci = handpose_case_add(&db, "free_case", HCK_INTERACT);
+    int ki = handpose_case_key_at(&db, ci, db.c[ci].contact);
+    db.c[ci].keys[ki].hand[1].j[HF_PINKY][2] = (HandJoint){ -150, 90, 120 };
+    handpose_link(&db);
+    HandPose rp, kp;
+    handpose_resolve(&db, ei, 1, &rp);
+    handpose_case_key_pose(&db, ci, -1, ki, 1, &kp);
+    CHECK(!memcmp(&rp.j[HF_THUMB][0], t0, sizeof(HandJoint)) && rp.j[HF_INDEX][1].curl == 160 && rp.j[HF_INDEX][1].spread == 45 && rp.j[HF_INDEX][1].twist == -90,
+          "resolve clamped a free joint (index PIP %.1f %.1f %.1f)", rp.j[HF_INDEX][1].curl, rp.j[HF_INDEX][1].spread, rp.j[HF_INDEX][1].twist);
+    CHECK(kp.j[HF_PINKY][2].curl == -150 && kp.j[HF_PINKY][2].spread == 90 && kp.j[HF_PINKY][2].twist == 120, "case key clamped a free joint (%.1f %.1f %.1f)",
+          kp.j[HF_PINKY][2].curl, kp.j[HF_PINKY][2].spread, kp.j[HF_PINKY][2].twist);
+    handpose_db_free(&db);
+    // The curl shorthand drives the three joints past the old limits (index PIP 152 deg, old 110).
+    handpose_set_finger_curl(j, HF_INDEX, 400.0f);
+    CHECK(fabsf(handpose_finger_curl(j, HF_INDEX) - 400.0f) < 1e-3f && fabsf(j[HF_INDEX][1].curl - 152.0f) < 1e-3f, "curl shorthand clamped (%.1f, PIP %.1f)",
+          handpose_finger_curl(j, HF_INDEX), j[HF_INDEX][1].curl);
     for (int i = 0; i < handpose_preset_count(); i++) CHECK(handpose_preset(handpose_preset_name(i), j), "preset %s", handpose_preset_name(i));
-}
-
-// ------------------------------------------------------------------ contact solver
-
-static void test_contact(void) {
-    const Skeleton *s = &L->skel;
-    pose_bind(s, &g_pa);
-    pose_to_model(s, &g_pa, g_ma);
-    int worst_f = -1;
-    float worst = 0;
-    for (int side = 0; side < 2; side++)
-        for (int f = 1; f < 5; f++) {
-            // A bar under the finger, in the palm frame (palm side = -Y), 2.5 cm below the knuckles.
-            Xform palm = xf_mul(g_ma[s->role[side ? BR_R_HAND : BR_L_HAND]], L->hands.palm[side]);
-            vec3 tip = handpose_fingertip(s, g_ma, side, f);
-            HandBox box = { v3_add(tip, quat_rotate(palm.r, v3(0, -0.035f, 0.01f))), v3(0.05f, 0.012f, 0.012f), palm.r };
-            HandFingers j;
-            memset(j, 0, sizeof(j));
-            HandContactResult r = handpose_contact_solve(s, &g_pa, g_ma, side, f, j, &L->hands, &box, 1, NULL, 0.008f, 0.0005f);
-            CHECK(r.touched, "contact %s %s: never touched the bar", side ? "R" : "L", handpose_finger_name(f));
-            CHECK(r.tip_dist >= 0 && r.tip_dist <= 0.001f, "contact %s %s: stopped %.2f mm from the surface", side ? "R" : "L", handpose_finger_name(f), r.tip_dist * 1000);
-            CHECK(j[f][0].curl > 0, "contact: finger didn't close");
-            if (r.tip_dist > worst) { worst = r.tip_dist; worst_f = f; }
-            // Inside from the start (25 deg past the contact): opens until clear, ends on the surface.
-            HandFingers k;
-            memcpy(k, j, sizeof(k));
-            for (int q = 0; q < 3; q++) k[f][q].curl = fminf(k[f][q].curl + 25.0f * (q == 0 ? 0.30f : q == 1 ? 0.38f : 0.32f), 90.0f);
-            HandFingers probe;
-            memcpy(probe, k, sizeof(probe));
-            HandContactResult in0 = handpose_contact_solve(s, &g_pa, g_ma, side, f, probe, &L->hands, &box, 1, NULL, 0.008f, 0.0005f);
-            r = in0;
-            CHECK(r.touched && r.curl_add < 0, "contact from inside %s %s: didn't open (%.1f deg)", side ? "R" : "L", handpose_finger_name(f), r.curl_add);
-            CHECK(r.tip_dist >= 0 && r.tip_dist <= 0.001f, "contact from inside %s %s: %.2f mm", side ? "R" : "L", handpose_finger_name(f), r.tip_dist * 1000);
-        }
-    printf("  contact solver: worst surface gap %.3f mm (%s)\n", worst * 1000, handpose_finger_name(worst_f));
-    // Nothing to touch + a target: the closest curl to the target.
-    HandFingers j;
-    memset(j, 0, sizeof(j));
-    HandBox far = { v3(10, 10, 10), v3(0.01f, 0.01f, 0.01f), quat_identity() };
-    vec3 tgt = handpose_fingertip(s, g_ma, 1, HF_INDEX);
-    tgt = v3_add(tgt, v3(0, -0.03f, 0));
-    HandContactResult r = handpose_contact_solve(s, &g_pa, g_ma, 1, HF_INDEX, j, &L->hands, &far, 1, &tgt, 0.008f, 0.0005f);
-    CHECK(!r.touched && j[HF_INDEX][0].curl > 0, "target without contact: the finger moves towards it");
 }
 
 // ------------------------------------------------------------------ glue with tweaks
@@ -1026,8 +1013,7 @@ int main(int argc, char **argv) {
     test_inheritance();
     test_roundtrip();
     test_migration();
-    test_mirror_limits();
-    test_contact();
+    test_mirror_free_joints();
     test_case_timeline();
     test_universal_grip(db);
     test_glue_tweaks(db);

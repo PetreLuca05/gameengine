@@ -5,7 +5,7 @@
 //
 //   Root (item root / case anchor)          translate / rotate / scale (scale: grips only, uniform)
 //   |- IK_hand_L, IK_hand_R                 translate / rotate   (the whole arm follows by IK)
-//   |  |- <side> <finger> 1..3              rotate (x = curl, y = spread, z = twist, within limits)
+//   |  |- <side> <finger> 1..3              rotate (x = curl, y = spread, z = twist, free)
 //   |- Pole_L, Pole_R                       translate            (elbow direction)
 //
 // The item mesh is not a control: it moves only through the root.
@@ -77,16 +77,17 @@ enum { HPL_LOCK_LOC = 0x7, HPL_LOCK_ROT = 0x38, HPL_LOCK_SCALE = 0x40 };
 // Writes a new world transform of control `ctrl` into the target (what the control allows; the
 // rest of `world` is ignored), given the transform it had when the edit started (`start`, from
 // hp_rig_world) and the data at that time already in the DB as the base. Fingers: the rotation
-// from start to world is decomposed into curl / spread / twist about the joint's axes, added to
-// the joint values `j0` the edit started from and clamped to the limits. Returns false when the
-// target / control can't take it. Locks keep the locked local components.
+// from start to world is decomposed into curl / spread / twist about the joint's axes and added to
+// the joint values `j0` the edit started from (free on every axis, kept within +-180). Returns
+// false when the target / control can't take it. Locks keep the locked local components.
 bool hp_rig_apply(HandPoseDB *db, HpTarget t, const HpRigCtx *ctx, const HpEditDefaults *def, int ctrl, Xform start, Xform world, const HandJoint *j0, u8 locks);
 
 // Local values shown in the N-panel: root (pos, rot, scale), IK (item space / key space socket),
 // pole (the direction), finger joint (curl, spread, twist as rotation x / y / z).
 typedef struct HpLocal { vec3 loc, rot_deg; quat rot; float scale; } HpLocal;
 HpLocal hp_rig_local(const HandPoseDB *db, HpTarget t, int ctrl, const HpEditDefaults *def);
-// Sets the local values (the N-panel / typed values); clamps (limits, scale).
+// Sets the local values (the N-panel / typed values); clamps the root scale (finger joints are
+// free, kept within +-180).
 bool hp_rig_set_local(HandPoseDB *db, HpTarget t, int ctrl, const HpEditDefaults *def, HpLocal v);
 // Back to the default (inherited / identity) for location, rotation or scale (Alt+G / R / S).
 bool hp_rig_clear(HandPoseDB *db, HpTarget t, int ctrl, int channel);   // channel HPA_T / HPA_R / HPA_S

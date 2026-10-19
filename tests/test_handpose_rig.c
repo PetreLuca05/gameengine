@@ -1,8 +1,9 @@
 // Hand pose control rig + transform tool (src/editor/handpose/hp_rig.c, hp_xform.c,
 // docs/HANDPOSE.md "Control rig"): the hierarchy (Root -> IK / poles -> fingers), moving the root
 // moves both hands' IK targets by the same transform (grips and case keys), the root's scale
-// scales the hands' offsets, fingers only rotate and stay within their limits, nothing but the
-// root moves the item, mirror, undo / redo round trips every rig operation, and the modal
+// scales the hands' offsets, fingers only rotate, freely on every axis (curl / spread / twist far
+// past the old joint limits, gizmo and typed values; kept within +-180), nothing but the root
+// moves the item, mirror, undo / redo round trips every rig operation, and the modal
 // transforms (constraints, typed values, snapping, pivots, cancel, view-plane grab).
 #include "editor/handpose/hp_rig.h"
 #include "editor/handpose/hp_xform.h"
@@ -199,25 +200,31 @@ static void test_fingers(void) {
     HpLocal l1 = hp_rig_local(&db, t, fi, &def);
     CHECK(fabsf(l1.rot_deg.x - (j0.curl + 20.0f)) < 0.01f && fabsf(l1.rot_deg.y - j0.spread) < 0.01f && fabsf(l1.rot_deg.z - j0.twist) < 0.01f,
           "curl rotation: %.2f %.2f %.2f (from %.2f)", l1.rot_deg.x, l1.rot_deg.y, l1.rot_deg.z, j0.curl);
-    // Spread / twist axes.
-    nw.r = quat_norm(quat_mul(quat_axis_angle(ax[1], 3.0f * DG_DEG2RAD), w[fi].r));
+    // Spread / twist axes: free, far past the old limits (PIP spread 5, twist 10).
+    nw.r = quat_norm(quat_mul(quat_axis_angle(ax[1], 40.0f * DG_DEG2RAD), w[fi].r));
     hp_rig_apply(&db, t, &ctx, &def, fi, w[fi], nw, &j0, 0);
     l1 = hp_rig_local(&db, t, fi, &def);
-    CHECK(fabsf(l1.rot_deg.y - (j0.spread + 3.0f)) < 0.01f || fabsf(l1.rot_deg.y - 5.0f) < 0.01f, "spread rotation (%.2f)", l1.rot_deg.y);
-    // A huge rotation: clamped to the joint's limits.
-    nw.r = quat_norm(quat_mul(quat_axis_angle(ax[0], 170.0f * DG_DEG2RAD), w[fi].r));
+    CHECK(fabsf(l1.rot_deg.y - (j0.spread + 40.0f)) < 0.01f && fabsf(l1.rot_deg.x - j0.curl) < 0.01f && fabsf(l1.rot_deg.z - j0.twist) < 0.01f, "spread rotation (%.2f)", l1.rot_deg.y);
+    nw.r = quat_norm(quat_mul(quat_axis_angle(ax[2], -70.0f * DG_DEG2RAD), w[fi].r));
     hp_rig_apply(&db, t, &ctx, &def, fi, w[fi], nw, &j0, 0);
-    HandJoint lo, hi;
-    handpose_joint_limits(HF_INDEX, 1, &lo, &hi);
     l1 = hp_rig_local(&db, t, fi, &def);
-    CHECK(l1.rot_deg.x <= hi.curl + 1e-4f && l1.rot_deg.x >= lo.curl - 1e-4f, "finger joint outside its limits (%.2f, %.0f..%.0f)", l1.rot_deg.x, lo.curl, hi.curl);
+    CHECK(fabsf(l1.rot_deg.z - (j0.twist - 70.0f)) < 0.01f && fabsf(l1.rot_deg.x - j0.curl) < 0.01f && fabsf(l1.rot_deg.y - j0.spread) < 0.01f, "twist rotation (%.2f)", l1.rot_deg.z);
+    // A large curl (old limit 110): taken as is.
+    nw.r = quat_norm(quat_mul(quat_axis_angle(ax[0], 150.0f * DG_DEG2RAD), w[fi].r));
+    hp_rig_apply(&db, t, &ctx, &def, fi, w[fi], nw, &j0, 0);
+    l1 = hp_rig_local(&db, t, fi, &def);
+    CHECK(fabsf(l1.rot_deg.x - (j0.curl + 150.0f)) < 0.01f, "large curl rotation clamped (%.2f, from %.2f)", l1.rot_deg.x, j0.curl);
+    // Typed values: any value within a full turn is taken exactly, beyond it kept at +-180.
     for (int f = 0; f < HAND_FINGERS; f++)
         for (int j = 0; j < HAND_FINGER_JOINTS; j++) {
-            HandJoint jt = handpose_clamp_joint(f, j, (HandJoint){ 999, -999, 999 });
-            HpLocal v = { v3(0, 0, 0), v3(999, -999, 999), quat_identity(), 1 };
+            HpLocal v = { v3(0, 0, 0), v3(150, -120, 170), quat_identity(), 1 };
             hp_rig_set_local(&db, t, HP_RIG_FINGER(0, f, j), &def, v);
             HpLocal b = hp_rig_local(&db, t, HP_RIG_FINGER(0, f, j), &def);
-            CHECK(b.rot_deg.x == jt.curl && b.rot_deg.y == jt.spread && b.rot_deg.z == jt.twist, "typed finger values not clamped (%s %d)", handpose_finger_name(f), j);
+            CHECK(!memcmp(&b.rot_deg, &v.rot_deg, sizeof(vec3)), "typed finger values clamped (%s %d: %.1f %.1f %.1f)", handpose_finger_name(f), j, b.rot_deg.x, b.rot_deg.y, b.rot_deg.z);
+            v.rot_deg = v3(999, -999, 999);
+            hp_rig_set_local(&db, t, HP_RIG_FINGER(0, f, j), &def, v);
+            b = hp_rig_local(&db, t, HP_RIG_FINGER(0, f, j), &def);
+            CHECK(b.rot_deg.x == 180 && b.rot_deg.y == -180 && b.rot_deg.z == 180, "typed finger values not kept within +-180 (%s %d)", handpose_finger_name(f), j);
         }
     // Fingers don't translate: a moved (not rotated) finger frame changes nothing.
     HpLocal before = hp_rig_local(&db, t, fi, &def);
@@ -302,8 +309,8 @@ static void test_undo_all(void) {
             case 9: hp_rig_clear(&db, t, HP_RIG_IK(1), HPA_T); break;
             case 10: l = hp_rig_local(&db, t, HP_RIG_IK(0), &def); l.loc.z -= 0.03f; hp_rig_set_local(&db, t, HP_RIG_IK(0), &def, l); break;
             case 11: hp_rig_clear(&db, t, HP_RIG_ROOT, HPA_T | HPA_R | HPA_S); break;
-            case 12: if (t.ci >= 0) handpose_case_key_at(&db, t.ci, db.c[t.ci].release); else hp_edit_add_contact(&db, t, 1, 1, v3(0, 0, -0.1f)); break;
-            case 13: if (t.ci >= 0) handpose_case_key_remove(&db.c[t.ci], db.c[t.ci].key_count - 1); else hp_edit_reset(&db, t, 1, HPL_CONTACTS); break;
+            case 12: if (t.ci >= 0) handpose_case_key_at(&db, t.ci, db.c[t.ci].release); else hp_edit_set_joint(&db, t, 1, HF_INDEX, 2, (HandJoint){ 150, -60, 90 }); break;
+            case 13: if (t.ci >= 0) handpose_case_key_remove(&db.c[t.ci], db.c[t.ci].key_count - 1); else hp_edit_reset(&db, t, 1, HPL_FINGER(HF_INDEX)); break;
             }
             char *after = text_of(&db, t);
             HpTarget r = hp_undo(&u, &db);

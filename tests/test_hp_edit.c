@@ -1,9 +1,9 @@
 // Hand pose editor logic (src/editor/handpose/hp_edit.c, docs/HANDPOSE.md "Editor"): field
 // provenance (override / inherited), seeding an override keeps the resolved pose, reset to
-// inherited, joint limits on edits, presets, mirror, contacts, the canonical file only holds
-// overrides, case keys as targets, undo / redo (coalescing, bounds, redo cleared by a new edit, DB
-// reorder, cases, a grip's item sockets), the weapon muzzle socket (hp_muzzle.c: the weapon file
-// patch, number format, bore helpers, every shipped weapon file).
+// inherited, free finger joints on edits (a full turn, only kept within +-180), presets, mirror,
+// the canonical file only holds overrides, case keys as targets, undo / redo (coalescing, bounds,
+// redo cleared by a new edit, DB reorder, cases, a grip's item sockets), the weapon muzzle socket
+// (hp_muzzle.c: the weapon file patch, number format, bore helpers, every shipped weapon file).
 #include "editor/handpose/hp_edit.h"
 #include "editor/handpose/hp_muzzle.h"
 #include "core/engine.h"
@@ -29,7 +29,7 @@ static int g_fail, g_checks;
     } while (0)
 
 static bool pose_eq(const HandPose *a, const HandPose *b) {
-    if (a->has_socket != b->has_socket || a->has_pole != b->has_pole || a->contact_count != b->contact_count) return false;
+    if (a->has_socket != b->has_socket || a->has_pole != b->has_pole) return false;
     if (memcmp(a->j, b->j, sizeof(a->j)) || a->ik_weight != b->ik_weight) return false;
     if (a->has_socket && memcmp(&a->socket, &b->socket, sizeof(a->socket))) return false;
     if (memcmp(&a->wrist, &b->wrist, sizeof(a->wrist))) return false;
@@ -88,7 +88,7 @@ static void test_touch_reset(void) {
     // Seeding an override changes nothing visible, for every field.
     HpEditDefaults def;
     for (int h = 0; h < 2; h++) { def.socket[h] = xf_make(v3(0, -0.05f, 0.1f * (float)h), quat_identity()); def.pole[h] = v3(h ? 1.0f : -1.0f, -1, 0); }
-    u16 bits[] = { HPL_SOCKET, HPL_WRIST, HPL_POLE, HPL_IKW, HPL_FINGER(HF_THUMB), HPL_FINGER(HF_PINKY), HPL_CONTACTS };
+    u16 bits[] = { HPL_SOCKET, HPL_WRIST, HPL_POLE, HPL_IKW, HPL_FINGER(HF_THUMB), HPL_FINGER(HF_PINKY) };
     for (int h = 0; h < 2; h++)
         for (int b = 0; b < (int)ARRAY_COUNT(bits); b++) {
             HandPose before, after;
@@ -111,23 +111,31 @@ static void test_touch_reset(void) {
         }
     CHECK(!handpose_entry_has_overrides(&db.e[r]), "rifle should be clean after resets");
 
-    // A joint edit: clamped, the finger's other joints keep their inherited values.
+    // A joint edit: free on every axis (far past the old limits: PIP curl 110, spread / twist 5 / 10),
+    // only kept within +-180; the finger's other joints keep their inherited values.
     HandPose inh, now;
     handpose_resolve(&db, r, 1, &inh);
+    hp_edit_set_joint(&db, tg, 1, HF_INDEX, 1, (HandJoint){ 150, 40, -120 });
+    handpose_resolve(&db, r, 1, &now);
+    CHECK(now.j[HF_INDEX][1].curl == 150 && now.j[HF_INDEX][1].spread == 40 && now.j[HF_INDEX][1].twist == -120, "free edit clamped (%.1f %.1f %.1f)",
+          now.j[HF_INDEX][1].curl, now.j[HF_INDEX][1].spread, now.j[HF_INDEX][1].twist);
     hp_edit_set_joint(&db, tg, 1, HF_INDEX, 1, (HandJoint){ 500, 0, -500 });
     handpose_resolve(&db, r, 1, &now);
-    HandJoint lo, hi;
-    handpose_joint_limits(HF_INDEX, 1, &lo, &hi);
-    CHECK(now.j[HF_INDEX][1].curl == hi.curl && now.j[HF_INDEX][1].twist == lo.twist, "edit not clamped (%.1f %.1f)", now.j[HF_INDEX][1].curl, now.j[HF_INDEX][1].twist);
+    CHECK(now.j[HF_INDEX][1].curl == 180 && now.j[HF_INDEX][1].twist == -180, "edit not kept within +-180 (%.1f %.1f)", now.j[HF_INDEX][1].curl, now.j[HF_INDEX][1].twist);
     CHECK(!memcmp(&now.j[HF_INDEX][0], &inh.j[HF_INDEX][0], sizeof(HandJoint)) && !memcmp(&now.j[HF_INDEX][2], &inh.j[HF_INDEX][2], sizeof(HandJoint)),
           "other joints of the finger moved");
     CHECK(!memcmp(now.j[HF_MIDDLE], inh.j[HF_MIDDLE], sizeof(now.j[HF_MIDDLE])), "another finger moved");
     CHECK(db.e[r].grip[1].set == HPL_FINGER(HF_INDEX), "only the index bit is set (%x)", db.e[r].grip[1].set);
     CHECK(hp_field_source(&db, r, 1, HPL_FINGER(HF_INDEX)).entry == r, "override is now the source");
-    // The curl shortcut drives the three joints together (clamped per joint).
+    // The curl shortcut drives the three joints together, also past the old limits (ring PIP
+    // 0.38 x 300 = 114 deg, old limit 110).
     hp_edit_set_curl(&db, tg, 1, HF_RING, 80.0f);
     handpose_resolve(&db, r, 1, &now);
     CHECK(fabsf(handpose_finger_curl(now.j, HF_RING) - 80.0f) < 1e-3f && now.j[HF_RING][1].curl > now.j[HF_RING][0].curl, "curl shortcut (%.2f)", handpose_finger_curl(now.j, HF_RING));
+    hp_edit_set_curl(&db, tg, 1, HF_RING, 300.0f);
+    handpose_resolve(&db, r, 1, &now);
+    CHECK(fabsf(handpose_finger_curl(now.j, HF_RING) - 300.0f) < 1e-3f && fabsf(now.j[HF_RING][1].curl - 114.0f) < 1e-3f, "curl shortcut clamped (%.2f, PIP %.2f)",
+          handpose_finger_curl(now.j, HF_RING), now.j[HF_RING][1].curl);
 
     // The canonical file holds only the overrides.
     char *txt = handpose_entry_write(&db.e[r]);
@@ -156,15 +164,6 @@ static void test_touch_reset(void) {
     hp_edit_touch(&db, tg, 1, HPL_SOCKET, NULL)->socket = xf_make(v3(0.1f, 0, 0), quat_identity());
     hp_edit_mirror(&db, tg, 1);
     CHECK(db.e[r].grip[0].set == db.e[r].grip[1].set && fabsf(db.e[r].grip[0].socket.t.x + 0.1f) < 1e-6f, "mirror R -> L");
-
-    // Contacts.
-    CHECK(hp_edit_add_contact(&db, tg, 1, HF_INDEX, v3(0, 0, -0.1f)), "add contact");
-    CHECK(hp_edit_add_contact(&db, tg, 1, HF_MIDDLE, v3(0, 0, -0.2f)), "add contact 2");
-    hp_edit_remove_contact(&db, tg, 1, 0);
-    HandPoseLayer *l = &db.e[r].grip[1];
-    CHECK(l->contact_count == 1 && l->contacts[0].finger == HF_MIDDLE, "remove contact");
-    for (int i = 0; i < 8; i++) hp_edit_add_contact(&db, tg, 1, HF_RING, v3(0, 0, 0));
-    CHECK(l->contact_count == HANDPOSE_CONTACTS, "contacts bounded");
 
     // Commit: net identity changes, revision bumps.
     u32 h0 = db.hash, rev = db.revision;

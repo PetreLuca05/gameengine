@@ -4,9 +4,9 @@
 //
 // An edit target is a grip (an entry: its root + one layer per hand) or a case key (one layer per
 // hand, relative to the case anchor; key < 0 = the case's anchor / markers only). A "field" is one
-// layer bit (HPL_SOCKET = the IK target, HPL_POLE, HPL_IKW, HPL_FINGER(f), HPL_CONTACTS). Editing a
-// field the layer doesn't set first seeds it with the value it resolves to (so turning the
-// override on changes nothing visible), then applies the edit.
+// layer bit (HPL_SOCKET = the IK target, HPL_POLE, HPL_IKW, HPL_FINGER(f)). Editing a field the
+// layer doesn't set first seeds it with the value it resolves to (so turning the override on
+// changes nothing visible), then applies the edit.
 #ifndef DG_HP_EDIT_H
 #define DG_HP_EDIT_H
 
@@ -50,15 +50,13 @@ void hp_field_source_text(const HandPoseDB *db, HpFieldSource s, char *out, int 
 HandPoseLayer *hp_edit_touch(HandPoseDB *db, HpTarget t, int hand, u16 bit, const HpEditDefaults *def);
 bool hp_edit_reset(HandPoseDB *db, HpTarget t, int hand, u16 bit);   // back to inherited
 bool hp_edit_reset_root(HandPoseDB *db, HpTarget t);                 // identity root / anchor
-// One joint (clamped to the joint limits); the finger's other joints keep their resolved values.
+// One joint, free on every axis (only kept within +-180); the finger's other joints keep their
+// resolved values.
 void hp_edit_set_joint(HandPoseDB *db, HpTarget t, int hand, int finger, int joint, HandJoint v);
 void hp_edit_set_curl(HandPoseDB *db, HpTarget t, int hand, int finger, float curl);   // the three joints together
 bool hp_edit_preset(HandPoseDB *db, HpTarget t, int hand, const char *preset);         // all five fingers
 // Mirror from_hand onto the other hand (the grip, or every key of a case).
 void hp_edit_mirror(HandPoseDB *db, HpTarget t, int from_hand);
-// Contacts: append (false when full) / remove one.
-bool hp_edit_add_contact(HandPoseDB *db, HpTarget t, int hand, int finger, vec3 point);
-void hp_edit_remove_contact(HandPoseDB *db, HpTarget t, int hand, int index);
 // After any edit: rehash (net identity + revision bump, the runtime picks the change up at once).
 void hp_edit_commit(HandPoseDB *db);
 

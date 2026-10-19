@@ -1,6 +1,6 @@
-// Hand pose data: universal grips, cases (timeline keys), resolution, limits, presets, mirror,
-// finger application, contact solver, the JSON format and the schema 1 migration
-// (docs/HANDPOSE.md).
+// Hand pose data: universal grips, cases (timeline keys), resolution, joint ranges (free: a full
+// turn on every axis), presets, mirror, finger application, the JSON format and the schema 1
+// migration (docs/HANDPOSE.md).
 #include "handpose.h"
 #include "procedural_internal.h"
 #include "cJSON.h"
@@ -281,10 +281,6 @@ static void apply_layer(HandPose *o, const HandPoseLayer *l) {
     if (l->set & HPL_IKW) o->ik_weight = l->ik_weight;
     for (int f = 0; f < HAND_FINGERS; f++)
         if (l->set & HPL_FINGER(f)) memcpy(o->j[f], l->j[f], sizeof(o->j[f]));
-    if (l->set & HPL_CONTACTS) {
-        o->contact_count = l->contact_count;
-        memcpy(o->contacts, l->contacts, sizeof(o->contacts));
-    }
 }
 
 static void pose_base(HandPose *out) {
@@ -372,7 +368,6 @@ static void pose_lerp(HandPose *o, const HandPose *a, const HandPose *b, float u
             o->j[f][k].spread = lerpf(a->j[f][k].spread, b->j[f][k].spread, u);
             o->j[f][k].twist = lerpf(a->j[f][k].twist, b->j[f][k].twist, u);
         }
-    if (u >= 0.5f) { o->contact_count = b->contact_count; memcpy(o->contacts, b->contacts, sizeof(o->contacts)); }
 }
 
 void handpose_case_eval(const HandPoseDB *db, int ci, int base, int hand, float t, HandPose *out) {
@@ -442,17 +437,15 @@ void handpose_case_phase(const HandPoseCase *c, float t, int *phase, float *u) {
     else { *phase = HCP_RETURN; *u = saturate((t - release) / fmaxf(1e-6f, dur - release)); }
 }
 
-// ------------------------------------------------------------------ limits / presets
+// ------------------------------------------------------------------ joint ranges / presets
 
 void handpose_joint_limits(int finger, int joint, HandJoint *lo, HandJoint *hi) {
-    // Degrees. Thumb: CMC (wide spread / twist), MCP, IP. Fingers: MCP (spread), PIP, DIP.
-    static const HandJoint thumb_lo[3] = { { -30, -45, -45 }, { -15, -15, -20 }, { -20, -10, -15 } };
-    static const HandJoint thumb_hi[3] = { { 70, 60, 45 }, { 70, 15, 20 }, { 90, 10, 15 } };
-    static const HandJoint fing_lo[3] = { { -20, -25, -15 }, { -5, -5, -10 }, { -10, -5, -10 } };
-    static const HandJoint fing_hi[3] = { { 95, 25, 15 }, { 110, 5, 10 }, { 90, 5, 10 } };
-    joint = DG_CLAMP(joint, 0, 2);
-    *lo = finger == HF_THUMB ? thumb_lo[joint] : fing_lo[joint];
-    *hi = finger == HF_THUMB ? thumb_hi[joint] : fing_hi[joint];
+    // Degrees. Every joint (thumb CMC / MCP / IP, fingers MCP / PIP / DIP) rotates freely on every
+    // axis: the range is a full turn, the clamp only keeps values inside it.
+    (void)finger;
+    (void)joint;
+    *lo = (HandJoint){ -180.0f, -180.0f, -180.0f };
+    *hi = (HandJoint){ 180.0f, 180.0f, 180.0f };
 }
 
 HandJoint handpose_clamp_joint(int finger, int joint, HandJoint v) {
@@ -531,7 +524,6 @@ void handpose_mirror_layer(const HandPoseLayer *in, HandPoseLayer *out) {
     m.socket = handpose_mirror_xform(in->socket);
     m.wrist = handpose_mirror_xform(in->wrist);
     m.pole.x = -in->pole.x;
-    for (int c = 0; c < in->contact_count && c < HANDPOSE_CONTACTS; c++) m.contacts[c].point.x = -in->contacts[c].point.x;
     *out = m;
 }
 
@@ -609,140 +601,6 @@ vec3 handpose_fingertip(const Skeleton *s, const Xform *model, int side, int fin
     if (end >= 0) return model[end].t;
     int m = s->parent[d];
     return m >= 0 ? v3_madd(model[d].t, v3_sub(model[d].t, model[m].t), 0.8f) : model[d].t;
-}
-
-// ------------------------------------------------------------------ contact solver
-
-float handpose_box_signed_dist(const HandBox *b, vec3 p) {
-    vec3 l = quat_rotate(quat_conj(b->rot), v3_sub(p, b->center));
-    vec3 q = v3(fabsf(l.x) - b->half.x, fabsf(l.y) - b->half.y, fabsf(l.z) - b->half.z);
-    vec3 o = v3(fmaxf(q.x, 0), fmaxf(q.y, 0), fmaxf(q.z, 0));
-    return v3_len(o) + fminf(fmaxf(q.x, fmaxf(q.y, q.z)), 0.0f);
-}
-
-typedef struct SolveCtx {
-    const Skeleton *s;
-    const Pose *pose;
-    const Xform *model;
-    const HandFrames *hf;
-    const HandBox *boxes;
-    int box_count, side, finger;
-    HandJoint base[3];
-    float radius;
-} SolveCtx;
-
-static Pose g_solve_pose;   // the solver runs on the main thread (editor / tests): scratch, not on the stack
-static Xform g_solve_model[ANIM_MAX_BONES];
-
-static void solve_joints(const SolveCtx *c, float t, HandJoint out[3]) {
-    for (int k = 0; k < 3; k++) {
-        out[k] = c->base[k];
-        out[k].curl += t * k_split[k] * (c->finger == HF_THUMB ? THUMB_SCALE : 1.0f);
-        out[k] = handpose_clamp_joint(c->finger, k, out[k]);
-    }
-}
-
-// Finger surface distance to the nearest box (sphere-swept chain, sampled), and its tip.
-static float solve_eval(const SolveCtx *c, float t, vec3 *tip) {
-    pose_copy(&g_solve_pose, c->pose);
-    memcpy(g_solve_model, c->model, sizeof(Xform) * (size_t)c->s->count);
-    HandJoint jt[3];
-    solve_joints(c, t, jt);
-    apply_finger(c->s, &g_solve_pose, g_solve_model, c->side, c->finger, jt, c->hf, 1.0f);
-    vec3 pts[4];
-    for (int k = 0; k < 3; k++) {
-        int b = handpose_finger_bone(c->s, c->side, c->finger, k);
-        pts[k] = b >= 0 ? g_solve_model[b].t : v3(0, 0, 0);
-    }
-    pts[3] = handpose_fingertip(c->s, g_solve_model, c->side, c->finger);
-    *tip = pts[3];
-    float best = 1e9f;
-    // Only the segments past the proximal joint: the knuckle itself sits on the grip by design.
-    for (int seg = 1; seg < 3; seg++)
-        for (int q = 0; q <= 6; q++) {
-            vec3 p = v3_lerp(pts[seg], pts[seg + 1], (float)q / 6.0f);
-            for (int i = 0; i < c->box_count; i++) best = fminf(best, handpose_box_signed_dist(&c->boxes[i], p) - c->radius);
-        }
-    return best;
-}
-
-HandContactResult handpose_contact_solve(const Skeleton *s, const Pose *pose, const Xform *model, int side, int finger, HandFingers j,
-                                         const HandFrames *hf, const HandBox *boxes, int box_count, const vec3 *target, float radius, float tol) {
-    HandContactResult r = { 0 };
-    SolveCtx c = { s, pose, model, hf, boxes, box_count, side, finger, { { 0 } }, radius };
-    memcpy(c.base, j[finger], sizeof(c.base));
-    // Range: from where the first joint reaches its lower curl limit (opening) to where the first
-    // reaches its upper one (closing); all three joints move together.
-    float t_min = -1e9f, t_max = 1e9f;
-    for (int k = 0; k < 3; k++) {
-        HandJoint lo, hi;
-        handpose_joint_limits(finger, k, &lo, &hi);
-        float share = k_split[k] * (finger == HF_THUMB ? THUMB_SCALE : 1.0f);
-        t_max = fminf(t_max, (hi.curl - c.base[k].curl) / share);
-        t_min = fmaxf(t_min, (lo.curl - c.base[k].curl) / share);
-    }
-    t_max = fmaxf(t_max, 0.0f);
-    t_min = fminf(t_min, 0.0f);
-    const float step = 2.0f;
-    vec3 tip;
-    float d0 = solve_eval(&c, 0, &tip);
-    float best_t = 0, best_target = target ? v3_dist(tip, *target) : 0;
-    // Bracket [t_free, t_hit]: the finger is clear at t_free and touching at t_hit (adjacent steps).
-    float t_free = 0, t_hit = 0;
-    bool bracket = false;
-    if (d0 < 0) {
-        // Already inside: open step by step until clear.
-        t_hit = 0;
-        for (float t = -step; t >= t_min - step * 0.5f; t -= step) {
-            float tt = fmaxf(t, t_min);
-            float d = solve_eval(&c, tt, &tip);
-            r.steps++;
-            if (d >= 0) { t_free = tt; bracket = true; break; }
-            t_hit = tt;
-            if (tt <= t_min) break;
-        }
-        if (!bracket) {
-            // Fully open and still inside: report it, leave the finger open.
-            r.tip_dist = solve_eval(&c, t_min, &tip);
-            solve_joints(&c, t_min, j[finger]);
-            r.curl_add = t_min;
-            return r;
-        }
-    } else {
-        for (float t = step; t <= t_max + step * 0.5f; t += step) {
-            float tt = fminf(t, t_max);
-            float d = solve_eval(&c, tt, &tip);
-            r.steps++;
-            if (d < 0) { t_hit = tt; bracket = true; break; }
-            t_free = tt;
-            if (target) {
-                float dt = v3_dist(tip, *target);
-                if (dt < best_target) { best_target = dt; best_t = tt; }
-            }
-            if (tt >= t_max) break;
-        }
-    }
-    float t_final;
-    if (bracket) {
-        // Bisect the clear / touching bracket until the surface gap is inside the tolerance.
-        float lo = t_free, hi = t_hit;
-        float d = solve_eval(&c, lo, &tip);
-        for (int i = 0; i < 48 && d > tol; i++) {
-            float m = 0.5f * (lo + hi);
-            float dm = solve_eval(&c, m, &tip);
-            r.steps++;
-            if (dm >= 0) { lo = m; d = dm; } else hi = m;
-        }
-        t_final = lo;
-        r.touched = true;
-        r.tip_dist = d;
-    } else {
-        t_final = target ? best_t : t_max;
-        r.tip_dist = solve_eval(&c, t_final, &tip);
-    }
-    solve_joints(&c, t_final, j[finger]);
-    r.curl_add = t_final;
-    return r;
 }
 
 // ------------------------------------------------------------------ euler
@@ -827,16 +685,7 @@ static void parse_layer(HandPoseLayer *l, const cJSON *o) {
         }
         l->set |= (u16)HPL_FINGER(f);
     }
-    const cJSON *ct = cJSON_GetObjectItemCaseSensitive(o, "contacts"), *c;
-    if (cJSON_IsArray(ct)) {
-        l->set |= HPL_CONTACTS;
-        cJSON_ArrayForEach(c, ct) {
-            if (l->contact_count >= HANDPOSE_CONTACTS) break;
-            int f = handpose_finger_from_name(jstring(c, "finger", ""));
-            if (f < 0 || !jvec(c, "point", v, 3)) continue;
-            l->contacts[l->contact_count++] = (HandContact){ (u8)f, v3(v[0], v[1], v[2]) };
-        }
-    }
+    // "contacts" in older files (the removed contact solver's fingertip targets): ignored.
     fold_wrist(l);
 }
 
@@ -848,7 +697,6 @@ static void layer_over(HandPoseLayer *dst, const HandPoseLayer *src) {
     if (src->set & HPL_IKW) dst->ik_weight = src->ik_weight;
     for (int f = 0; f < HAND_FINGERS; f++)
         if (src->set & HPL_FINGER(f)) memcpy(dst->j[f], src->j[f], sizeof(dst->j[f]));
-    if (src->set & HPL_CONTACTS) { dst->contact_count = src->contact_count; memcpy(dst->contacts, src->contacts, sizeof(dst->contacts)); }
     dst->set |= src->set;
 }
 
@@ -875,8 +723,6 @@ static void note_diff(HandPoseMigrateNote *n, const char *state, int hand, const
     DIFF(HPL_IKW, "ik_weight", ik_weight);
     for (int f = 0; f < HAND_FINGERS && wl < (int)sizeof(what) - 12; f++)
         if ((s->set & HPL_FINGER(f)) && (!(grip->set & HPL_FINGER(f)) || memcmp(grip->j[f], s->j[f], sizeof(grip->j[f])))) wl += snprintf(what + wl, sizeof(what) - (size_t)wl, "%s%s", wl ? "," : "", k_finger_names[f]);
-    if ((s->set & HPL_CONTACTS) && (!(grip->set & HPL_CONTACTS) || grip->contact_count != s->contact_count || memcmp(grip->contacts, s->contacts, sizeof(grip->contacts))))
-        wl += snprintf(what + wl, sizeof(what) - (size_t)wl, "%scontacts", wl ? "," : "");
 #undef DIFF
     if (!wl) return;
     if (n) n->dropped++;
@@ -1156,16 +1002,6 @@ static void write_layer(Sb *b, const HandPoseLayer *l, const char *ind) {
             sb_put(b, "]");
         }
         sb_printf(b, "\n%s  }", ind);
-    }
-    if (l->set & HPL_CONTACTS) {
-        FIELD("contacts");
-        sb_put(b, "[");
-        for (int c = 0; c < l->contact_count; c++) {
-            sb_printf(b, "%s{ \"finger\": \"%s\", \"point\": ", c ? ", " : "", k_finger_names[l->contacts[c].finger % HAND_FINGERS]);
-            sb_vec(b, &l->contacts[c].point.x, 3);
-            sb_put(b, " }");
-        }
-        sb_put(b, "]");
     }
 #undef FIELD
     sb_put(b, first ? "}" : "\n}");

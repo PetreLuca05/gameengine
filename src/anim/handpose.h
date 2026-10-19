@@ -28,7 +28,6 @@ struct HandFrames;
 #define HAND_FINGERS 5
 #define HAND_FINGER_JOINTS 3
 #define HANDPOSE_SCHEMA 2          // 2: universal grips + cases; bump + add a step to the migration when the file format changes
-#define HANDPOSE_CONTACTS 5        // one fingertip target per finger
 #define HANDPOSE_CASE_KEYS 12
 #define HANDPOSE_DIR "assets/handposes"
 #define HANDPOSE_ROOT_SCALE_MIN 0.5f
@@ -58,15 +57,12 @@ typedef enum HandCasePhase { HCP_REACH, HCP_HOLD, HCP_RETURN } HandCasePhase;
 typedef struct HandJoint { float curl, spread, twist; } HandJoint;
 typedef HandJoint HandFingers[HAND_FINGERS][HAND_FINGER_JOINTS];
 
-// Fingertip target on the item (item space): the contact solver closes the finger onto it.
-typedef struct HandContact { u8 finger; vec3 point; } HandContact;
-
 enum HandPoseLayerBits {
     HPL_SOCKET = 1 << 0,           // the IK target ("ik" in the files)
     HPL_WRIST = 1 << 1,            // legacy palm offset from the socket (schema 1; folded into the IK target when that is set)
     HPL_POLE = 1 << 2, HPL_IKW = 1 << 3,
     HPL_FINGER0 = 1 << 4,          // << finger (5 bits): that finger's three joints are set
-    HPL_CONTACTS = 1 << 9,
+    // 1 << 9: unused (was the removed fingertip contacts; the other bits keep their values).
 };
 #define HPL_FINGER(f) (HPL_FINGER0 << (f))
 #define HPL_FINGERS_ALL (0x1Fu << 4)
@@ -74,24 +70,20 @@ enum HandPoseLayerBits {
 // Sparse hand layer (a grip hand, a case key hand): only the fields whose bit is in `set` apply.
 typedef struct HandPoseLayer {
     u16 set;
-    u8 contact_count;
     Xform socket;                  // IK target: item space (grips) / relative to the case anchor (cases)
     Xform wrist;                   // legacy palm offset relative to the socket
     vec3 pole;                     // elbow hint (camera space direction, the style's elbow_r / elbow_l)
     float ik_weight;               // multiplies the hold's hand IK weight
     HandFingers j;
-    HandContact contacts[HANDPOSE_CONTACTS];
 } HandPoseLayer;
 
 // Resolved (dense) pose of one hand.
 typedef struct HandPose {
     bool has_socket, has_pole;
-    u8 contact_count;
     Xform socket, wrist;
     vec3 pole;
     float ik_weight;
     HandFingers j;
-    HandContact contacts[HANDPOSE_CONTACTS];
 } HandPose;
 
 typedef struct HandPoseEntry {
@@ -227,7 +219,9 @@ void handpose_case_phase(const HandPoseCase *c, float t, int *phase, float *u);
 float handpose_case_reach_time(const HandPoseCase *c);
 float handpose_case_return_time(const HandPoseCase *c);
 
-// Joint limits (degrees) and clamping (applied on load, on every edit and when resolving).
+// Joint ranges (degrees): every finger joint rotates freely on every axis (curl, spread, twist),
+// -180 .. +180 (a full turn). The clamp (on load, on every edit and when resolving) only keeps
+// values inside that turn: it never restricts a pose. No automatic finger placement.
 void handpose_joint_limits(int finger, int joint, HandJoint *lo, HandJoint *hi);
 HandJoint handpose_clamp_joint(int finger, int joint, HandJoint v);
 void handpose_clamp_fingers(HandFingers j);
@@ -236,7 +230,7 @@ void handpose_clamp_fingers(HandFingers j);
 void handpose_from_curl(const float curl[5], HandFingers out);
 // The curl of one finger as the shorthand reads it (the proximal joint / its share).
 float handpose_finger_curl(const HandFingers j, int finger);
-void handpose_set_finger_curl(HandFingers j, int finger, float curl);   // the three joints together (clamped)
+void handpose_set_finger_curl(HandFingers j, int finger, float curl);   // the three joints together (each kept within +-180)
 
 // Finger presets (applied per hand, then tweaked).
 int handpose_preset_count(void);
@@ -244,8 +238,7 @@ const char *handpose_preset_name(int i);
 bool handpose_preset(const char *name, HandFingers out);
 
 // Mirror L <-> R: socket / wrist reflected across the YZ plane (x -> -x, the palm frame kept
-// right-handed), the pole hint's x negated, contact points' x negated; finger values are
-// hand-relative and unchanged.
+// right-handed), the pole hint's x negated; finger values are hand-relative and unchanged.
 Xform handpose_mirror_xform(Xform x);
 void handpose_mirror_layer(const HandPoseLayer *in, HandPoseLayer *out);
 void handpose_mirror_entry_hand(HandPoseEntry *e, int from_hand);   // grip: copies from_hand onto the other, mirrored
@@ -258,16 +251,6 @@ void handpose_apply_fingers(const Skeleton *s, Pose *pose, Xform *model, int sid
 vec3 handpose_fingertip(const Skeleton *s, const Xform *model, int side, int finger);
 // Bone of finger f, joint k (0..2) of a hand side (-1 when the skeleton lacks it).
 int handpose_finger_bone(const Skeleton *s, int side, int finger, int joint);
-
-// Contact solver: closes finger f (all three joints, proportionally) from its current curl until
-// the finger touches one of the boxes (model space OBBs: center, half extents, rotation) or its
-// curl limit; the tip ends on the surface within `tol` (m). With a target point (non-NULL) it
-// stops at the curl closest to the target instead when nothing is touched. Returns the joints.
-typedef struct HandBox { vec3 center, half; quat rot; } HandBox;
-typedef struct HandContactResult { bool touched; float tip_dist; float curl_add; int steps; } HandContactResult;
-HandContactResult handpose_contact_solve(const Skeleton *s, const Pose *pose, const Xform *model, int side, int finger, HandFingers j,
-                                         const struct HandFrames *hf, const HandBox *boxes, int box_count, const vec3 *target, float radius, float tol);
-float handpose_box_signed_dist(const HandBox *b, vec3 p);   // < 0 inside
 
 // JSON. Parse fills an entry / a case, migrating older schemas (note: what the migration did, may
 // be NULL); write produces the canonical text (stable key order, shortest round-trip floats, only

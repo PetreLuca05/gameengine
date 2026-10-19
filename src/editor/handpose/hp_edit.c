@@ -80,10 +80,6 @@ HandPoseLayer *hp_edit_touch(HandPoseDB *db, HpTarget t, int hand, u16 bit, cons
     if (missing & HPL_IKW) l->ik_weight = p.ik_weight;
     for (int f = 0; f < HAND_FINGERS; f++)
         if (missing & HPL_FINGER(f)) memcpy(l->j[f], p.j[f], sizeof(l->j[f]));
-    if (missing & HPL_CONTACTS) {
-        l->contact_count = p.contact_count;
-        memcpy(l->contacts, p.contacts, sizeof(l->contacts));
-    }
     l->set |= missing;
     return l;
 }
@@ -102,7 +98,6 @@ bool hp_edit_reset(HandPoseDB *db, HpTarget t, int hand, u16 bit) {
     if (bit & HPL_IKW) l->ik_weight = z.ik_weight;
     for (int f = 0; f < HAND_FINGERS; f++)
         if (bit & HPL_FINGER(f)) memset(l->j[f], 0, sizeof(l->j[f]));
-    if (bit & HPL_CONTACTS) { l->contact_count = 0; memset(l->contacts, 0, sizeof(l->contacts)); }
     return true;
 }
 
@@ -143,23 +138,6 @@ void hp_edit_mirror(HandPoseDB *db, HpTarget t, int from_hand) {
     if (!hp_target_valid(db, t)) return;
     if (t.entry >= 0) handpose_mirror_entry_hand(&db->e[t.entry], from_hand);
     else handpose_mirror_case_hand(&db->c[t.ci], from_hand);
-}
-
-bool hp_edit_add_contact(HandPoseDB *db, HpTarget t, int hand, int finger, vec3 point) {
-    HandPoseLayer *l = hp_edit_touch(db, t, hand, HPL_CONTACTS, NULL);
-    if (!l || l->contact_count >= HANDPOSE_CONTACTS || finger < 0 || finger >= HAND_FINGERS) return false;
-    l->contacts[l->contact_count].finger = (u8)finger;
-    l->contacts[l->contact_count].point = point;
-    l->contact_count++;
-    return true;
-}
-
-void hp_edit_remove_contact(HandPoseDB *db, HpTarget t, int hand, int index) {
-    HandPoseLayer *l = hp_edit_touch(db, t, hand, HPL_CONTACTS, NULL);
-    if (!l || index < 0 || index >= l->contact_count) return;
-    memmove(&l->contacts[index], &l->contacts[index + 1], sizeof(HandContact) * (size_t)(l->contact_count - index - 1));
-    l->contact_count--;
-    memset(&l->contacts[l->contact_count], 0, sizeof(HandContact));
 }
 
 void hp_edit_commit(HandPoseDB *db) {
