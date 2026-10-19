@@ -231,10 +231,10 @@ void arms_layer_eval(const ArmsLayerDef *d, ArmsLayerState *st, const ArmsLayerI
     p.rotation.y *= 1.0f - ads;
     p.fov_add *= 1.0f - ads;
 
-    // Present: the drawn arms + item rigidly onto the presented item - at the hip only by the move
-    // between the two hold points (identity: the arms stay where the body has them, reach pull and
-    // all), aimed exactly onto it (the sight on the view axis).
-    Xform pr = xf_lerp(in->present_hold, in->present, ads);
+    // Present: the drawn arms + item rigidly onto the presented item, at the hip as aimed (the sight on
+    // the view axis): the presented item is camera-locked (no soft pitch limit), so the item and the
+    // hands keep their place on screen at any view pitch whatever the body's arms reach.
+    Xform pr = in->present;
     pr.s = v3(1, 1, 1);
     mat4 P = mat4_trs(pr.t, pr.r, v3(1, 1, 1));
     Xform item = xf_mul(pr, in->item_cam);

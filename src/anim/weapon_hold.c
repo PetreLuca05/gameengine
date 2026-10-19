@@ -240,6 +240,7 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     if (in->hp_view && !in->hp_given) {
         HoldPointInput hv = hi;
         hv.ads = in->ads_t > 0.5f;
+        hv.screen_locked = true;   // the same place on screen at any view pitch
         holdpoint_eval(&st->hp_view, &hv, &st->hp_view_out);
         st->hp_view_valid = true;
     } else if (!in->hp_given) {

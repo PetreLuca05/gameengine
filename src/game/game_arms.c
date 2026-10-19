@@ -155,7 +155,6 @@ void game_arms_frame(const RenderCamera *cam, vec2 aim_deg, float aim_pitch, flo
     memset(in, 0, sizeof(*in));
     in->pose_eye = fa.pose_eye;
     in->present = fa.present;
-    in->present_hold = fa.present_hold;
     in->has_item = fa.has_item;
     in->item_cam = fa.item_cam;
     in->pivot = fa.pivot;

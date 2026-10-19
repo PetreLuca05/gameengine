@@ -228,7 +228,6 @@ void chars_set_fp_camera(vec3 pos, quat rot, bool valid);
 typedef struct CharsFpArms {
     Xform pose_eye;             // world: head bone x eye socket, the view's rotation
     Xform present;              // pose-eye space: the drawn item -> the presented one (identity: no hold, or a clip owns the hands)
-    Xform present_hold;         // (the same: the move is already blended by ads_w, proc_presented_move)
     float ads_w;                // the presentation hold point's ADS weight (interpolated)
     bool has_item;
     Xform item_cam;             // the drawn item, pose-eye space

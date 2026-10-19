@@ -487,12 +487,13 @@ void proc_run(ProcState *st, const ProcInput *in0, Pose *pose, Xform *model) {
     st->prev_vel = in.velocity;
 }
 
-Xform proc_presented_move(const ProcState *st, Xform drawn_cam, float ads_w, float ikw) {
+Xform proc_presented_move(const ProcState *st, Xform drawn_cam, float ikw) {
     if (!st->hp_view_valid || !st->has_item) return xf_identity();
-    Xform v = st->view_item_cam, h = st->hold_item_cam;
-    v.s = h.s = drawn_cam.s = v3(1, 1, 1);
-    Xform at_hip = xf_mul(v, xf_inverse(h)), aimed = xf_mul(v, xf_inverse(drawn_cam));
-    Xform m = xf_lerp(at_hip, aimed, saturate(ads_w));
+    Xform v = st->view_item_cam;
+    v.s = drawn_cam.s = v3(1, 1, 1);
+    // Exactly onto the presented item, at the hip as aimed: the body's reach pull (the arms short of
+    // the hold point at a steep view pitch) never shows on screen.
+    Xform m = xf_mul(v, xf_inverse(drawn_cam));
     if (ikw < 1.0f) m = xf_lerp(xf_identity(), m, saturate(ikw));
     m.s = v3(1, 1, 1);
     return m;

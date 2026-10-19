@@ -135,6 +135,8 @@ typedef struct HoldPointInput {
     HoldPointRayFn raycast;
     void *ray_ctx;
     bool static_pose;                 // no procedural layer (alignment tests, editor)
+    bool screen_locked;               // the presentation hold point (the arms layer): no soft pitch limit, so the
+                                      // item keeps its place on screen at any view pitch
     float sway_scale;                 // look lag, idle sway, breathing, sprint bob (wpn_sway_scale; 0 = none)
     float bob_scale;                  // movement bob outside sprint (wpn_bob_scale; 0 = the item stays still)
     HoldKickParams kick_params;       // anchors / ADS kick shaping (unset = sight anchor, push 1, roll 1)

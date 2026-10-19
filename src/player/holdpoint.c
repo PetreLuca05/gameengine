@@ -407,10 +407,11 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     Xform inv_anchor = xf_inverse(in->anchor);
     Xform item = xf_mul(base, inv_anchor);
     // Soft pitch limit: looking steeply up / down the item stops following the view fully (arms
-    // stay in reach); none in ADS (the sight must stay on the view axis), eased with the blend.
+    // stay in reach); none in ADS (the sight must stay on the view axis), eased with the blend. None
+    // for the presentation hold point either: the arms layer keeps the item put on screen at any pitch.
     float pw_target = (state == HP_ADS || state == HP_PHONE_PORTRAIT || state == HP_PHONE_LANDSCAPE) ? 0.0f : 1.0f;
     st->pitch_w += (pw_target - st->pitch_w) * (1.0f - expf(-dt / fmaxf(0.02f, s->blend_in[state] * 0.35f)));
-    {
+    if (!in->screen_locked) {
         float pdeg = in->aim_pitch * DG_RAD2DEG, a = fabsf(pdeg);
         float soft = lerpf(s->ads_pitch_soft, s->pitch_soft, st->pitch_w), fol = lerpf(s->ads_pitch_follow, s->pitch_follow, st->pitch_w);
         if (a > soft) {

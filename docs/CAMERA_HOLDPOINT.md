@@ -145,7 +145,7 @@ in that camera's space places the drawn arms + item, in this order (`src/render/
 
 | Step | What |
 |---|---|
-| present | the move from the drawn item onto the presented one (the presentation hold point). At the hip only the two hold points' difference (identity: the arms stay where the body has them). Aimed, exactly onto it: the sight on the view axis, computed, never tuned. Faded out while a clip owns the hands (reload, equip, sprint) |
+| present | the move from the drawn item exactly onto the presented one (the presentation hold point), at the hip as aimed (the sight on the view axis, computed, never tuned). The presentation hold point is screen-locked (no soft pitch limit), so the item and the hands keep their place on screen at any view pitch: the body's reach pull at a steep pitch never shows, and no bone moves for it (the forearms' angle still follows the body's elbows). Faded out while a clip owns the hands (reload, equip, sprint) |
 | tuned | `offset` (right, up, forward m), `rotation` (pitch, yaw, roll °) and `scale` (0.9 … 1.1) about the hold point, per hold point state and per item (`items`), blended over the state's `blend`. In ADS only the push along the view axis, the roll and the scale apply, about the sight |
 | kick | the player's cosmetic "Weapon kick" (`wpn_visual_scale`: the pose's kick shown smaller) + the first-person screen kick |
 | equip | a newly selected item comes up from below the arms frustum to its hold over `equip.time` (0.3 s: the gun is ready then). It starts `equip.pitch` muzzle down and its item length + `equip.margin` under the bottom edge |
@@ -243,7 +243,7 @@ down to `ads_scale` in ADS, and every rotation is around the **pivot**:
 | idle sway + breathing | time (`sway`) — × `wpn_sway_scale` |
 | movement bob | camera-space velocity (`bob`) — × `wpn_sway_scale` |
 | kick | the recoil system's item spring (`recoil_visual_kick` → `vm_pos` / `vm_rot`) — × `wpn_kick_scale`; aim recoil still drives the view angles |
-| soft pitch limit | past `pitch_soft` (65°; none in ADS) the item follows the view pitch only by `pitch_follow`, so arms stay in reach at near-vertical views |
+| soft pitch limit | past `pitch_soft` (65°; none in ADS) the item follows the view pitch only by `pitch_follow`, so arms stay in reach at near-vertical views. The body's pose only: the presentation hold point (`screen_locked`) has none, so the arms layer shows the item in the same place at any pitch |
 
 `wpn_sway_scale` (0, replicated: it also scales the aim sway of `weapon_sway_deg`, so bullets and
 the crosshair agree) defaults to zero: **the item is fixed to the pose eye** except for the state

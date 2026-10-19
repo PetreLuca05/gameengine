@@ -34,7 +34,7 @@ static ArmsLayerIn base_in(Xform eye) {
     ArmsLayerIn in;
     memset(&in, 0, sizeof(in));
     in.pose_eye = eye;
-    in.present = in.present_hold = xf_identity();
+    in.present = xf_identity();
     in.has_item = true;
     // A rifle at the hip: grip 18 cm right, 22 cm down, 35 cm ahead of the eye; sight 9 cm above the grip.
     in.item_cam = xf_make(v3(0.18f, -0.22f, -0.35f), quat_identity());

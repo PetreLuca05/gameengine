@@ -3269,7 +3269,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
 bool chars_fp_arms(CharsFpArms *o) {
     ensure_globals();
     memset(o, 0, sizeof(*o));
-    o->present = o->present_hold = o->item_cam = o->pose_eye = xf_identity();
+    o->present = o->item_cam = o->pose_eye = xf_identity();
     if (!LIB || FP.frame != g_engine.frame_index || !FP.solved || !FP.w) return false;   // this frame's pose (its world is alive)
     CharacterInst *c = char_get(FP.w, FP.ent);
     if (!c) return false;
@@ -3299,8 +3299,8 @@ bool chars_fp_arms(CharsFpArms *o) {
     o->sway_hip_rot = FP.sway_hip_rot;
     o->sway_hip_pos = FP.sway_hip_pos;
     o->sway_ads_rot = FP.sway_ads_rot;
-    // The same rigid move the aim claims use (proc_presented_move): presented = move x drawn.
-    o->present = o->present_hold = proc_presented_move(&FP.st, o->item_cam, o->ads_w, FP.ikw);
+    // presented = move x drawn (proc_presented_move): hip and aimed alike, exactly onto the presented item.
+    o->present = proc_presented_move(&FP.st, o->item_cam, FP.ikw);
     return true;
 }
 

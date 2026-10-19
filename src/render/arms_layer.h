@@ -5,7 +5,8 @@
 // The arms camera is the pose eye (head bone x eye socket, the view's rotation: where the hold point
 // is defined). The layer moves rigidly in that camera's space, applied to the drawn arms + item:
 //   present  the rigid move from the drawn item onto the presented one (the presentation hold point:
-//            ADS happens here, never in the model)
+//            ADS happens here, never in the model; at the hip too, so the item and the hands keep
+//            their place on screen at any view pitch whatever the body's reach)
 //   tuned    offset / rotation / scale per hold point state and per item (assets/player/arms_layer.json),
 //            about the hold point; in ADS only the push along the view axis, the roll and the scale
 //            about the sight (the sight stays on the view axis)
@@ -59,7 +60,6 @@ typedef struct ArmsLayerState {
 typedef struct ArmsLayerIn {
     Xform pose_eye;                   // world
     Xform present;                    // pose-eye space: drawn item -> presented item (identity: none)
-    Xform present_hold;               // pose-eye space: the pose's hold point item -> presented item (identity at the hip)
     bool has_item;
     Xform item_cam;                   // the drawn item, pose-eye space
     vec3 pivot, sight;                // item space
