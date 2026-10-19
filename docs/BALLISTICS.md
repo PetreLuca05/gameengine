@@ -66,8 +66,12 @@ The original planning notes, with the survey of the old code, are in `BALLISTICS
 
 **Launch**
 - From the first-person camera along the view plus recoil (docs/AIM.md): the bullets land where the crosshair says. Plus the spread cone (`recoil_cone_dir`, unchanged). The tracer is drawn from the visible barrel and blends onto the bullet's path over the first 15 m (`BalLive.visual_offset`); remote replays take the shooter's held item's muzzle.
-- Pitched up by the zero elevation, solved by bisection on the same sim (standard atmosphere, no wind) for `zero_distance`:
-  - pistol 25 m, SMG 50 m, rifle / LMG 100 m, DMR 200 m, sniper 300 m.
+- Pitched up by the zero elevation, solved by bisection on the same sim (standard atmosphere, no wind) for the
+  distance under the crosshair (2026-10-20, `aimed_zero`: a static-world ray from the eye along the aim, 1 m
+  steps, 5 m past 100 m; nothing within 1000 m: the weapon's `zero_distance`), so the bullets land on the
+  crosshair / reticle centre at any range (wind and spin drift aside). A fixed zero from the eye put every
+  shot nearer than it above the line of sight (an 8x zeroed at 300 m hit high at 50 m). `zero_distance`:
+  pistol 25 m, SMG 50 m, rifle / LMG 100 m, DMR 200 m, sniper 300 m.
 - Plus the device's point-of-impact shift (`poi_moa`).
 - Speed: `mv_curve(barrel_length) × device.velocity_mul`.
 - The visible tracer and smoke are the true path: it starts at the muzzle (the old 15 m blend from the visible muzzle onto an eye-origin path is gone). `EV_SHOT.pos` is the muzzle origin, so replays start there too.

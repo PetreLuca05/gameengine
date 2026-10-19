@@ -241,6 +241,20 @@ static float zero_angle(int cart, float speed, float zero_m) {
     return a;
 }
 
+// The zero of a shot: the distance under the crosshair (docs/BALLISTICS.md "Launch"), so the bullets land
+// where it says at any range. The bullets leave the eye on the line of sight: a fixed zero_distance put
+// every shot nearer than it above the crosshair (an 8x zeroed at 300 m hit high at 50 m). The static
+// world only, so the host and the predicting client agree; 1 m steps (5 m past 100 m: the solve is
+// cached); nothing within 1000 m: the weapon's zero_distance.
+static float aimed_zero(World *w, vec3 origin, vec3 aim, float fallback) {
+    const float range = 1000.0f;
+    RayHit rh;
+    if (!w || !w->phys || v3_len2(aim) < 1e-8f) return fallback;
+    if (!phys_raycast(w->phys, origin, v3_scale(v3_norm(aim), range), PL_MASK_WORLD, PHYS_INVALID_BODY, &rh)) return fallback;
+    float dist = clampf(rh.fraction * range, 5.0f, range);
+    return dist < 100.0f ? roundf(dist) : 5.0f * roundf(dist / 5.0f);
+}
+
 // Rotates a pellet direction up by the zero elevation (+ the device's POI shift).
 static vec3 launch_dir(vec3 d, float up, float right) {
     vec3 r = v3_cross(d, v3(0, 1, 0));
@@ -321,7 +335,7 @@ void bal_fire(World *w, const BalFireIn *in) {
     rec.caliber = (u8)d->vfx_caliber;
     rec.spread = in->spread;
     rec.speed = bal_cartridge_mv(c, d->barrel_length) * dev->velocity_mul;
-    rec.zero_angle = zero_angle(ci, rec.speed, d->zero_distance);
+    rec.zero_angle = zero_angle(ci, rec.speed, aimed_zero(w, in->origin, in->aim, d->zero_distance));
     const float moa = 3.14159265f / (180.0f * 60.0f);
     rec.poi[0] = dev->poi_moa[0] * moa;
     rec.poi[1] = dev->poi_moa[1] * moa;
