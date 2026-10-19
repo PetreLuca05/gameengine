@@ -1,0 +1,80 @@
+{
+  "_comment": "First-person framing reference (docs/CAMERA_HOLDPOINT.md \"Framing\"): the reference screenshot (MWII, world Field of View 80, Weapon Field of View Default, hip) and where its rifle sits on screen, fractions of the width / height from the top left. targets: the front sight post, the rear sight, the left hand's centre, exit_x the bore axis at the bottom edge, angle the sight line (deg above horizontal), cant the front post's lean (deg, + = clockwise). tolerance.left_hand is wider than the points': our rifle's support grip (an IK target, never moved) is 14 cm behind its front sight, the reference gun's hand sits under its front sight, and the arms camera only moves (it never turns). classes: the hand that keeps its screen place for the other weapons (the rifle's fitted left hand; the pistol's right hand), the sight height is the rifle's front sight. Edit with the arms tuner's reference overlay (fp_framing_*).",
+  "image": "docs/fp_framing/reference_mwii_80fov.jpg",
+  "pitch": 15,
+  "item": "rifle",
+  "targets": {
+    "front_sight": [
+      0.563,
+      0.566
+    ],
+    "rear_sight": [
+      0.688,
+      0.705
+    ],
+    "left_hand": [
+      0.525,
+      0.79
+    ],
+    "exit_x": 0.8,
+    "angle": 32.1,
+    "cant": 0
+  },
+  "tolerance": {
+    "point": 0.02,
+    "angle": 3,
+    "class_hand": 0.03,
+    "left_hand": 0.07
+  },
+  "classes": {
+    "pistol": {
+      "hand": "right",
+      "at": [
+        0.63,
+        0.8
+      ]
+    },
+    "smg": {
+      "hand": "left",
+      "at": [
+        0.57,
+        0.791
+      ]
+    },
+    "lmg": {
+      "hand": "left",
+      "at": [
+        0.57,
+        0.791
+      ]
+    },
+    "shotgun": {
+      "hand": "left",
+      "at": [
+        0.57,
+        0.791
+      ]
+    },
+    "dmr": {
+      "hand": "left",
+      "at": [
+        0.57,
+        0.791
+      ]
+    },
+    "sniper": {
+      "hand": "left",
+      "at": [
+        0.57,
+        0.791
+      ]
+    },
+    "crossbow": {
+      "hand": "left",
+      "at": [
+        0.57,
+        0.791
+      ]
+    }
+  }
+}

@@ -134,11 +134,12 @@ interpolated state and forwarded angles. The glide restarts on a target switch.
 
 ## Rule 3: the arms layer
 
-The arms from the upper arms down (the `arm` mesh: triangles ≥ 50 % skinned to the arm chains) and
-the held item with its attachments are drawn in the viewmodel pass:
+The forearms and hands (the `arm` mesh: triangles ≥ 50 % skinned to a forearm chain) and the held
+item with its attachments are drawn in the viewmodel pass:
 - with their own **camera**, **FOV** and depth buffer, so they never clip walls;
 - with the same skeleton instance as the body, so the bones are identical;
-- the body draw (`fpbody`) leaves them out, so nothing is drawn twice.
+- the body draw (`fpbody`) leaves them out, so nothing is drawn twice; it also hides the owner's
+  upper arms, like the head (the arms camera has its own position, "Framing").
 
 **The arms camera** is the pose eye: the frame where the hold point lives. A rigid layer transform
 in that camera's space places the drawn arms + item, in this order (`src/render/arms_layer.c`):
@@ -147,6 +148,7 @@ in that camera's space places the drawn arms + item, in this order (`src/render/
 |---|---|
 | present | the move from the drawn item exactly onto the presented one (the presentation hold point), at the hip as aimed (the sight on the view axis, computed, never tuned). The presentation hold point is screen-locked (no soft pitch limit), so the item and the hands keep their place on screen at any view pitch: the body's reach pull at a steep pitch never shows, and no bone moves for it (the forearms' angle still follows the body's elbows). Faded out while a clip owns the hands (reload, equip, sprint) |
 | tuned | `offset` (right, up, forward m), `rotation` (pitch, yaw, roll °) and `scale` (0.9 … 1.1) about the hold point, per hold point state and per item (`items`), blended over the state's `blend`. In ADS only the push along the view axis, the roll and the scale apply, about the sight |
+| camera | the arms camera's own position against the eye, per state / item (`camera.position`, right / up / forward m): it moves, never turns; the hip framing ("Framing" below). Aimed it is back on the eye, weighted by the item's own ADS progress |
 | kick | the player's cosmetic "Weapon kick" (`wpn_visual_scale`: the pose's kick shown smaller) + the first-person screen kick |
 | equip | a newly selected item comes up from below the arms frustum to its hold over `equip.time` (0.3 s: the gun is ready then). It starts `equip.pitch` muzzle down and its item length + `equip.margin` under the bottom edge |
 | aim | a rotation about the eye that puts the barrel where the world camera shows the shot: sway, the ADS counter of the camera kick, the arms FOV ≠ world FOV |
@@ -154,10 +156,11 @@ in that camera's space places the drawn arms + item, in this order (`src/render/
 **The arms FOV** is Weapon Field of View ("Field of view" below): a preset at the hip, the sight's own
 FOV aimed. It changes nothing but the arms projection, and the fidelity levels don't bound it.
 
-**The shoulder seam:** the body is drawn by the world camera, the arms by the arms camera. Arm
-vertices within `seam.r0` of an upper-arm joint keep the world camera's screen position, past
-`seam.r1` the arms camera's, smoothly between (`skin.vert`, `arms_shoulder` in the frame data; the
-depth stays the arms layer's).
+**The shoulder seam** (`seam.on`, off): the body is drawn by the world camera, the arms by the arms
+camera. When on, arm vertices within `seam.r0` of an upper-arm joint keep the world camera's screen
+position, past `seam.r1` the arms camera's, smoothly between (`skin.vert`, `arms_shoulder` in the
+frame data; the depth stays the arms layer's). Off, the arms camera draws only the forearms, hands
+and item: with its own position a blend would stretch the arm between the two cameras.
 
 **Everything else follows the arms camera:**
 - `render_viewmodel_to_world` maps an arms-layer point to where it appears (muzzle flash, tracers,
@@ -235,6 +238,83 @@ View, Affected = sight × FOV / 80, the blend's ends / monotony / steepest frame
 resulting FOVs, the multipliers, the presets and the lateral scale, the command round trip);
 `ctest -R arms_layer` (the hip sight keeps its pixel across the presets, aimed it stays centred);
 `tools/tests/fov_setting.cfg` + `fov_report` (80 / 120, both ADS modes, the presets, `sv_fov`).
+
+### Framing (the reference)
+
+The hip framing matches a Call of Duty: Modern Warfare II screenshot: world Field of View 80, Weapon
+Field of View Default, an iron-sighted rifle at the hip (`docs/fp_framing/reference_mwii_80fov.jpg`,
+the streamer's webcam inset blanked). Only the **arms camera** does it: per item, its own position
+against the eye (it moves, never turns) and the arms FOV. The item and the hands stay where the body
+holds them, the hold points are untouched, no bone moves.
+
+**The reference, measured** (fractions of the width / height from the top left; `assets/player/fp_framing.json`):
+
+| Point | Reference | Ours (rifle) |
+|---|---|---|
+| Front sight post | 0.563, 0.566 | 0.569, 0.553 |
+| Rear sight | 0.688, 0.705 | 0.689, 0.696 |
+| Left hand centre | 0.525, 0.79 | 0.586, 0.779 |
+| Bore at the bottom edge | 0.80 | 0.786 |
+| Sight line | 32.1° above horizontal | 33.8° |
+| Front post | upright (± 5°) | upright |
+| Visible length (front sight to the bottom edge) | 43 % of the height | 45 % |
+| Right hand | off screen bottom right | off screen (0.70, 1.05) |
+
+The reference's sight line passes through the screen centre: its rifle points straight ahead and the
+angle is perspective. The camera was pitched up ~15° there; the arms layer is screen-locked, so the
+framing is measured with the camera level and holds at any pitch.
+
+**The fit.** `fp_framing_fit` solves the camera's position (three numbers, Levenberg-Marquardt) that
+puts the held gun's front sight (the `front_sight` part's top), rear sight, left hand centre (wrist ..
+middle knuckle), bore exit, sight line and an upright post on the targets, through the arms camera's
+own projection. `fp_framing_sweep` repeats it per arms FOV: the residual is flat between 65 and 90
+(1.4 .. 1.6 % of the screen); from 75 up, parts reach the near plane. **Default = 70** (43° vertical),
+Narrow 60, Wide 85. The left hand stays ~6 % right of the reference's: our rifle's support grip (an IK
+target, never moved) is 14 cm behind its front sight, the reference gun's hand sits under its front
+sight, and a camera that only moves cannot change where the hand is on the gun (`tolerance.left_hand`
+7 %).
+
+**The other guns** keep the rifle's left hand on screen (the pistol its right hand at 0.63, 0.80) and
+its sight height, their camera near the rifle's:
+
+| Gun | Camera (right, up, forward m) | Hand off the target |
+|---|---|---|
+| rifle | 0.024, −0.042, −0.220 | (the reference) |
+| pistol | 0.013, −0.025, −0.306 | right hand −0.014, +0.020 |
+| smg | 0.038, −0.061, −0.288 | +0.006, +0.005 |
+| lmg | 0.033, −0.013, −0.369 | −0.011, +0.023 |
+| shotgun | 0.036, −0.051, −0.221 | −0.001, +0.000 |
+| dmr | 0.033, −0.049, −0.163 | +0.010, −0.010 |
+| sniper | 0.031, −0.057, −0.109 | +0.013, −0.018 |
+| crossbow | 0.043, −0.048, −0.285 | −0.005, +0.009 |
+
+The fit writes the camera to the item's hip / crouch / prone / sprint states (`arms_layer.json`
+`items`, `camera.position`). Aimed the camera is back on the eye: its weight follows the item itself
+(how far the presented sight has come from its aimed place to its hip place), so hip ↔ ADS moves on
+one straight screen path, no overshoot. The ADS state takes the hip's camera (a second, state blend of
+it would lag the item).
+
+**What the arms camera draws:** the forearms, hands and the item only (`arm` mesh: triangles ≥ 50 %
+skinned to a forearm chain). The body is the world camera's; the owner's upper arms are hidden in the
+first-person body like the head (a camera 20 cm behind the eye would see the shoulders from inside, and
+an upper arm drawn by the world camera would not meet the forearm). The shoulder seam is off
+(`seam.on`).
+
+**Tools:** `fp_framing [tag]` (this frame against the targets: PASS / FAIL, triangles cut by the near
+plane on screen, the reach), `fp_framing_fit [fov]`, `fp_framing_sweep lo hi step`,
+`fp_framing_overlay [0|1] [alpha]` (the reference over the view with the targets and this frame's
+points), `fp_framing_track frames` (per-frame screen points), `fp_framing_capture name` (screenshot +
+measurements into `docs/fp_framing/`; `py tools/fp_framing_compare.py name` composes
+`name_compare.jpg`: reference / ours / 50 % blend; the raw captures are git-ignored). The arms tuner's "Reference framing" section: the
+overlay, its opacity, draggable targets, camera level / the reference's pitch, fit, capture, save the
+targets; "Camera" rows per state and item; the Weapon Field of View presets.
+
+**Tests:** `tools/tests/fp_framing.cfg` + `fp_framing_check.py` (the rifle against the reference;
+the same placement at Field of View 100 / 120 and 60° down / up; the sight's place across Narrow /
+Wide; hip → ADS → hip without overshoot; every other gun's hand, near plane and muzzle);
+`ctest -R arms_layer` (the camera moves, never turns, the input untouched, aimed the sight centred).
+Comparison snapshots: `docs/fp_framing/rifle_fov80_compare.jpg`, `rifle_fov120_compare.jpg`,
+`rifle_fov80_pitch15_compare.jpg`.
 
 ## Solve order (no feedback loop)
 

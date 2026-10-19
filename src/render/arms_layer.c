@@ -23,6 +23,7 @@ void arms_layer_defaults(ArmsLayerDef *d) {
     d->equip_time = 0.3f;
     d->equip_pitch = 35.0f;
     d->equip_margin = 0.05f;
+    d->seam = false;
     d->seam_r0 = 0.06f;
     d->seam_r1 = 0.16f;
     d->znear = 0.01f;
@@ -49,6 +50,8 @@ static ArmsPose parse_pose(const cJSON *o, ArmsPose p) {
     p.rotation = jv3(o, "rotation", p.rotation);
     p.scale = clampf(jf(o, "scale", p.scale), 0.9f, 1.1f);
     p.fov_add = clampf(jf(o, "fov_add", p.fov_add), -20.0f, 20.0f);
+    const cJSON *c = jget(o, "camera");
+    p.cam_pos = jv3(c, "position", p.cam_pos);
     return p;
 }
 
@@ -80,6 +83,7 @@ void arms_layer_parse(ArmsLayerDef *d, const cJSON *root) {
     d->equip_pitch = jf(eq, "pitch", d->equip_pitch);
     d->equip_margin = fmaxf(0.0f, jf(eq, "margin", d->equip_margin));
     const cJSON *seam = jget(root, "seam");
+    if (cJSON_IsBool(jget(seam, "on"))) d->seam = cJSON_IsTrue(jget(seam, "on"));
     d->seam_r0 = fmaxf(0.0f, jf(seam, "r0", d->seam_r0));
     d->seam_r1 = fmaxf(d->seam_r0 + 0.01f, jf(seam, "r1", d->seam_r1));
     d->znear = clampf(jf(root, "znear", d->znear), 0.002f, 0.05f);
@@ -100,6 +104,8 @@ static void put_pose(cJSON *o, ArmsPose p) {
     put_v3(o, "rotation", p.rotation);
     cJSON_AddNumberToObject(o, "scale", r4(p.scale));
     cJSON_AddNumberToObject(o, "fov_add", r4(p.fov_add));
+    cJSON *c = cJSON_AddObjectToObject(o, "camera");
+    put_v3(c, "position", p.cam_pos);
 }
 
 char *arms_layer_to_json(const ArmsLayerDef *d) {
@@ -108,7 +114,10 @@ char *arms_layer_to_json(const ArmsLayerDef *d) {
                             "First-person arms layer (docs/CAMERA_HOLDPOINT.md \"Rule 3\"): the arms + held item drawn with their own camera. Per hold point state "
                             "(and per item under \"items\"): offset (right, up, forward m), rotation (pitch, yaw, roll deg) and scale (0.9 .. 1.1) about the hold "
                             "point, fov_add (deg on the Weapon Field of View); in ADS only offset[2] (push), rotation[2] (roll) and scale (about the sight) apply. "
-                            "equip: the raise from below the view. seam: arm vertices near the shoulder blend from the world camera (r0) to the arms camera (r1). "
+                            "camera: the arms camera's own position against the eye (right, up, forward m; it moves, never turns), the "
+                            "hip framing (docs/CAMERA_HOLDPOINT.md \"Framing\"); aimed it is back on the eye. equip: the raise from below the view. seam (on: "
+                            "arm vertices near the shoulder blend from the world camera (r0) to the arms camera (r1); off: the arms camera draws only the "
+                            "arms + item). "
                             "weapon_fov: the Weapon Field of View presets (hip, horizontal deg at 16:9; the layer moves sideways with them so the sight keeps "
                             "its place on screen). Edit live with arms_tuner.");
     cJSON *st = cJSON_AddObjectToObject(o, "states");
@@ -128,6 +137,7 @@ char *arms_layer_to_json(const ArmsLayerDef *d) {
     cJSON_AddNumberToObject(eq, "pitch", r4(d->equip_pitch));
     cJSON_AddNumberToObject(eq, "margin", r4(d->equip_margin));
     cJSON *seam = cJSON_AddObjectToObject(o, "seam");
+    cJSON_AddBoolToObject(seam, "on", d->seam);
     cJSON_AddNumberToObject(seam, "r0", r4(d->seam_r0));
     cJSON_AddNumberToObject(seam, "r1", r4(d->seam_r1));
     cJSON_AddNumberToObject(o, "znear", r4(d->znear));
@@ -176,6 +186,7 @@ static ArmsPose pose_lerp(ArmsPose a, ArmsPose b, float t) {
     r.rotation = v3_lerp(a.rotation, b.rotation, t);
     r.scale = lerpf(a.scale, b.scale, t);
     r.fov_add = lerpf(a.fov_add, b.fov_add, t);
+    r.cam_pos = v3_lerp(a.cam_pos, b.cam_pos, t);
     return r;
 }
 
@@ -214,6 +225,9 @@ void arms_layer_eval(const ArmsLayerDef *d, ArmsLayerState *st, const ArmsLayerI
     int state = DG_CLAMP(in->hp_state, 0, HP_STATE_COUNT - 1);
     u32 ih = str_hash(in->item_id);
     ArmsPose target = arms_layer_target(d, state, in->item_id);
+    // Aimed the camera is the hip's, faded by the item's own ADS progress below (a second, state blend
+    // of it would lag the item and swing it past its place on screen).
+    if (state == HP_ADS) target.cam_pos = arms_layer_target(d, HP_HIP, in->item_id).cam_pos;
     // State / item changes ease from wherever the layer is (smootherstep over the state's blend).
     if (!st->init) {
         st->init = true;
@@ -251,14 +265,38 @@ void arms_layer_eval(const ArmsLayerDef *d, ArmsLayerState *st, const ArmsLayerI
     vec3 pivot = in->has_item ? v3_lerp(xf_point(item, in->pivot), xf_point(item, in->sight), ads) : v3(0.12f, -0.18f, -0.35f);
     // Tuned placement about the hold point.
     mat4 T = about(pivot, hp_euler_deg(p.rotation), p.scale, hp_cam_pos(p.offset));
-    // Weapon Field of View: sideways at the same depth by the preset's tangent ratio, so the sight keeps
-    // its pixel at the hip (aimed it is on the view axis already).
-    if (in->has_item && in->lateral_scale > 0.0f && fabsf(in->lateral_scale - 1.0f) > 1e-6f) {
-        vec3 s = mat4_mul_point(T, xf_point(item, in->sight));
-        float k = (in->lateral_scale - 1.0f) * (1.0f - ads);
-        T = mat4_mul(mat4_translate(v3(s.x * k, s.y * k, 0.0f)), T);
-    }
+    vec3 sight_t = in->has_item ? mat4_mul_point(T, xf_point(item, in->sight)) : v3(0, 0, -0.3f);
     pivot = mat4_mul_point(T, pivot);
+    // The arms camera's own position (the hip framing; it never turns): pose-eye space -> arms camera
+    // space. Aimed it is back on the eye, so the sight lands on the screen centre. Its weight follows
+    // the item itself: how far the presented sight has come from its aimed place to its hip place
+    // (3D: item and camera then move along one line in camera space, a straight path on screen; a
+    // separate ease would let the item arrive first and swing past its place). Until the item has been
+    // aimed once, the sight's distance from the view axis against its hip place.
+    float cw = 1.0f - ads;
+    if (in->has_item) {
+        vec3 sc = xf_point(item, in->sight);
+        if (st->sight_item != ih) {
+            st->hip_sight_ok = st->ads_sight_ok = false;
+            st->sight_item = ih;
+        }
+        if (ads <= 0.0f) {
+            st->hip_sight = sc;
+            st->hip_sight_ok = true;
+        } else if (ads >= 1.0f) {
+            st->ads_sight = sc;
+            st->ads_sight_ok = true;
+            cw = 0.0f;
+        } else if (st->hip_sight_ok) {
+            vec3 a = st->ads_sight_ok ? st->ads_sight : v3(0, 0, sc.z), d = v3_sub(st->hip_sight, a);
+            if (!st->ads_sight_ok) d.z = 0.0f;
+            float d2 = v3_dot(d, d);
+            if (d2 > 1e-8f) cw = clampf(v3_dot(v3_sub(sc, a), d) / d2, 0.0f, 1.0f);
+        }
+    }
+    mat4 C = mat4_translate(v3_scale(hp_cam_pos(p.cam_pos), -cw));
+    out->cam_w = cw;
+    out->sight = in->has_item ? xf_point(item, in->sight) : v3(0, 0, 0);
     // Cosmetic sway (Weapon sway < 1): the pose's sway shown smaller - about the pivot at the hip, about
     // the sight aimed (the hold point turns it there).
     mat4 Sw = mat4_identity();
@@ -289,16 +327,25 @@ void arms_layer_eval(const ArmsLayerDef *d, ArmsLayerState *st, const ArmsLayerI
     float raise = 0.0f;
     if (in->equip_t >= 0.0f && d->equip_time > 1e-3f && in->equip_t < d->equip_time) {
         raise = 1.0f - smoother(in->equip_t / d->equip_time);
-        float depth = fmaxf(-pivot.z, 0.05f);
+        vec3 pc = mat4_mul_point(C, pivot);   // seen from the arms camera
+        float depth = fmaxf(-pc.z, 0.05f);
         float th = tanf(fmaxf(in->fov_hands, 10.0f) * 0.5f * DG_DEG2RAD);
         float reach = fmaxf(in->length, 0.35f) + d->equip_margin;   // the item and the forearms around the hold point
-        float drop = pivot.y + depth * th + reach;
+        float drop = pc.y + depth * th + reach;
         E = about(pivot, quat_axis_angle(v3(1, 0, 0), -d->equip_pitch * DG_DEG2RAD * raise), 1.0f, v3(0, -drop * raise, 0));
     }
     // Aim: where the world camera shows the shot (sway, the ADS counter of the camera kick, the FOVs).
     quat a = arms_layer_aim_rot(in->aim_deg, in->aim_pitch, in->fov_world, in->fov_hands);
     mat4 A = mat4_from_quat(a);
-    out->layer = mat4_mul(A, mat4_mul(E, mat4_mul(K, mat4_mul(Sw, mat4_mul(T, P)))));
+    // Weapon Field of View: sideways at the same depth (arms camera space) by the preset's tangent ratio,
+    // so the sight keeps its pixel at the hip (aimed it is on the view axis already).
+    mat4 L = mat4_identity();
+    if (in->has_item && in->lateral_scale > 0.0f && fabsf(in->lateral_scale - 1.0f) > 1e-6f) {
+        vec3 s = mat4_mul_point(C, sight_t);
+        float k = (in->lateral_scale - 1.0f) * cw;
+        L = mat4_translate(v3(s.x * k, s.y * k, 0.0f));
+    }
+    out->layer = mat4_mul(L, mat4_mul(C, mat4_mul(A, mat4_mul(E, mat4_mul(K, mat4_mul(Sw, mat4_mul(T, P)))))));
     Xform eye = in->pose_eye;
     eye.s = v3(1, 1, 1);
     mat4 inv_eye = mat4_inverse_rigid(mat4_trs(eye.t, eye.r, v3(1, 1, 1)));

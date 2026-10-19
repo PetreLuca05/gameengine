@@ -15,6 +15,9 @@
 //   sway     the player's cosmetic "Weapon sway" (the pose's own sway shown smaller)
 //   kick     the player's cosmetic "Weapon kick" (the pose's own kick shown smaller) + the first-person
 //            screen kick towards the eye
+//   camera   the arms camera's own position against the pose eye, per state / item (the hip framing:
+//            the camera moves, never turns; the arms and item stay where the body holds them); back on
+//            the eye aimed
 //   equip    a newly selected item comes up from below the view (out of the arms frustum) to its hold
 //   aim      a rotation about the eye that puts the barrel where the world camera shows the shot
 //            (sway, the ADS counter of the camera kick, the Hands FOV against the world FOV)
@@ -29,8 +32,10 @@
 struct cJSON;
 
 // A rigid placement of the layer in camera space: offset (right, up, forward) m, rotation (pitch,
-// yaw, roll) deg as the hold point's, uniform scale, and degrees added to the Hands FOV (hip).
-typedef struct ArmsPose { vec3 offset, rotation; float scale, fov_add; } ArmsPose;
+// yaw, roll) deg as the hold point's, uniform scale, and degrees added to the arms FOV (hip). The
+// arms camera's own position against the pose eye: cam_pos (right, up, forward m; it moves, never
+// turns) - it frames the arms + item without moving them.
+typedef struct ArmsPose { vec3 offset, rotation; float scale, fov_add; vec3 cam_pos; } ArmsPose;
 
 #define ARMS_MAX_ITEMS 64
 typedef struct ArmsItem {
@@ -47,8 +52,9 @@ typedef struct ArmsLayerDef {
     float equip_time;                 // s from below the view to the hold point (the gun is ready at 0.3 s)
     float equip_pitch;                // deg muzzle down at the start of the raise
     float equip_margin;               // m below the frustum's bottom edge
-    float seam_r0, seam_r1;           // shoulder seam: arm vertices within r0 of the upper-arm joint are drawn with the
-                                      // world camera, past r1 with the arms camera (m)
+    bool seam;                        // shoulder seam on: arm vertices within r0 of the upper-arm joint are drawn with
+    float seam_r0, seam_r1;           // the world camera, past r1 with the arms camera (m); off: the arms camera draws
+                                      // the arms + item only, the body is the world camera's
     float znear;                      // the arms projection's near plane (m)
     float weapon_fov[WEAPON_FOV_COUNT];   // Weapon Field of View presets: narrow, default, wide (hip, horizontal deg at 16:9)
 } ArmsLayerDef;
@@ -59,6 +65,9 @@ typedef struct ArmsLayerState {
     u32 item_hash;
     float t, dur;
     ArmsPose from, cur;
+    bool hip_sight_ok, ads_sight_ok;
+    u32 sight_item;                   // the item they were taken with
+    vec3 hip_sight, ads_sight;        // the presented sight's last hip / aimed place (pose-eye space): the camera's ADS weight
 } ArmsLayerState;
 
 typedef struct ArmsLayerIn {
@@ -91,6 +100,8 @@ typedef struct ArmsLayerOut {
     mat4 layer;                       // pose-eye space -> arms camera space (the rigid layer, scale included)
     float fov_add;                    // deg to add to the Hands FOV this frame
     float raise;                      // 0..1 how far the equip raise still has to go (1 = out of view)
+    float cam_w;                      // the arms camera's weight this frame (1 at the hip, 0 aimed)
+    vec3 sight;                       // the presented sight (pose-eye space)
 } ArmsLayerOut;
 
 void arms_layer_defaults(ArmsLayerDef *d);

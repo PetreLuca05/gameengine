@@ -264,6 +264,13 @@ bool game_arms_last(struct ArmsLayerIn *in, struct ArmsLayerOut *out);
 // The arms layer's hip FOV (vertical deg): the viewed player's Weapon Field of View preset
 // (arms_layer.json weapon_fov; cl_hands_fov overrides it, dev), Hor+ like the world.
 float game_arms_hip_fov(void);
+struct CharsFpArms;
+bool game_arms_last_fp(struct CharsFpArms *fa);   // the first-person arms the last layer was built from
+// First-person framing against a reference (game_fp_framing.c, docs/CAMERA_HOLDPOINT.md "Framing").
+void fp_framing_register(void);
+void fp_framing_draw(void);                       // the reference overlay + markers (and per-frame tracking)
+struct nk_context;
+void fp_framing_tuner(struct nk_context *ctx);    // the arms tuner's "Reference framing" section
 void game_fire_on_shot(const struct ShotEvent *ev);
 void game_fire_tick(void);                               // per sim tick, before chars_present_tick
 const struct FireAnimOut *game_fire_sample(float alpha); // this frame's interpolated output (camera layer, hands)

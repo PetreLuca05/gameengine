@@ -592,6 +592,7 @@ void hands_update(const HandsInput *in) {
 static u32 s_world_item_flags = MAT_NO_SHADOW;   // flags for third-person held items (hands_draw_held)
 static float s_draw_scale = 1.0f;                // held item scale (the grip root's calibration, docs/HANDPOSE.md)
 static float s_fp_scale = 1.0f;                  // the same for the first-person item this frame
+static float s_fp_scale_drawn = 1.0f;            // ... as the last first-person draw used it (fp_framing)
 
 static void draw_box(vec3 center, quat rot, vec3 half, vec4 color, bool viewmodel) {
     DrawItem d;
@@ -804,6 +805,8 @@ bool hands_emitter(int kind, vec3 *pos, vec3 *fwd) {
 bool hands_muzzle(vec3 *pos, vec3 *fwd) { return H && H->weapon ? fp_gun_point(H->weapon->sockets.muzzle, pos, fwd) : false; }
 bool hands_barrel_tip(vec3 *pos, vec3 *fwd) { return H && H->weapon ? fp_gun_point(H->weapon->muzzle_offset, pos, fwd) : false; }
 
+float hands_fp_scale(void) { return s_fp_scale_drawn; }
+
 bool hands_fp_item(vec3 *pos, quat *rot, const WeaponDef **wd) {
     if (!H || !H->initialized || !H->weapon) return false;
     if (pos) *pos = H->weapon_pos;
@@ -862,6 +865,7 @@ void hands_render(void) {
         for (int h = 0; h < 2; h++) draw_arm(&H->chain[h], h, H->cam_rot, true);
     H->body_arms = false;
     s_draw_scale = s_fp_scale;
+    s_fp_scale_drawn = s_fp_scale;
     s_mech_cur = &s_mech_fp;
     if (H->weapon) draw_weapon(H->weapon, H->weapon_pos, H->weapon_rot, true);
     else if (H->held_item && H->held_item->kind != ITEM_WEAPON) draw_held_item(H->held_item, H->weapon_pos, H->weapon_rot, true);

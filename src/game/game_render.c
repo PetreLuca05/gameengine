@@ -245,6 +245,7 @@ void game_render_init(void) {
     shadow_sky_register();
     terrain_game_register();
     ground_ref_register();
+    fp_framing_register();
     char_preview_register();
     items_game_register();
     blender_open_register();
@@ -1214,6 +1215,7 @@ void game_render(void) {
     daynight_draw();
     shadow_sky_draw();
     ground_ref_draw();
+    fp_framing_draw();
     char_preview_dev_draw();
     weather_draw();
     game_audio_draw(cam.pos);

@@ -60,3 +60,6 @@ Thumbs.db
 
 # Cell images turned a quarter (bake_cells writes them for tools; docs/INVENTORY.md "Cell images")
 /assets/ui/cells/*_r.png
+
+# First-person framing captures (fp_framing_capture; the *_compare.jpg sheets are committed)
+docs/fp_framing/*.png

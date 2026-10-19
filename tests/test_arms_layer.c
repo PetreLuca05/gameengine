@@ -8,6 +8,7 @@
 //  5) Aim: the barrel's vanishing point lands where the world camera shows the shot (sway / kick
 //     counter with Hands FOV != world FOV).
 //  6) Weapon Field of View: the presets keep the hip sight on its pixel, aimed it stays centred.
+//  7) The arms camera moves (never turns) without touching the input; aimed it is back on the eye.
 #include "render/arms_layer.h"
 #include "player/holdpoint.h"
 #include "player/fov.h"
@@ -202,6 +203,38 @@ int main(void) {
         CHECK(worst_ads < 1e-4f, "Weapon FOV: aimed, the sight is %g NDC off the centre", worst_ads);
         printf("  Weapon FOV: the hip sight within %.2g of the screen across Narrow / Default / Wide (4 cm at the sight %.3f / %.3f / %.3f NDC), aimed %.2g NDC off the centre\n",
                worst, size[0], size[1], size[2], worst_ads);
+    }
+    // 7) The arms camera's own position (the hip framing): the view moves by it in camera space and
+    //    never turns (the eye's rotation), the input is untouched; aimed it is back on the eye, the
+    //    presented sight on the screen centre.
+    {
+        arms_layer_defaults(&d);
+        ArmsPose *p = arms_layer_edit(&d, HP_HIP, "rifle");
+        p->cam_pos = v3(0.03f, -0.05f, -0.22f);   // right, up, forward: 22 cm back
+        arms_layer_reset(&st);
+        ArmsLayerIn in = base_in(eye), before = base_in(eye);
+        arms_layer_eval(&d, &st, &in, &out);
+        mat4 eye_view = mat4_fps_view(eye.t, yaw, pitch, 0);
+        // view = translate(-camera) x the eye's view: the same rotation, the camera's offset.
+        mat4 want = mat4_mul(mat4_translate(v3(-0.03f, 0.05f, -0.22f)), eye_view);
+        float e = mdiff(out.view, want), rot = 0;
+        for (int c = 0; c < 3; c++)
+            for (int r = 0; r < 3; r++) rot = fmaxf(rot, fabsf(out.view.m[c * 4 + r] - eye_view.m[c * 4 + r]));
+        CHECK(e < 1e-4f, "camera: the arms view is %g off translate(-camera) x the eye's view", e);
+        CHECK(rot < 1e-5f, "camera: the arms view turned (%g)", rot);
+        CHECK(!memcmp(&in, &before, sizeof(in)), "camera: the input changed");
+        // Aimed: back on the eye, the sight centred.
+        arms_layer_reset(&st);
+        in.hp_state = HP_ADS;
+        in.ads_w = 1.0f;
+        in.present = xf_mul(xf_make(v3_sub(v3(0, 0, -0.12f), in.sight), quat_identity()), xf_inverse(in.item_cam));
+        arms_layer_edit(&d, HP_ADS, "rifle")->cam_pos = v3(0.03f, -0.05f, -0.22f);   // even if the data had one
+        arms_layer_eval(&d, &st, &in, &out);
+        mat4 proj = mat4_perspective(in.fov_hands * DG_DEG2RAD, 16.0f / 9.0f, 0.01f, 100.0f);
+        float off = v2_len(ndc(proj, out.view, xf_point(eye, xf_point(in.item_cam, in.sight))));
+        CHECK(off < 1e-4f, "camera: aimed, the sight is %g NDC off the centre", off);
+        printf("  camera: the view moves (%.2g off), never turns (%.2g), aimed the sight %.2g NDC off the centre\n", e, rot, off);
+        arms_layer_defaults(&d);
     }
     printf("%d checks, %d failed\n", g_checks, g_fails);
     return g_fails ? 1 : 0;

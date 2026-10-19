@@ -109,6 +109,7 @@ bool hands_barrel_tip(vec3 *pos, vec3 *fwd);
 // The first-person weapon this frame (viewmodel world space) and its effective definition
 // (attachments applied). False when no weapon is held.
 bool hands_fp_item(vec3 *pos, quat *rot, const struct WeaponDef **wd);
+float hands_fp_scale(void);   // the scale the last first-person item draw used (item space x this x rot + pos)
 void hands_reload_poses(void);
 // Editor (scene handpose, simulated cases, docs/HANDPOSE.md): the interaction with `target` held
 // at case timeline time t (s) instead of running on the use press. NULL / !active = off.

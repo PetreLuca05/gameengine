@@ -67,7 +67,7 @@ void arms_tuner_draw(void) {
         nk_layout_row_dynamic(ctx, S(18), 1);
         char info[200];
         if (live)
-            snprintf(info, sizeof(info), "now: %s, item %s, ADS %.2f, raise %.2f, Hands FOV %.1f (world %.1f)", holdpoint_state_name(in.hp_state),
+            snprintf(info, sizeof(info), "now: %s, item %s, ADS %.2f, raise %.2f, arms FOV %.1f (world %.1f)", holdpoint_state_name(in.hp_state),
                      in.item_id ? in.item_id : "-", in.ads_w, out.raise, in.fov_hands, in.fov_world);
         else
             snprintf(info, sizeof(info), "no arms layer this frame (first person, a held item)");
@@ -104,10 +104,16 @@ void arms_tuner_draw(void) {
             changed |= frow(ctx, "roll (deg)", &p->rotation.z, -45, 45, 0.1f);
             changed |= frow(ctx, "scale", &p->scale, 0.9f, 1.1f, 0.001f);
             if (!ads) changed |= frow(ctx, "FOV add (deg)", &p->fov_add, -20, 20, 0.1f);
+            if (!ads) {
+                // The arms camera's own position (the hip framing: the camera moves, never turns; not the arms).
+                changed |= frow(ctx, "camera right (m)", &p->cam_pos.x, -0.8f, 0.8f, 0.001f);
+                changed |= frow(ctx, "camera up (m)", &p->cam_pos.y, -0.8f, 0.8f, 0.001f);
+                changed |= frow(ctx, "camera forward (m)", &p->cam_pos.z, -0.8f, 0.8f, 0.001f);
+            }
             frow(ctx, "blend into (s)", &d->blend[T.state], 0, 1, 0.01f);
             nk_layout_row_dynamic(ctx, S(24), 1);
             if (nk_button_label(ctx, "Reset this state")) {
-                p->offset = p->rotation = v3(0, 0, 0);
+                p->offset = p->rotation = p->cam_pos = v3(0, 0, 0);
                 p->scale = 1.0f;
                 p->fov_add = 0.0f;
                 changed = true;
@@ -126,11 +132,21 @@ void arms_tuner_draw(void) {
             nk_tree_pop(ctx);
         }
         if (nk_tree_push(ctx, NK_TREE_TAB, "Shoulder seam / near plane", NK_MINIMIZED)) {
+            nk_layout_row_dynamic(ctx, S(20), 1);
+            nk_bool sm = d->seam;
+            if (nk_checkbox_label(ctx, "shoulder seam (off: the arms camera draws only the arms + item)", &sm)) d->seam = sm;
             frow(ctx, "world camera within (m)", &d->seam_r0, 0, 0.3f, 0.005f);
             frow(ctx, "arms camera past (m)", &d->seam_r1, 0.01f, 0.5f, 0.005f);
             frow(ctx, "near plane (m)", &d->znear, 0.002f, 0.05f, 0.001f);
             nk_tree_pop(ctx);
         }
+        if (nk_tree_push(ctx, NK_TREE_TAB, "Weapon Field of View presets (h16)", NK_MINIMIZED)) {
+            frow(ctx, "Narrow", &d->weapon_fov[WEAPON_FOV_NARROW], 30, 130, 0.5f);
+            frow(ctx, "Default", &d->weapon_fov[WEAPON_FOV_DEFAULT], 30, 130, 0.5f);
+            frow(ctx, "Wide", &d->weapon_fov[WEAPON_FOV_WIDE], 30, 130, 0.5f);
+            nk_tree_pop(ctx);
+        }
+        fp_framing_tuner(ctx);
         if (nk_tree_push(ctx, NK_TREE_TAB, "View", NK_MAXIMIZED)) {
             nk_layout_row_dynamic(ctx, S(20), 1);
             toggle_cvar(ctx, "arms layer wireframe", "r_arms_wireframe", 1);
