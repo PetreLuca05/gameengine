@@ -20,7 +20,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define TRACER_LIGHTS 6
 
 static struct {
     BalMuzzleHeat heat[MAX_PLAYERS + 1];
@@ -36,7 +35,15 @@ static struct {
     int preview_cart, preview_dev;
     float preview_barrel;
     double preview_next;
+    bool preview_shot;   // the preview's flash: always shown, its own size
+    Rng flash_rng;       // the flash's per-shot variation (visual only, never replicated)
 } F;
+
+// The flash varies shot to shot (docs/BALLISTICS.md "Muzzle flash"): the flame and its light show on
+// FLASH_CHANCE of the shots, each at its own size (1 +- FLASH_SIZE_VAR); the smoke, vapour, sparks,
+// blast and dust come with every shot.
+#define FLASH_CHANCE 0.3f
+#define FLASH_SIZE_VAR 0.3f
 
 static float cv(Cvar **c, const char *name, float def) {
     if (!*c) *c = cvar_find(name);
@@ -93,15 +100,20 @@ void bal_fx_muzzle(int slot, int cart, int device, float barrel, vec3 pos, vec3 
     BalMuzzleOut o;
     bal_muzzle_compose(&in, &o);
     const BalFlashParams *k = o.c;
-    spawn_part("muzzle_primary", pos, dir, &k[BFC_PRIMARY], 0.0f, viewmodel, k[BFC_PRIMARY].size, 1);
-    spawn_part("muzzle_mach", pos, dir, &k[BFC_MACH], k[BFC_MACH].dist, viewmodel, k[BFC_MACH].size, 1);
+    // This shot's flame: shown or not, and its size (0: none; the light goes with it).
+    if (!F.flash_rng.inc) F.flash_rng = rng_make((u64)(now * 1e6));
+    float fs = rng_float(&F.flash_rng) < FLASH_CHANCE ? rng_range(&F.flash_rng, 1.0f - FLASH_SIZE_VAR, 1.0f + FLASH_SIZE_VAR) : 0.0f;
+    if (F.preview_shot) fs = 1.0f;
+    log_info("TMPFLASH %.3f", fs);
+    spawn_part("muzzle_primary", pos, dir, &k[BFC_PRIMARY], 0.0f, viewmodel, k[BFC_PRIMARY].size * fs, 1);
+    spawn_part("muzzle_mach", pos, dir, &k[BFC_MACH], k[BFC_MACH].dist, viewmodel, k[BFC_MACH].size * fs, 1);
     {
         int ticks = DG_CLAMP((int)lrintf(k[BFC_SECONDARY].life * 60.0f), 1, 3);
         char name[32];
         snprintf(name, sizeof(name), "muzzle_secondary_%d", ticks);
-        spawn_part(name, pos, dir, &k[BFC_SECONDARY], k[BFC_SECONDARY].dist, viewmodel, k[BFC_SECONDARY].size, 1);
+        spawn_part(name, pos, dir, &k[BFC_SECONDARY], k[BFC_SECONDARY].dist, viewmodel, k[BFC_SECONDARY].size * fs, 1);
     }
-    spawn_part("muzzle_prongs", pos, dir, &k[BFC_PRONGS], k[BFC_PRONGS].dist, viewmodel, k[BFC_PRONGS].size, (float)DG_MAX(dev->prongs, 3));
+    spawn_part("muzzle_prongs", pos, dir, &k[BFC_PRONGS], k[BFC_PRONGS].dist, viewmodel, k[BFC_PRONGS].size * fs, (float)DG_MAX(dev->prongs, 3));
     if (k[BFC_VENTS].intensity > 0.01f && dev->port_count) {
         vec3 right = v3_cross(dir, v3(0, 1, 0));
         right = v3_len2(right) > 1e-6f ? v3_norm(right) : v3(1, 0, 0);
@@ -109,7 +121,7 @@ void bal_fx_muzzle(int slot, int cart, int device, float barrel, vec3 pos, vec3 
         for (int i = 0; i < dev->port_count; i++) {
             vec3 pd = dev->ports[i];
             vec3 wd = v3_norm(v3_add(v3_add(v3_scale(right, pd.x), v3_scale(up, pd.y)), v3_scale(dir, -pd.z)));
-            spawn_part("muzzle_vent", v3_madd(pos, dir, -0.02f), wd, &k[BFC_VENTS], 0.0f, false, k[BFC_VENTS].size, 1);
+            spawn_part("muzzle_vent", v3_madd(pos, dir, -0.02f), wd, &k[BFC_VENTS], 0.0f, false, k[BFC_VENTS].size * fs, 1);
         }
     }
     spawn_part("muzzle_vapor", pos, dir, &k[BFC_VAPOR], 0.0f, false, k[BFC_VAPOR].size, 1);
@@ -124,7 +136,7 @@ void bal_fx_muzzle(int slot, int cart, int device, float barrel, vec3 pos, vec3 
         bool shadow = cv(&F.vfx_quality, "vfx_quality", 2) >= 3.0f;
         BalFlashParams lt = k[BFC_LIGHT];
         lt.rgb = v3(1, 1, 1);
-        spawn_part(shadow ? "muzzle_light_shadow" : "muzzle_light", pos, dir, &lt, lt.dist, viewmodel, o.light_radius, 1);
+        spawn_part(shadow ? "muzzle_light_shadow" : "muzzle_light", pos, dir, &lt, lt.dist, viewmodel, o.light_radius * fminf(fs, 1.0f), 1);
     }
     if (o.dust && near) {
         BalFlashParams du = k[BFC_BLAST];
@@ -197,7 +209,9 @@ static void preview_tick(World *w, vec3 cam) {
     vec3 fwd = dir_from_angles(p->sim.move.yaw, p->sim.move.pitch);
     vec3 right = right_from_yaw(p->sim.move.yaw);
     (void)w;
+    F.preview_shot = true;
     bal_fx_muzzle(MAX_PLAYERS, F.preview_cart, F.preview_dev, F.preview_barrel, v3_madd(v3_madd(cam, fwd, 1.6f), right, -0.35f), right, false);
+    F.preview_shot = false;
 }
 
 void bal_fx_init(void) {
@@ -237,15 +251,9 @@ static bool magnified_ads(World *w) {
     return o && o->zoom >= 3.0f;
 }
 
-// Night: the nearest tracers light their surroundings (small moving point lights).
-typedef struct TracerLights {
-    struct { float d; vec3 pos; vec3 col; float k; } l[TRACER_LIGHTS];
-    int n;
-} TracerLights;
-
-// One tracer for this frame: the velocity-stretched head ending at l->b.pos and the curved tail.
-// Returns its look (intensity 0: dark, nothing drawn).
-static BalTracerLook draw_tracer(const BalLive *l, vec3 cam, float shutter, bool arcade, TracerLights *night) {
+// One tracer for this frame: the velocity-stretched head ending at l->b.pos and the curved tail. It
+// glows (emissive, bloom) and lights nothing. Returns its look (intensity 0: dark, nothing drawn).
+static BalTracerLook draw_tracer(const BalLive *l, vec3 cam, float shutter, bool arcade) {
     const BalCartridge *c = &bal_data()->cart[l->b.cart];
     BalTracerLook look = bal_tracer_look(&c->tracer, l->b.dist, l->b.time, arcade);
     if (look.intensity <= 0.0f) return look;
@@ -275,19 +283,6 @@ static BalTracerLook draw_tracer(const BalLive *l, vec3 cam, float shutter, bool
             prev = p;
         }
     }
-    if (night) {
-        int slot = night->n < TRACER_LIGHTS ? night->n++ : -1;
-        if (slot < 0) {
-            for (int q = 0; q < TRACER_LIGHTS; q++)
-                if (night->l[q].d > cam_d && (slot < 0 || night->l[q].d > night->l[slot].d)) slot = q;
-        }
-        if (slot >= 0) {
-            night->l[slot].d = cam_d;
-            night->l[slot].pos = head;
-            night->l[slot].col = rgb;
-            night->l[slot].k = k;
-        }
-    }
     return look;
 }
 
@@ -304,10 +299,6 @@ void bal_fx_frame(World *w, vec3 cam, float dt) {
     // Shutter: the frame's time in the simulation's clock (slow motion shortens the streak).
     float shutter = cv(&F.shutter, "shutter_preview", 0);
     if (shutter <= 0.0f) shutter = clampf(dt, 1.0f / 240.0f, 1.0f / 20.0f) * cv(&F.timescale, "host_timescale", 1.0f);
-    // Night: the scene is exposed for darkness (the tracers light their surroundings).
-    TracerLights lights;
-    lights.n = 0;
-    TracerLights *night = daynight_daylight() < 0.2f ? &lights : NULL;
     bool scope = F.trace && F.trace->i && magnified_ads(w);
     bool vapor = false;
     if (F.vapor && F.vapor->i) {
@@ -346,7 +337,7 @@ void bal_fx_frame(World *w, vec3 cam, float dt) {
             vfx_game_spawn("bullet_vapor", &sp);
         }
         if (!(l->b.flags & BF_TRACER)) continue;
-        BalTracerLook look = draw_tracer(l, cam, shutter, arcade, night);
+        BalTracerLook look = draw_tracer(l, cam, shutter, arcade);
         if (look.intensity <= 0.0f) {
             if (F.smoke_h[i]) { vfx_sys_stop(vfx_game_system(), F.smoke_h[i]); F.smoke_h[i] = 0; }
             continue;
@@ -366,9 +357,5 @@ void bal_fx_frame(World *w, vec3 cam, float dt) {
     // Tracers that stopped since the last frame: their last streak, up to the impact (hits closer
     // than one tick's flight are otherwise never drawn).
     const BalLive *ended = bal_world_ended_tracers(&count);
-    for (int i = 0; i < count; i++) draw_tracer(&ended[i], cam, shutter, arcade, night);
-    for (int i = 0; i < lights.n; i++) {
-        PointLight pl = { lights.l[i].pos, 5.0f, lights.l[i].col, 2.5f * lights.l[i].k, LIGHT_NO_SHADOW };
-        render_add_light(&pl);
-    }
+    for (int i = 0; i < count; i++) draw_tracer(&ended[i], cam, shutter, arcade);
 }

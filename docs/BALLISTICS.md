@@ -22,7 +22,7 @@ The original planning notes, with the survey of the old code, are in `BALLISTICS
 | `bal_tracer.c` | Tracer rounds per magazine, igniter / burn / burnout states, streak length. Pure. |
 | `bal_muzzle.c` | The flash composer, exposure gain, blackbody colours, heat / suppressor pop. Pure. |
 | `bal_world.c` | Bullet pool, launch, per-tick swept hits with lag compensation, events, replays, crack / report scheduling, console. |
-| `bal_fx.c` | Spawns the composed flash, draws tracers (head + curved tail + smoke + night light), bullet trace / vapour trails, `muzzle_preview`, the fire hook. |
+| `bal_fx.c` | Spawns the composed flash, draws tracers (head + curved tail + smoke: they glow, they light nothing), bullet trace / vapour trails, `muzzle_preview`, the fire hook. |
 | `tests/test_ballistics.c` | Unit tests (ctest `ballistics`). |
 | `tools/ballistics_ref.py` | Reference trajectories (py-ballisticcalc) → `tests/data/ballistics_ref.json`. |
 | `tools/sfxgen_ballistics.py` | Crack / whizz / plate ring / distant-report sounds. |
@@ -196,6 +196,11 @@ The supersonic crack is never changed by a device; only subsonic ammunition remo
 Inputs: the cartridge, `barrel_length` (L), the device, the heat of recent fire, near-surface
 (two 0.5 m rays from the muzzle), and the scene exposure.
 
+**Shot to shot** (`bal_fx.c`, 2026-10-20): the flame (primary, mach, secondary, prongs, port vents)
+and its light show on 3 shots in 10 (`FLASH_CHANCE`), each at its own size (x 0.7 .. 1.3,
+`FLASH_SIZE_VAR`); the smoke, vapour, sparks, blast and dust come with every shot. Visual only (a
+local RNG, never replicated); `muzzle_preview` always shows the full flash.
+
 | Quantity | Formula | Basis |
 |---|---|---|
 | Unburnt fraction u | `clamp(0.15 + 0.85·(1 − L/burn_length), 0.05, 0.9)` | Propellant still burning at the crown. |
@@ -252,7 +257,7 @@ camera, seen from the side, in slow motion.
 - Stopped tracers: a tracer that stops in something leaves a copy (`bal_world_ended_tracers`) whose head is at the impact. It is drawn until the next tick after a frame has shown it. Without it, a hit closer than one tick's flight (about 16 m for 5.56 at 60 Hz, more when several ticks run per frame) was never drawn, and every tracer vanished one tick short of its target.
 - Width at least about 1.5 px.
 - A faint smoke trail while burning (`tracer_smoke`).
-- At night the 6 nearest tracers are small point lights.
+- Tracers glow (emissive head and tail, bloom) and cast no light (2026-10-20: the 6 nearest were point lights at night).
 - Tracers that stop in dry grass call `fire_try_ignite`, a stub until foliage burns.
 
 **Non-tracer rounds**
