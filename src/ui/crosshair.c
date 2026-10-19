@@ -31,15 +31,18 @@ typedef struct CrossStyle {
 
 static struct {
     CrossStyle st;
-    Cvar *style, *length, *thickness, *gap, *opacity, *color, *outline, *follow_kick, *hitmarker, *target_color;
+    Cvar *style, *length, *thickness, *gap, *opacity, *color, *outline, *hitmarker, *target_color;
     Cvar *obstruct, *obstruct_lerp;
     float ads_fade;    // 0 = shown, 1 = hidden (ADS)
     // Aim model (docs/AIM.md): the crosshair's offset from the screen centre to the obstruction Q (smoothed).
     vec2 obs_off;
     float obs_w;       // 0 = clear, 1 = obstructed (smoothed)
+    bool obs_lock;     // settled on Q: follows it exactly until it jumps (or clears)
+    float obs_settle;  // s on the same obstruction (class, Q's distance)
+    float obs_qdist;   // Q's distance last frame (m)
     int obs_cls;       // last obstruction class (kept while fading out)
     vec2 last_pos;     // where the crosshair was drawn (tests: aim_report / crosshair_pos)
-    vec2 last_target;  // where it was heading that frame (Q's projection when obstructed, else P's)
+    vec2 last_target;  // where it was heading that frame (Q's projection when obstructed, else the centre)
     bool last_valid;
 } CH;
 
@@ -144,7 +147,7 @@ static void cmd_reload(int argc, const char **argv) {
 
 static void cmd_pos(int argc, const char **argv) {
     (void)argc; (void)argv;
-    log_info("crosshair_pos: %.1f %.1f (%s) obstruction %s %.2f offset %.1f %.1f ui %.0fx%.0f target %.1f %.1f", CH.last_pos.x, CH.last_pos.y,
+    log_info("crosshair_pos: %.2f %.2f (%s) obstruction %s %.2f offset %.2f %.2f ui %.0fx%.0f target %.2f %.2f", CH.last_pos.x, CH.last_pos.y,
              CH.last_valid ? "drawn" : "hidden", aim_class_name(CH.obs_cls), CH.obs_w, CH.obs_off.x, CH.obs_off.y, ui_width(), ui_height(), CH.last_target.x,
              CH.last_target.y);
 }
@@ -157,10 +160,9 @@ void crosshair_init(void) {
     CH.opacity = cvar_reg_float("crosshair_opacity", 0.9f, 0.1f, 1, CVAR_ARCHIVE | CVAR_EDITABLE, "crosshair opacity");
     CH.color = cvar_reg_int("crosshair_color", 0, 0, MAX_COLORS - 1, CVAR_ARCHIVE | CVAR_EDITABLE, "crosshair color preset (assets/ui/crosshair.json)");
     CH.outline = cvar_reg_bool("crosshair_outline", true, CVAR_ARCHIVE | CVAR_EDITABLE, "dark outline around the crosshair");
-    CH.follow_kick = cvar_reg_bool("crosshair_follow_kick", false, CVAR_LOCKED, "pin the crosshair to the screen center (follows the camera kick) instead of the true aim point");
     CH.hitmarker = cvar_reg_bool("crosshair_hitmarker", true, CVAR_ARCHIVE | CVAR_EDITABLE, "show hit markers");
     CH.target_color = cvar_reg_bool("crosshair_target_color", true, CVAR_ARCHIVE | CVAR_EDITABLE, "tint the crosshair over enemies / friendlies");
-    CH.obstruct = cvar_reg_bool("crosshair_obstruct", true, CVAR_LOCKED, "move the crosshair to where the barrel line ends when it is obstructed (hits something clearly closer than the camera ray does, docs/AIM.md)");
+    CH.obstruct = cvar_reg_bool("crosshair_obstruct", true, CVAR_LOCKED, "move the crosshair to where the barrel line ends when it is obstructed (hits something clearly closer than the camera ray does, or misses the aim point: docs/AIM.md); otherwise it is exactly the screen centre");
     CH.obstruct_lerp = cvar_reg_float("crosshair_obstruct_lerp", 0.1f, 0.0f, 1.0f, CVAR_LOCKED, "time constant (s) of the crosshair's move to and from an obstruction");
     cmd_register("crosshair_reload", cmd_reload, "re-read assets/ui/crosshair.json");
     cmd_register("crosshair_pos", cmd_pos, "crosshair_pos: where the crosshair was drawn last frame (UI px) and its obstruction state (tests)");
@@ -261,19 +263,27 @@ void crosshair_draw(float dt) {
     float rate = dt / fmaxf(0.01f, st->ads_fade_time);
     CH.ads_fade = ads ? fminf(1.0f, CH.ads_fade + rate) : fmaxf(0.0f, CH.ads_fade - rate);
 
-    // Where the next bullet goes: the view (+ sway); the camera adds the kick spring on top.
+    // Aim model (docs/AIM.md): the gun's hold points the barrel at the camera ray's aim point P and the
+    // bullet follows the barrel, so while the barrel line ends at P (class clear) the crosshair is
+    // exactly the screen centre: nothing is projected, nothing is corrected. Only when the line is
+    // obstructed (or misses P: the gun was moved) does it move to where the line ends (Q). The viewed
+    // player's solve (a spectator gets the target's from its forwarded commands and pose).
     float cx = scr_w * 0.5f, cy = scr_h * 0.5f;
     vec2 sway = gun ? weapon_aim_offset_deg(wd, &p->sim.wpn, &p->sim.move, weapon_sway_time(vcmd->seq) + g->alpha * SIM_DT) : v2(0, 0);
     vec3 aim = dir_from_angles(g->view.yaw - sway.x * DG_DEG2RAD, g->view.pitch + sway.y * DG_DEG2RAD);
-    // Aim model (docs/AIM.md): the reticle stays on the camera ray; the bullet leaves the muzzle along
-    // the barrel with no correction, and the reticle moves to where that line ends (Q) only when it is
-    // obstructed. The viewed player's solve (a spectator gets the target's from its forwarded
-    // commands: the muzzle and barrel claims and the view).
     AimSolve as;
     bool have_aim = gun && weapon_aim_preview(w, vs, player_eye_pos(&p->sim.move), g->view.yaw, g->view.pitch, vcmd, &as);
-    if (!CH.follow_kick->i) {
+    {
         vec2 px;
-        if (project_ui(have_aim ? as.p : v3_madd(g->view.eye, aim, 50.0f), &px)) {
+        const WeaponCvars *wc = weapons_cvars();
+        Cvar *ckr = cvar_find("cam_kick_rot");
+        bool moved = (wc->ads_sway && wc->ads_sway->f > 0.0f) || (wc->ads_bob && wc->ads_bob->f > 0.0f) || (ckr && ckr->f > 0.0f);
+        if (game_cam_mode() == 3) {
+            // Third-person debug / vehicle cameras: the aim point where it projects.
+            if (project_ui(have_aim ? as.p : v3_madd(g->view.eye, aim, 50.0f), &px)) { cx = px.x; cy = px.y; }
+        } else if (moved && project_ui(v3_madd(g->view.eye, aim, 1.0e4f), &px)) {
+            // The deliberate reticle movers (wpn_ads_sway / wpn_ads_bob, the cam_kick_rot camera turn):
+            // the aim direction where it projects (a point at infinity).
             cx = px.x;
             cy = px.y;
         }
@@ -285,14 +295,25 @@ void crosshair_draw(float dt) {
     {
         float k = aim_lerp_k(dt, CH.obstruct_lerp->f);
         vec2 want = obstructed ? v2(qpx.x - cx, qpx.y - cy) : v2(0, 0);
-        // Settled on an obstruction: follow Q exactly (a Q at point blank moves a few px with the
-        // weapon's idle sway every frame; easing it would leave the crosshair behind the impact).
-        // The ease is for the moves to and from it.
+        // Settled on an obstruction: follow Q exactly (a Q at point blank moves many px a frame with the
+        // body's idle motion; easing it would leave the crosshair behind the impact). The ease is for
+        // the moves to and from it: 0.3 s (three time constants) on the same obstruction, then locked
+        // until it changes (a teammate in the way, Q jumping to another surface) or clears.
         float dx = want.x - CH.obs_off.x, dy = want.y - CH.obs_off.y;
-        if (obstructed && CH.obs_w > 0.98f && dx * dx + dy * dy < 64.0f) k = 1.0f;
+        bool blocked = as.cls == AIM_OBSTRUCTED || as.cls == AIM_BARREL, was_blocked = CH.obs_cls == AIM_OBSTRUCTED || CH.obs_cls == AIM_BARREL;
+        bool same = obstructed && (as.cls == CH.obs_cls || (blocked && was_blocked)) && fabsf(as.q_dist - CH.obs_qdist) < fmaxf(0.25f, 0.25f * CH.obs_qdist);
+        CH.obs_settle = same ? CH.obs_settle + dt : 0.0f;
+        CH.obs_lock = same && (CH.obs_lock || CH.obs_settle >= 3.0f * fmaxf(CH.obstruct_lerp->f, 0.0f) || dx * dx + dy * dy < 1.0f);
+        if (CH.obs_lock) k = 1.0f;
+        CH.obs_qdist = obstructed ? as.q_dist : 0.0f;
         CH.obs_off.x += dx * k;
         CH.obs_off.y += dy * k;
         CH.obs_w += ((obstructed ? 1.0f : 0.0f) - CH.obs_w) * k;
+        // Back from an obstruction: exactly the centre again once the ease is under a twentieth of a pixel.
+        if (!obstructed && CH.obs_off.x * CH.obs_off.x + CH.obs_off.y * CH.obs_off.y < 0.05f * 0.05f) {
+            CH.obs_off = v2(0, 0);
+            CH.obs_w = 0.0f;
+        }
         CH.last_target = obstructed ? qpx : v2(cx, cy);
         if (obstructed) CH.obs_cls = as.cls;
         if (!gun || !CH.obstruct->i) { CH.obs_off = v2(0, 0); CH.obs_w = 0.0f; }

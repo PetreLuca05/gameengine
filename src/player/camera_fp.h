@@ -28,7 +28,7 @@ typedef struct CamHeadStab {
 
 typedef struct CamFpCvars {
     struct Cvar *stiffness, *damping, *follow, *follow_lateral, *clamp, *bob_scale, *recon_smooth, *third, *debug;
-    struct Cvar *radius, *death_follow, *death_spectate, *weapon_fov, *kick_scale;
+    struct Cvar *radius, *death_follow, *death_spectate, *weapon_fov, *kick_scale, *kick_rot;
 } CamFpCvars;
 
 // Pure stabilizer parameters (camera_fp_math.c, unit tested); camera_fp_stabilize fills them

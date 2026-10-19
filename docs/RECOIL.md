@@ -49,15 +49,16 @@ your start.
 Each locally predicted shot raises a `ShotEvent` (with its sub-tick time), and the game's hook
 feeds the gun-driven fire animation: a one-tick, mass-based gun kick, hands that lag it, a camera
 that follows the body 2-3 ticks later, FOV punch and the other perceptual layers. See
-**docs/FIRE_ANIM.md**. The aim is untouched, so the crosshair drifts against the camera layer.
-With `crosshair_follow_kick 1` the crosshair is pinned to the screen center instead. The weapons'
-`camera_kick` / `viewmodel_kick` blocks and `recoil_visual_*` are legacy: they are still parsed
-but no longer drive the view.
+**docs/FIRE_ANIM.md**. The aim is untouched, and so is the screen centre: the camera layer's pitch /
+yaw are off (`cam_kick_rot 0`), so the centred crosshair stays on the bullets' line; its roll twitch,
+FOV punch and push-back don't move the centre (docs/AIM.md "Sway, recoil and the camera"). The gun
+kick moves only the drawn gun, never a bullet. The weapons' `camera_kick` / `viewmodel_kick` blocks
+and `recoil_visual_*` are legacy: they are still parsed but no longer drive the view.
 
 ### Spread cone and crosshair
 
 `cone = lerp(hip, ads, ads_t) × crouch × prone × lerp(1, move, speed) × air + bloom`, times
-`wpn_spread_scale`. Bloom grows by `per_shot_bloom` per shot up to `bloom_max`, decays at
+`wpn_spread_scale` (0 = no cone; `wpn_recoil_scale 0` = no aim recoil). Bloom grows by `per_shot_bloom` per shot up to `bloom_max`, decays at
 `bloom_recovery` deg/s, and grows when you take damage (flinch, host side).
 
 The value is the **full** cone angle. Bullets use `recoil_cone_dir`: a center-weighted radius
@@ -80,8 +81,9 @@ Every multiplier blends with the aim progress (`ads_t`), so aiming mid-burst nev
 | Aim recoil (view climb) | × `hip.aim_mult` (rifle 0.35: the camera climbs much less) | × `modifiers.ads` × `ads.aim_mult` (the original values) |
 | Spread | `spread.hip` × `hip.spread_mult` | `spread.ads` |
 | Bloom per shot / max / recovery | × `hip.bloom_mult` / `hip.bloom_max_mult` / `hip.bloom_recovery_mult` (more, higher, slower) | as configured |
-| Item (gun) kick | × `hip.kick_mult` (1: the full animation) about the hip anchor | × `ads.kick_mult` about the **reticle centre** |
-| Camera visual kick | unchanged | unchanged; the gun counters it so the reticle keeps marking the aim |
+| Item (gun) kick (drawn gun only) | × `hip.kick_mult` (1: the full animation) about the hip anchor | × `ads.kick_mult` about the **reticle centre** |
+| Camera visual kick | roll, FOV punch, push-back (pitch / yaw × `cam_kick_rot`, 0) | the same; with `cam_kick_rot` > 0 the gun counters it so the reticle keeps marking the aim |
+| The gun's aim | the hold aim turns the barrel through the crosshair's aim point (≤ 12°) | the hold aim turns the gun about the sight (≤ 3°) so the bore passes through it |
 
 Hip accuracy is governed by the cone: the crosshair gap opens with the bloom on a mag-dump.
 
@@ -103,9 +105,9 @@ Hip accuracy is governed by the cone: the crosshair gap opens with the bloom on 
   pull in ADS runs along the view axis.
 - **Optics:** a red dot draws its dot on the eye→sight line, and a picture-in-picture scope looks
   along it, so neither drifts when the gun turns.
-- **Camera kick:** the visual camera kick turns the view but not the aim. While aimed, the first-
-  person weapon counters it (`chars_set_fp_aim_offset`), so the reticle shows exactly where the
-  shots go.
+- **Camera kick:** the camera layer's pitch / yaw are off by default (`cam_kick_rot 0`). With it on
+  the visual camera kick turns the view but not the aim; while aimed the first-person weapon then
+  counters it (`chars_set_fp_aim_offset`), so the reticle shows exactly where the shots go.
 
 Measured: `tools/tests/recoil_ads.cfg` (mag-dumps at `wpn_kick_scale 3`) with `sight_test recoil`
 / `recoil_report`. The worst reticle-to-aim error was ≤ 0.81 px for irons, red dot, 4x, 8x and
@@ -114,7 +116,8 @@ the pistol. Camera climb over the same burst: hip 3.9°, ADS 7.7°.
 ## Weapon sway
 
 The held weapon sways on its hold point (`src/player/holdpoint.c`), applied before the recoil kick.
-The arms follow by IK, so the hands stay glued. Sway is cosmetic: it never moves the shots.
+The arms follow by IK, so the hands stay glued. Sway is cosmetic again: it moves only the drawn gun,
+never the gameplay pose the bullets follow (docs/AIM.md "Hold aim"), and never the crosshair.
 
 **Components:**
 * **Breathing:** layered slow sines: a figure-eight, two slower drifts and a breath bob.

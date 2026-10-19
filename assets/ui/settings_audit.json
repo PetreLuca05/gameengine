@@ -319,6 +319,12 @@
    "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): aim stability and what peeks over cover. One rig for all.",
    "category": "camera"
   },
+  "cam_kick_rot": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "A camera turned off the aim line moves the crosshair off the screen centre (AIM.md): the fire camera layer's pitch / yaw stay off for everyone.",
+   "category": "camera"
+  },
   "cam_kick_scale": {
    "class": "EDITABLE",
    "ui": "Graphics > Comfort",
@@ -557,12 +563,6 @@
    "class": "EDITABLE",
    "ui": "HUD > Crosshair",
    "reason": "Crosshair style / colour / size / opacity / outline: style only (the gap stays the exact spread plus this).",
-   "category": "weapons"
-  },
-  "crosshair_follow_kick": {
-   "class": "LOCKED",
-   "ui": "—",
-   "reason": "Crosshair follow-kick switches the crosshair from the true aim point to the screen centre: spread / aim behaviour, not style.",
    "category": "weapons"
   },
   "crosshair_gap": {
@@ -2927,6 +2927,12 @@
    "class": "LOCKED",
    "ui": "—",
    "reason": "Debug view / log: dev builds only (debug views can show geometry and entities through walls).",
+   "category": "weapons"
+  },
+  "wpn_hold_aim_max": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
    "category": "weapons"
   },
   "wpn_kick_scale": {

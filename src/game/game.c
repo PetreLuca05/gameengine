@@ -562,14 +562,17 @@ static UserCmd build_cmd(void) {
     c.use_target = G->focus;
     c.view_tick = net_client_view_tick256();
     phone_fill_cmd(&c);
-    // Aim model (docs/AIM.md): where the muzzle is and where the barrel points in the pose this player
-    // sees (the host checks both).
+    // Aim model (docs/AIM.md): the first-person camera, and where the muzzle is and where the barrel
+    // points in this player's gameplay pose aimed at this command's aim point (the hold aim; the
+    // host checks all three). No hold solve (LOD, no gun): the latest pose as it is.
     {
         Player *lp = game_local_player();
         vec3 mc;
-        if (lp && chars_muzzle_cam(G->world, lp->ent, &mc, NULL)) aim_claim_pack(mc, c.muzzle_cam);
-        if (lp && chars_barrel_cam(G->world, lp->ent, &mc, NULL)) aim_dir_pack(mc, c.barrel_cam);
         if (lp && chars_eye_cam(G->world, lp->ent, &mc, NULL)) aim_claim_pack(mc, c.eye_cam);
+        if (lp && !weapons_fill_aim_claim(G->world, G->local_slot, &c)) {
+            if (chars_muzzle_cam(G->world, lp->ent, &mc, NULL)) aim_claim_pack(mc, c.muzzle_cam);
+            if (chars_barrel_cam(G->world, lp->ent, &mc, NULL)) aim_dir_pack(mc, c.barrel_cam);
+        }
     }
     return c;
 }
@@ -638,8 +641,6 @@ static void tick(void) {
             game_sim_player(w, G->local_slot, &cmd, SIM_DT, true);
             chars_local_predict(w, G->local_slot, true);
         }
-        // Sent after the prediction: the command carries its shot's predicted aim point (docs/AIM.md).
-        G->cmd_history[cmd.seq % CMD_HISTORY].aim_dist = weapons_take_aim_claim();
         net_client_send_cmds(G->cmd_history, CMD_HISTORY, cmd.seq);
         spectator_tick(w);   // the watched player: relayed commands through the same path
         g_chars_force_phys_step = vehicles_client_tick(w, &cmd);

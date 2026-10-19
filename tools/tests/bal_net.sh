@@ -3,8 +3,9 @@
 # hits ("predict shot ...") must match the host's authoritative ones ("host shot ...") within
 # 0.25 m; the host's rifle burst is replayed on the client ("replay shot ...") with cracks / reports
 # scheduled for its listener (snd_trace). DG_BUILD=build-alt for the alt build. Both run with
-# net_fakelag 100 (set in the scripts): the aim model's claims (muzzle + barrel, docs/AIM.md) give
-# the client's shots the same origin and barrel direction on both machines.
+# net_fakelag 100 (set in the scripts): the aim model's claims (the hold-aimed muzzle + barrel,
+# docs/AIM.md) give the client's shots the same origin and barrel direction on both machines, also
+# for the 2 .. 5 m hip shots (the largest hold aim turns), with no barrel claim clamped.
 cd "$(dirname "$0")/../../${DG_BUILD:-build}/bin"
 EXE=./deadground.exe; [ -x ./deadground ] && EXE=./deadground
 $EXE --test --nosound --log ../bal_net_host.log --script ../../tools/tests/bal_net_host.cfg > /dev/null 2>&1 &

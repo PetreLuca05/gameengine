@@ -623,7 +623,8 @@ static void test_phone_hold(const ItemDB *db) {
 
 // ------------------------------------------------------------------ hold point / first person camera
 
-static void hp_step(CharRuntime *rt, const ItemSockets *k, CharInputs *in, float dt, bool static_pose, bool first_person, vec3 kick_p, vec3 kick_r) {
+// aim_d > 0: the hold aim on, P on the view axis at that distance (the game's limits: 12 deg, ADS 3).
+static void hp_step_aim(CharRuntime *rt, const ItemSockets *k, CharInputs *in, float dt, bool static_pose, bool first_person, vec3 kick_p, vec3 kick_r, float aim_d) {
     charrt_set_inputs(rt, in);
     charrt_tick(rt, dt);
     charrt_eval_base(rt);
@@ -635,7 +636,220 @@ static void hp_step(CharRuntime *rt, const ItemSockets *k, CharInputs *in, float
     pi.first_person = first_person;
     pi.item_kick_pos = kick_p;
     pi.item_kick_rot = kick_r;
+    if (aim_d > 0.0f) {
+        pi.hp_aim_valid = true;
+        pi.hp_aim_p = v3(0, 0, -aim_d);
+        pi.hp_aim_max_hip = 12.0f * DG_DEG2RAD;
+        pi.hp_aim_max_ads = AIM_HOLD_ADS_MAX_DEG * DG_DEG2RAD;
+    }
     charrt_post(rt, &pi);
+}
+static void hp_step(CharRuntime *rt, const ItemSockets *k, CharInputs *in, float dt, bool static_pose, bool first_person, vec3 kick_p, vec3 kick_r) {
+    hp_step_aim(rt, k, in, dt, static_pose, first_person, kick_p, kick_r, 0.0f);
+}
+
+// Hold aim (docs/AIM.md "Hold aim") inside the hold point evaluation, from its inputs directly.
+static bool g_wall;   // the collision ray hits at fraction 0 (pressed against a wall)
+static bool wall_ray(void *ctx, vec3 o, vec3 d, float *f, vec3 *pt, vec3 *n) {
+    (void)ctx;
+    (void)d;
+    if (!g_wall) return false;
+    *f = 0.0f;
+    *pt = o;
+    *n = v3(0, 0, 1);
+    return true;
+}
+static void hp_aim_input(HoldPointInput *in, const HoldPointStyle *st, const ItemSockets *k, int t, bool ads, bool sprint, float aim_d, bool static_pose) {
+    memset(in, 0, sizeof(*in));
+    in->style = st;
+    in->ovr = &k->hp;
+    in->anchor = xf_make(k->anchor.t, quat_identity());
+    in->sight = k->sight;
+    in->pivot = k->pivot;
+    in->muzzle = k->muzzle;
+    in->barrel = v3(0, 0, -1);
+    in->length = k->length;
+    in->has_item = true;
+    in->ads = ads;
+    in->sprint = sprint;
+    in->dt = 1.0f / 60.0f;
+    in->phase_valid = true;
+    in->clock = t / 60.0;
+    in->stride = (float)t * 0.04f;
+    in->aim_yaw = sinf((float)t * 0.05f) * 0.4f;
+    in->aim_pitch = cosf((float)t * 0.031f) * 0.2f;
+    in->vel_cam = v3(0.0f, 0.0f, -2.0f);
+    in->grounded = true;
+    in->cam_world = xf_identity();
+    in->raycast = wall_ray;
+    in->static_pose = static_pose;
+    in->sway_scale = 1.0f;
+    in->bob_scale = 1.0f;
+    in->kick_pos = static_pose ? v3(0, 0, 0) : v3(0.0f, 0.004f, 0.03f * fabsf(sinf((float)t * 0.7f)));
+    in->kick_rot = static_pose ? v3(0, 0, 0) : v3(4.0f * fabsf(sinf((float)t * 0.7f)), 0.8f, 1.2f);
+    in->aim_valid = aim_d > 0.0f;
+    in->aim_p = v3(0, 0, -aim_d);
+    in->aim_max_hip = 12.0f * DG_DEG2RAD;
+    in->aim_max_ads = AIM_HOLD_ADS_MAX_DEG * DG_DEG2RAD;
+}
+static bool xf_same(Xform a, Xform b) { return !memcmp(&a.t, &b.t, sizeof(vec3)) && !memcmp(&a.r, &b.r, sizeof(quat)); }
+
+static void test_hold_aim(const ItemDB *db) {
+    const float dt = 1.0f / 60.0f;
+    // 1) The evaluation's hold aim is aim_hold_solve on its own raw (bit-identical), and the
+    //    presentation (full sway, look lag, bob, the fire kick) moves the drawn item but never the
+    //    gameplay pose: static_pose on vs off gives the same aim_item / raw bits.
+    for (int wi = 0; wi < db->weapon_count; wi++) {
+        const WeaponDef *wd = &db->weapons[wi];
+        if (wd->kind == WPN_MELEE) continue;
+        HoldPointStyle style;
+        holdpoint_style_defaults(&style, wd->hold_style);
+        HoldPointState a, b;
+        holdpoint_reset(&a);
+        holdpoint_reset(&b);
+        bool same = true, solve_same = true, drawn_moved = false;
+        float worst_miss = 0.0f;
+        for (int t = 0; t < 240; t++) {
+            bool ads = (t / 60) % 2 == 1;
+            float d = t < 120 ? 25.0f : 2.0f + (float)(t % 7);
+            HoldPointInput ia, ib;
+            HoldPointOutput oa, ob;
+            hp_aim_input(&ia, &style, &wd->sockets, t, ads, false, d, false);
+            hp_aim_input(&ib, &style, &wd->sockets, t, ads, false, d, true);
+            holdpoint_eval(&a, &ia, &oa);
+            holdpoint_eval(&b, &ib, &ob);
+            if (!xf_same(oa.aim_item, ob.aim_item) || !xf_same(oa.gp_item, ob.gp_item) || memcmp(&oa.aim_raw, &ob.aim_raw, sizeof(AimHoldRaw))) same = false;
+            AimHold h = aim_hold_solve(&oa.aim_raw, ia.aim_p);
+            if (memcmp(&h.rot, &oa.aim_hold, sizeof(quat)) || h.angle_deg != oa.aim_angle_deg || h.miss != oa.aim_miss) solve_same = false;
+            if (!xf_same(oa.item, oa.aim_item)) drawn_moved = true;
+            // The aimed gameplay pose's bore line ends at P (reachable: 25 m, 2 .. 8 m hip, ADS 25 m).
+            vec3 mz = xf_point(oa.aim_item, wd->sockets.muzzle), bz = quat_rotate(oa.aim_item.r, v3(0, 0, -1));
+            if (oa.blend >= 0.999f && !oa.aim_clamped) worst_miss = fmaxf(worst_miss, aim_line_miss(mz, bz, ia.aim_p));
+        }
+        CHECK(same, "%s: presentation (sway / kick) changed the gameplay pose", wd->id);
+        CHECK(solve_same, "%s: the evaluation's hold aim differs from aim_hold_solve on its raw", wd->id);
+        CHECK(drawn_moved, "%s: sway / kick never moved the drawn item (test inert)", wd->id);
+        CHECK(worst_miss < 2e-4f, "%s: the aimed bore line passes %.3f mm from P", wd->id, worst_miss * 1000.0f);
+    }
+    // 2) Pressed against a wall (pull 1): no turn, the gun points where the pull pitched it.
+    {
+        const WeaponDef *wd = &db->weapons[1];
+        HoldPointStyle style;
+        holdpoint_style_defaults(&style, wd->hold_style);
+        HoldPointState st;
+        holdpoint_reset(&st);
+        HoldPointOutput o;
+        g_wall = true;
+        for (int t = 0; t < 120; t++) {
+            HoldPointInput in;
+            hp_aim_input(&in, &style, &wd->sockets, t, false, false, 2.0f, true);
+            holdpoint_eval(&st, &in, &o);
+        }
+        g_wall = false;
+        float pitch = asinf(clampf(quat_rotate(o.aim_item.r, v3(0, 0, -1)).y, -1, 1)) * DG_RAD2DEG;
+        CHECK(o.pull > 0.99f && o.aim_w < 0.01f && o.aim_angle_deg < 0.1f, "pull %.3f: aim weight %.3f, turn %.3f deg (none)", o.pull, o.aim_w, o.aim_angle_deg);
+        printf("  hold aim at the wall: pull %.3f, aim weight %.4f, turn %.4f deg, barrel pitched %.1f deg\n", o.pull, o.aim_w, o.aim_angle_deg, pitch);
+    }
+    CharRuntime *a = (CharRuntime *)malloc(sizeof(CharRuntime)), *b = (CharRuntime *)malloc(sizeof(CharRuntime));
+    const CharacterDef *def = anim_lib_char_by_id(L, "player");
+    // 3) ADS with the aim on: the sight stays on the view axis (the gun turns about it), the barrel
+    //    turned only by the hold aim, every gun, five pitches, P at 2 / 25 / 300 m.
+    for (int wi = 0; wi < db->weapon_count && def; wi++) {
+        const WeaponDef *wd = &db->weapons[wi];
+        if (wd->kind == WPN_MELEE) continue;
+        int style = proc_hold_style_index(&L->proc, wd->hold_style);
+        float worst_p = 0, worst_a = 0, worst_miss = 0;
+        const float ds[3] = { 2.0f, 25.0f, 300.0f };
+        for (int pt = 0; pt < 5; pt++)
+            for (int di = 0; di < 3; di++) {
+                charrt_init(a, L, def);
+                CharInputs in;
+                memset(&in, 0, sizeof(in));
+                in.grounded = true;
+                in.weapon_type = style;
+                in.weapon_id = (u16)(wi + 1);
+                in.ads = true;
+                in.aim_pitch = (-0.6f + 0.3f * (float)pt);
+                for (int t = 0; t < 40; t++) hp_step_aim(a, &wd->sockets, &in, dt, true, false, v3(0, 0, 0), v3(0, 0, 0), ds[di]);
+                Xform ic = xf_mul(xf_inverse(a->proc.cam_model), a->proc.item_model);
+                vec3 sc = xf_point(ic, wd->sockets.sight);
+                quat want = quat_mul(a->proc.hp_out.aim_hold, a->proc.hp_out.ads_item.r);
+                worst_p = fmaxf(worst_p, sqrtf(sc.x * sc.x + sc.y * sc.y));
+                worst_a = fmaxf(worst_a, quat_angle_between(ic.r, want) * DG_RAD2DEG);
+                if (!a->proc.hp_out.aim_clamped) worst_miss = fmaxf(worst_miss, a->proc.hp_out.aim_miss);
+            }
+        CHECK(worst_p < 0.00002f && worst_a < 0.01f, "%s: ADS with the hold aim: sight %.4f mm / %.4f deg off", wd->id, worst_p * 1000, worst_a);
+        CHECK(worst_miss < 2e-4f, "%s: ADS bore line %.3f mm from P", wd->id, worst_miss * 1000);
+        printf("  ads + hold aim %-9s sight on axis within %.4f mm / %.4f deg, bore line %.4f mm from P\n", wd->id, worst_p * 1000, worst_a, worst_miss * 1000);
+    }
+    // 4) Owner and remote copy: bit-identical with the aim on (P changing every tick, states, recoil).
+    for (int wi = 0; wi < db->weapon_count && def; wi++) {
+        const WeaponDef *wd = &db->weapons[wi];
+        int style = proc_hold_style_index(&L->proc, wd->hold_style);
+        charrt_init(a, L, def);
+        charrt_init(b, L, def);
+        CharInputs in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.weapon_type = style;
+        in.weapon_id = (u16)(wi + 1);
+        bool same = true;
+        for (int t = 0; t < 300; t++) {
+            int ph = t / 50;
+            in.ads = ph == 1 || ph == 4;
+            in.sprint = ph == 2;
+            in.crouch = ph == 3;
+            in.speed = ph == 2 ? 6.0f : (ph == 3 ? 1.2f : 0.0f);
+            in.aim_yaw = 0.6f * sinf((float)t * 0.05f);
+            in.aim_pitch = 0.4f * sinf((float)t * 0.031f);
+            vec3 kp = ph == 4 ? v3(0, 0.004f, 0.02f * fabsf(sinf((float)t))) : v3(0, 0, 0);
+            vec3 kr = ph == 4 ? v3(3.0f * fabsf(sinf((float)t)), 0.5f, 0.8f) : v3(0, 0, 0);
+            float d = 2.0f + 40.0f * fabsf(sinf((float)t * 0.09f));
+            u8 turning = 0;
+            in.body_yaw = anim_body_yaw_step(in.body_yaw, in.aim_yaw, in.speed > 0.3f, &L->proc, dt, &turning);
+            hp_step_aim(a, &wd->sockets, &in, dt, false, false, kp, kr, wd->kind == WPN_MELEE ? 0.0f : d);
+            hp_step_aim(b, &wd->sockets, &in, dt, false, true, kp, kr, wd->kind == WPN_MELEE ? 0.0f : d);
+            if (memcmp(a->final_model, b->final_model, sizeof(Xform) * (size_t)L->skel.count) != 0 || memcmp(&a->proc.item_model, &b->proc.item_model, sizeof(Xform)) != 0 ||
+                memcmp(&a->proc.aim_item_model, &b->proc.aim_item_model, sizeof(Xform)) != 0) {
+                same = false;
+                break;
+            }
+        }
+        CHECK(same, "%s: owner and remote poses differ with the hold aim", wd->id);
+    }
+    // 5) Sprint -> hip: the aim blends in with the state, no pop (P at 2 m: a ~6 deg turn).
+    if (def) {
+        const WeaponDef *wd = &db->weapons[1];
+        int style = proc_hold_style_index(&L->proc, wd->hold_style);
+        charrt_init(a, L, def);
+        CharInputs in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.weapon_type = style;
+        in.weapon_id = 2;
+        float worst_rot = 0.0f, worst_pos = 0.0f, worst_rot_noaim = 0.0f;
+        Xform prev = xf_identity();
+        for (int run = 0; run < 2; run++) {
+            charrt_init(a, L, def);
+            for (int t = 0; t < 180; t++) {
+                in.sprint = (t / 45) % 2 == 0;
+                in.speed = in.sprint ? 6.0f : 0.0f;
+                hp_step_aim(a, &wd->sockets, &in, dt, true, false, v3(0, 0, 0), v3(0, 0, 0), run ? 2.0f : 0.0f);
+                Xform h = a->proc.hp_out.aim_item;
+                if (t > 0) {
+                    float r = quat_angle_between(h.r, prev.r) * DG_RAD2DEG;
+                    if (run) { worst_rot = fmaxf(worst_rot, r); worst_pos = fmaxf(worst_pos, v3_dist(h.t, prev.t)); }
+                    else worst_rot_noaim = fmaxf(worst_rot_noaim, r);
+                }
+                prev = h;
+            }
+        }
+        CHECK(worst_rot < worst_rot_noaim + 1.5f && worst_pos < 0.05f, "sprint <-> hip with the hold aim: %.2f deg / %.1f mm per tick (without %.2f deg)", worst_rot, worst_pos * 1000,
+              worst_rot_noaim);
+        printf("  hold aim sprint <-> hip: max %.2f deg / %.1f mm per tick (%.2f deg without the aim)\n", worst_rot, worst_pos * 1000, worst_rot_noaim);
+    }
+    free(a);
+    free(b);
 }
 
 // The clavicles (LeftShoulder / RightShoulder) keep the animation clip's local rotation after
@@ -1122,6 +1336,7 @@ int main(int argc, char **argv) {
     test_hold_and_glue(db);
     test_phone_hold(db);
     test_holdpoint(db);
+    test_hold_aim(db);
     test_clavicles_keep_clip(db);
     test_body_parts(db);
     test_damage_reaction();

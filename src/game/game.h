@@ -135,6 +135,7 @@ Player *game_local_player(void);
 void game_perf_init(void);
 void game_perf_frame(void);   // main loop, after the command buffer
 float game_ads_vis(void);       // the viewed player's ADS progress interpolated to this frame (zoom, sight presentation)
+int game_cam_mode(void);        // this frame's world camera: 0 fallback eye, 1 head camera (first person), 2 death, 3 third person / free / vehicle orbit
 // Spectating (docs/SPECTATE.md): whose eyes the first-person presentation uses. The watched player
 // in first / third person, else the local player. Input, prediction and RPCs stay on local_slot.
 int game_view_slot(void);
