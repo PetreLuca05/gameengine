@@ -190,6 +190,9 @@ Hold breath, standing aimed (rifle irons): 0.23° → 0.014°; the release overs
   several shots can fire in one tick. 750 rpm fires exactly 12.5 rounds/s at 60 Hz. Releasing the
   trigger doesn't bank idle time.
 * **Modes:** `fire_modes: ["auto", "burst", "single"]`, cycled with **B** (the `firemode` action).
+  Single: a click made while the gun cycles (its last 0.25 s) is kept and fires the moment the gun
+  is ready (`burst_left` is the replicated queue), so clicking as fast as it fires never drops a shot
+  (2026-10-20: clicks in the cooldown were lost).
   Burst fires `burst_count` at `burst_rpm` and then pauses one `rpm` interval.
 * **Sprint to fire:** `sprint_to_fire` seconds after sprinting before you can shoot. The first shot
   after a sprint is scaled by `modifiers.after_sprint`.

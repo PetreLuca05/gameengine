@@ -964,7 +964,12 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
             interval = 60.0f / fmaxf(1.0f, rp->burst_rpm);
             cap = ws->burst_left;
         } else {
-            trigger = (pressed & BTN_ATTACK) != 0;
+            // Single: a click fires. One made while the gun cycles (in its last 0.25 s) is kept
+            // (burst_left: the replicated queue) and fires the moment it is ready, so clicking as fast as the
+            // gun fires never drops a shot; not ready (sprint, a ledge) drops it.
+            if ((pressed & BTN_ATTACK) && ws->cooldown - dt <= 0.25f) ws->burst_left = 1;
+            if (!ready) ws->burst_left = 0;
+            trigger = ws->burst_left > 0 || (pressed & BTN_ATTACK) != 0;
         }
         if (trigger && ready && *mag <= 0) {
             if ((pressed & BTN_ATTACK) && local_view && first) fx_sound("dry_fire", sim->move.pos, 0.6f);
@@ -1001,7 +1006,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
             tick_kick.pitch += kk.pitch;
             tick_kick.yaw += kk.yaw;
             ws->recoil_kick = 1.0f;
-            if (mode == FM_BURST && ws->burst_left > 0) ws->burst_left--;
+            if ((mode == FM_BURST || mode == FM_SINGLE) && ws->burst_left > 0) ws->burst_left--;
             out->fired = true;
             out->shots++;
             if (first) {
