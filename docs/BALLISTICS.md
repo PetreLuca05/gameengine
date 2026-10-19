@@ -232,6 +232,7 @@ camera, seen from the side, in slow motion.
 **Which rounds**
 - `bal_tracer_round`: every `every`-th round of the magazine, starting at a phase taken from the magazine seed (`RecoilState.mag_seed`), plus the last `last_n` rounds.
 - The magazine seed and the shot counter are in the replicated `PlayerSim`, so every machine agrees. The host's `EV_SHOT` carries the flag.
+- With `sv_infinite_ammo` the magazine never empties, so the round index comes from the shot counter (`shots % mag_size`, a fresh magazine every `mag_size` rounds). Otherwise one round index would repeat forever, and a magazine would be all tracers or none.
 - `fire_tracers_only 1` makes every round a tracer (range / debug).
 
 **Look over the flight**
@@ -244,6 +245,7 @@ camera, seen from the side, in slow motion.
 - Segment sprites with the `tracer_head` effect's emitters (`vfx_game_push_sprite`).
 - Head: velocity-stretched, length = speed × shutter (`shutter_preview`, default the frame time, about 15 m for 5.56 at 60 FPS), soft head.
 - Tail: the last 8 tick positions, so it curves with drop and wind, fading.
+- Stopped tracers: a tracer that stops in something leaves a copy (`bal_world_ended_tracers`) whose head is at the impact. It is drawn until the next tick after a frame has shown it. Without it, a hit closer than one tick's flight (about 16 m for 5.56 at 60 Hz, more when several ticks run per frame) was never drawn, and every tracer vanished one tick short of its target.
 - Width at least about 1.5 px.
 - A faint smoke trail while burning (`tracer_smoke`).
 - At night the 6 nearest tracers are small point lights.
@@ -362,6 +364,7 @@ camera, seen from the side, in slow motion.
 - Range overview.
 - Flashes per device, day and night.
 - Tracers in slow motion.
+- A tracer that stops within one tick (the floor 8 m ahead), drawn up to the impact (`tracer_stop_*`).
 - Grazing hits on the ground (3° / 1.5°): only stop / penetrate outcomes.
 - Penetration witness panels.
 - Run with `--validation`; screenshots go to `screenshots/ballistics/`.

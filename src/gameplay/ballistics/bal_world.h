@@ -110,6 +110,10 @@ void bal_world_frame(World *w, vec3 listener, float dt);
 
 // Live bullets (tracers, debug): the pool and its high-water mark.
 const BalLive *bal_world_bullets(int *count);
+// Tracers that stopped in something since the last frame: copies with b.pos at the impact and
+// b.vel their velocity on arrival, kept until a frame has drawn them (a tracer can be fired and
+// stopped between two frames: a hit within one tick's ~15 m).
+const BalLive *bal_world_ended_tracers(int *count);
 // The air for this tick (weather temperature, the replicated wind).
 BalEnv bal_world_env(const World *w, vec3 pos);
 

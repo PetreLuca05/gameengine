@@ -237,6 +237,57 @@ static bool magnified_ads(World *w) {
     return o && o->zoom >= 3.0f;
 }
 
+// Night: the nearest tracers light their surroundings (small moving point lights).
+typedef struct TracerLights {
+    struct { float d; vec3 pos; vec3 col; float k; } l[TRACER_LIGHTS];
+    int n;
+} TracerLights;
+
+// One tracer for this frame: the velocity-stretched head ending at l->b.pos and the curved tail.
+// Returns its look (intensity 0: dark, nothing drawn).
+static BalTracerLook draw_tracer(const BalLive *l, vec3 cam, float shutter, bool arcade, TracerLights *night) {
+    const BalCartridge *c = &bal_data()->cart[l->b.cart];
+    BalTracerLook look = bal_tracer_look(&c->tracer, l->b.dist, l->b.time, arcade);
+    if (look.intensity <= 0.0f) return look;
+    vec3 head = l->b.pos;
+    float speed = bal_bullet_speed(&l->b);
+    vec3 dir = speed > 1e-3f ? v3_scale(l->b.vel, 1.0f / speed) : v3(0, 0, -1);
+    float cam_d = v3_dist(head, cam);
+    float k = look.intensity;
+    vec3 rgb = bal_tracer_rgb(c->tracer.color);
+    vec4 col = v4(rgb.x * k, rgb.y * k, rgb.z * k, 1.0f);
+    // Width: a few cm, never thinner than ~2 px so a distant tracer stays visible.
+    float width = fmaxf(0.03f, cam_d * 0.003f);
+    float streak = fminf(bal_tracer_streak(speed, shutter), l->b.dist);   // never behind the muzzle
+    if (F.em_head >= 0) vfx_game_push_sprite(F.em_head, v3_madd(head, dir, -streak), v3_scale(dir, streak), width, col);
+    // Tail: the last tick positions (curved by gravity / wind), fading.
+    if (F.em_tail >= 0 && look.state != BAL_TRS_IGNITER) {
+        vec3 prev = v3_madd(head, dir, -streak);
+        for (int t = 1; t < l->trail_count; t++) {
+            vec3 p = l->trail[t];
+            if (v3_dist(p, l->launch) < 1.0f) break;   // not over the shooter's own barrel
+            float f = 1.0f - (float)t / (float)BAL_TRAIL;
+            vec4 tc = v4(col.x * 0.45f * f, col.y * 0.45f * f, col.z * 0.45f * f, 1.0f);
+            vfx_game_push_sprite(F.em_tail, p, v3_sub(prev, p), width * 0.7f, tc);
+            prev = p;
+        }
+    }
+    if (night) {
+        int slot = night->n < TRACER_LIGHTS ? night->n++ : -1;
+        if (slot < 0) {
+            for (int q = 0; q < TRACER_LIGHTS; q++)
+                if (night->l[q].d > cam_d && (slot < 0 || night->l[q].d > night->l[slot].d)) slot = q;
+        }
+        if (slot >= 0) {
+            night->l[slot].d = cam_d;
+            night->l[slot].pos = head;
+            night->l[slot].col = rgb;
+            night->l[slot].k = k;
+        }
+    }
+    return look;
+}
+
 void bal_fx_frame(World *w, vec3 cam, float dt) {
     if (!w || !vfx_game_active()) return;
     preview_tick(w, cam);
@@ -246,15 +297,14 @@ void bal_fx_frame(World *w, vec3 cam, float dt) {
         F.em_head = vfx_game_emitter("tracer_head", 0);
         F.em_tail = vfx_game_emitter("tracer_head", 1);
     }
-    const BalData *data = bal_data();
     bool arcade = cv(&F.ignition, "bal_tracer_ignition", 1) == 0.0f;
     // Shutter: the frame's time in the simulation's clock (slow motion shortens the streak).
     float shutter = cv(&F.shutter, "shutter_preview", 0);
     if (shutter <= 0.0f) shutter = clampf(dt, 1.0f / 240.0f, 1.0f / 20.0f) * cv(&F.timescale, "host_timescale", 1.0f);
     // Night: the scene is exposed for darkness (the tracers light their surroundings).
-    bool night = daynight_daylight() < 0.2f;
-    struct { float d; vec3 pos; vec3 col; float k; } lights[TRACER_LIGHTS];
-    int nl = 0;
+    TracerLights lights;
+    lights.n = 0;
+    TracerLights *night = daynight_daylight() < 0.2f ? &lights : NULL;
     bool scope = F.trace && F.trace->i && magnified_ads(w);
     bool vapor = false;
     if (F.vapor && F.vapor->i) {
@@ -293,30 +343,10 @@ void bal_fx_frame(World *w, vec3 cam, float dt) {
             vfx_game_spawn("bullet_vapor", &sp);
         }
         if (!(l->b.flags & BF_TRACER)) continue;
-        const BalCartridge *c = &data->cart[l->b.cart];
-        BalTracerLook look = bal_tracer_look(&c->tracer, l->b.dist, l->b.time, arcade);
+        BalTracerLook look = draw_tracer(l, cam, shutter, arcade, night);
         if (look.intensity <= 0.0f) {
             if (F.smoke_h[i]) { vfx_sys_stop(vfx_game_system(), F.smoke_h[i]); F.smoke_h[i] = 0; }
             continue;
-        }
-        float k = look.intensity;
-        vec3 rgb = bal_tracer_rgb(c->tracer.color);
-        vec4 col = v4(rgb.x * k, rgb.y * k, rgb.z * k, 1.0f);
-        // Width: a few cm, never thinner than ~2 px so a distant tracer stays visible.
-        float width = fmaxf(0.03f, cam_d * 0.003f);
-        float streak = fminf(bal_tracer_streak(speed, shutter), fmaxf(l->b.dist, 0.5f));
-        if (F.em_head >= 0) vfx_game_push_sprite(F.em_head, v3_madd(head, dir, -streak), v3_scale(dir, streak), width, col);
-        // Tail: the last tick positions (curved by gravity / wind), fading.
-        if (F.em_tail >= 0 && look.state != BAL_TRS_IGNITER) {
-            vec3 prev = v3_madd(head, dir, -streak);
-            for (int t = 1; t < l->trail_count; t++) {
-                vec3 p = l->trail[t];
-                if (v3_dist(p, l->launch) < 1.0f) break;   // not over the shooter's own barrel
-                float f = 1.0f - (float)t / (float)BAL_TRAIL;
-                vec4 tc = v4(col.x * 0.45f * f, col.y * 0.45f * f, col.z * 0.45f * f, 1.0f);
-                vfx_game_push_sprite(F.em_tail, p, v3_sub(prev, p), width * 0.7f, tc);
-                prev = p;
-            }
         }
         // Smoke trail of the burning compound.
         if (look.state == BAL_TRS_BURNING) {
@@ -329,23 +359,13 @@ void bal_fx_frame(World *w, vec3 cam, float dt) {
                 vfx_sys_set_transform(vfx_game_system(), F.smoke_h[i], head, vfx_rot_from_dir(dir), l->b.vel);
             }
         }
-        // Night: the nearest tracers light their surroundings (small moving point lights).
-        if (night) {
-            int slot = nl < TRACER_LIGHTS ? nl++ : -1;
-            if (slot < 0) {
-                for (int q = 0; q < TRACER_LIGHTS; q++)
-                    if (lights[q].d > cam_d && (slot < 0 || lights[q].d > lights[slot].d)) slot = q;
-            }
-            if (slot >= 0) {
-                lights[slot].d = cam_d;
-                lights[slot].pos = head;
-                lights[slot].col = rgb;
-                lights[slot].k = k;
-            }
-        }
     }
-    for (int i = 0; i < nl; i++) {
-        PointLight pl = { lights[i].pos, 5.0f, lights[i].col, 2.5f * lights[i].k, LIGHT_NO_SHADOW };
+    // Tracers that stopped since the last frame: their last streak, up to the impact (hits closer
+    // than one tick's flight are otherwise never drawn).
+    const BalLive *ended = bal_world_ended_tracers(&count);
+    for (int i = 0; i < count; i++) draw_tracer(&ended[i], cam, shutter, arcade, night);
+    for (int i = 0; i < lights.n; i++) {
+        PointLight pl = { lights.l[i].pos, 5.0f, lights.l[i].col, 2.5f * lights.l[i].k, LIGHT_NO_SHADOW };
         render_add_light(&pl);
     }
 }
