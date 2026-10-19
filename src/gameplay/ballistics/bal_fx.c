@@ -104,7 +104,6 @@ void bal_fx_muzzle(int slot, int cart, int device, float barrel, vec3 pos, vec3 
     if (!F.flash_rng.inc) F.flash_rng = rng_make((u64)(now * 1e6));
     float fs = rng_float(&F.flash_rng) < FLASH_CHANCE ? rng_range(&F.flash_rng, 1.0f - FLASH_SIZE_VAR, 1.0f + FLASH_SIZE_VAR) : 0.0f;
     if (F.preview_shot) fs = 1.0f;
-    log_info("TMPFLASH %.3f", fs);
     spawn_part("muzzle_primary", pos, dir, &k[BFC_PRIMARY], 0.0f, viewmodel, k[BFC_PRIMARY].size * fs, 1);
     spawn_part("muzzle_mach", pos, dir, &k[BFC_MACH], k[BFC_MACH].dist, viewmodel, k[BFC_MACH].size * fs, 1);
     {
