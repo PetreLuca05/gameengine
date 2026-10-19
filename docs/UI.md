@@ -21,7 +21,7 @@ in game ── Esc / pad Start ──▶ PAUSE
                                  ├─ Leave game / Stop hosting ─▶ CONFIRM
                                  ├─ Quit to desktop ───────────▶ CONFIRM
                                  └─ Phone card (top right) ─▶ PHONE (the Connect portal modal, docs/PHONE.md)
-in game ── Tab / I / pad Back ──▶ INVENTORY (grids left, the player centre, hotbar right)
+in game ── Tab / I / pad Back ──▶ INVENTORY (slots left, the player centre, grids right; Tab again closes)
                                      └─ discard a weapon / container / wearable ─▶ CONFIRM
 world: crate (hold E), body, trunk ──▶ INVENTORY with the loot grid (right column)
 world: weapon bench   ──▶ BENCH (free attachment changes, stats)
@@ -183,13 +183,16 @@ document: **docs/INVENTORY.md** (data model, rules, intents, networking, screen,
 ## HUD
 
 All HUD elements sit in the safe area:
-* **Vitals** (bottom left): small-caps label, a slim health bar (pulses red under 30 %), the
-  value, and an armour bar. The lowest bar sits on the safe area's bottom edge, the same edge as the
-  hotbar slots and the ammo panel's magazine ticks.
+* **Vitals** (bottom centre, docs/INVENTORY.md "HUD"): small-caps labels, the armour bar above
+  the health bar, both with their values. The armour bar is in segments, one per plate the player
+  can hold (1, or 4 with a plate carrier). The health bar pulses red under 30 %. The health bar sits
+  on the safe area's bottom edge.
 * **Ammo** (bottom right): weapon name, magazine (large; amber below 25 %, red when empty), the
   reserve, magazine ticks, and the fire mode when the weapon has several.
-* **Hotbar** (bottom centre): six slots (keys 1-6) bound to item instances (docs/INVENTORY.md), the
-  slot widget with the cell image, the selected slot lifted; the item name fades in on switch.
+* **Weapon list** (bottom left, docs/INVENTORY.md "HUD"): primary / secondary / holster (keys 1-3,
+  the wheel cycles them). Each row has the cell image, the name, magazine / reserve and the drawn
+  gun's fire mode. The selected row is white; an empty row is a dim outline. An "In hands" row shows
+  while the hands hold a grid item.
 * **Interaction prompt** (under the crosshair): a key cap plus text, with a hold-progress ring
   around the key.
 * **Reload / use progress:** a ring around the crosshair.

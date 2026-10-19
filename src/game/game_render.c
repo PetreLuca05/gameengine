@@ -61,6 +61,8 @@ typedef struct GameRender {
 int game_cam_mode(void) { return GR ? GR->cam_mode : 0; }
 
 static void cmd_cam_stats(int argc, const char **argv);
+static void cmd_cam_track(int argc, const char **argv);
+static void cam_track_frame(const RenderCamera *cam);
 
 // fp_cam_test start | report: per-frame first-person invariants while a script drives the player
 //   |camera - head bone| < 0.15 m, camera forward . (camera - pelvis) >= 0 (never behind the body),
@@ -237,6 +239,7 @@ void game_render_init(void) {
     GR = ARENA_PUSH(&g_engine.perm_arena, GameRender);
     GR->pen_min_dist = 1e9f;
     cmd_register("cam_stats", cmd_cam_stats, "print + reset camera penetration / stabilizer stats (sampled while cam_debug is on)");
+    cmd_register("cam_track", cmd_cam_track, "cam_track <frames> [label]: log the rendered camera's largest drift (position, rotation, FOV) over the next frames, and whether the inventory is open (tests)");
 }
 const char *game_cam_debug_text(void) { return GR ? GR->cam_text : ""; }
 
@@ -254,6 +257,30 @@ static void cam_penetration_sample(PhysicsWorld *pw, vec3 safe, vec3 eye) {
         if (phys_raycast(pw, eye, v3_scale(dirs[i], 0.5f), PL_MASK_WORLD, PHYS_INVALID_BODY, &rh)) best = fminf(best, rh.distance);
     if (best < near_margin) GR->pen_near++;
     if (GR->pen_frames == 1 || best < GR->pen_min_dist) GR->pen_min_dist = best;
+}
+
+// cam_track <frames> [label] (tests: tools/tests/inv_camera.cfg): the rendered camera over the next
+// frames against the first one: the largest position, rotation and FOV drift; then one log line.
+static struct { int left, frames; char label[32]; RenderCamera first; float dpos, drot, dfov; bool inv_open; } CT;
+
+static void cmd_cam_track(int argc, const char **argv) {
+    memset(&CT, 0, sizeof(CT));
+    CT.left = CT.frames = argc > 1 ? DG_MAX(1, atoi(argv[1])) : 60;
+    dg_strcpy(CT.label, sizeof(CT.label), argc > 2 ? argv[2] : "track");
+}
+
+static void cam_track_frame(const RenderCamera *cam) {
+    if (CT.left <= 0) return;
+    if (CT.left == CT.frames) { CT.first = *cam; CT.inv_open = G->inventory_open; }
+    CT.dpos = fmaxf(CT.dpos, v3_dist(cam->pos, CT.first.pos));
+    float dr = fmaxf(fabsf(wrap_angle(cam->yaw - CT.first.yaw)), fmaxf(fabsf(cam->pitch - CT.first.pitch), fabsf(cam->roll - CT.first.roll)));
+    CT.drot = fmaxf(CT.drot, dr * DG_RAD2DEG);
+    CT.dfov = fmaxf(CT.dfov, fabsf(cam->fov_deg - CT.first.fov_deg));
+    CT.inv_open = CT.inv_open && G->inventory_open;
+    if (--CT.left == 0)
+        log_info("cam_track %s: %d frames, inventory %s, pos %.4f %.4f %.4f yaw %.4f pitch %.4f fov %.3f, max drift pos %.6f m rot %.5f deg fov %.5f deg", CT.label, CT.frames,
+                 CT.inv_open ? "open" : "closed", CT.first.pos.x, CT.first.pos.y, CT.first.pos.z, CT.first.yaw * DG_RAD2DEG, CT.first.pitch * DG_RAD2DEG, CT.first.fov_deg,
+                 CT.dpos, CT.drot, CT.dfov);
 }
 
 static void cmd_cam_stats(int argc, const char **argv) {
@@ -928,6 +955,7 @@ void game_render(void) {
     }
     flashlights_render(w, &cam, p, dead, vs);
     terrain_game_frame(cam.pos);   // terrain level / debug / reload (before the frame's parameters)
+    cam_track_frame(&cam);
     render_set_camera(&cam);
     // Time of day first: the post settings (exposure floor / curves, fog) follow this frame's sky.
     RenderEnvironment tod_env;

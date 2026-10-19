@@ -6,7 +6,7 @@ target sees. That covers the target's:
 - camera and hold point;
 - ADS, scope PiP and phone lens;
 - recoil, sway and crosshair spread;
-- HUD (ammo, health, hotbar, reload / use / hold rings);
+- HUD (ammo, health / armor, the weapon list, reload / use / hold rings);
 - hit markers, hurt markers and damage flash;
 - vehicle view.
 
@@ -61,7 +61,7 @@ Status:
                                    + spectator block (mode, target, flags,
                                    respawn timer, target one-way delay)
                                    relevance centre = target position
-                                 MSG_INVENTORY{slot = src}  ───────────────▶ HUD ammo / hotbar of the target
+                                 MSG_INVENTORY{slot = src}  ───────────────▶ HUD ammo / weapon list of the target
                                  events with target == T (hit confirm, ───▶ hit / hurt markers, hints
                                    hurt, hint, sound, chat) also go to O
 ```
@@ -296,7 +296,7 @@ There is no wall clock (`platform_time`) in any first-person gameplay path.
 - **The target's own HUD** comes from the existing `hud_draw` with the view slot:
   - vitals and ammo;
   - reload / use rings and the hold ring;
-  - hotbar (their equipped slot);
+  - the weapon list (their drawn slot);
   - crosshair with their spread, sway and focus;
   - hit markers, hurt markers, hints and kill feed;
   - the vehicle HUD.

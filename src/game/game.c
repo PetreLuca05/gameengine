@@ -550,6 +550,11 @@ static UserCmd build_cmd(void) {
     vehicles_fill_cmd(&c);
     if (G->noclip_request) { c.buttons |= BTN_NOCLIP; G->noclip_request = false; }
     wheels_filter_cmd(&c);   // E tap / hold on doors, the healing wheel's auto-use, open wheels (game_wheels.c)
+    // The hands used up their item with fire still held: the weapon that comes back waits for a release.
+    if (G->attack_wait_release) {
+        if (c.buttons & BTN_ATTACK) c.buttons &= (u16)~BTN_ATTACK;
+        else G->attack_wait_release = false;
+    }
     if (G->menu_open || G->inventory_open || G->container_open || G->bench_open || console_is_open() || phone_ui_blocks_game()) {
         c.move_x = c.move_y = 0;
         c.buttons &= (u16)(BTN_CROUCH | BTN_NOCLIP | BTN_FLASHLIGHT | BTN_PHONE | BTN_VEH_CAM);
@@ -761,7 +766,10 @@ static void cycle_weapon(const Player *p, int dir) {
 static void handle_selection(void) {
     Player *p = game_local_player();
     if (!p) return;
-    if (G->sel_slot == INV_SEL_HANDS && !inv_sel_c(&p->inv, INV_SEL_HANDS)->item) game_select(G->sel_weapon);
+    if (G->sel_slot == INV_SEL_HANDS && !inv_sel_c(&p->inv, INV_SEL_HANDS)->item) {
+        game_select(G->sel_weapon);
+        G->attack_wait_release = true;
+    }
     // A weapon newly in a slot is drawn when nothing is in hand (the first gun picked up, a looted rifle).
     static u16 last[INV_SEL_WEAPONS];
     for (int k = 0; k < INV_SEL_WEAPONS; k++) {

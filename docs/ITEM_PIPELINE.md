@@ -108,9 +108,9 @@ an `emitter` socket (the flashlight item).
 
 Other players still see the eye-mounted flashlight (no protocol change).
 
-The flashlight item is `"kind": "misc"` with `"hotbar": true` (`items.json`). Misc items normally go to
-the backpack and can never be held, so the flag lets it equip from the hotbar (`inventory.c
-hotbar_first`).
+The flashlight item is `"kind": "misc"` with `"hands": true` (`items.json`). Misc items normally
+stay in the backpack's grid and can never be held, so the flag lets it be taken into the hands
+(right click > Hold, `II_HOLD`, docs/INVENTORY.md "Selection").
 
 ## Budgets (LOD 0 triangles, `assets/items/catalog.json`)
 

@@ -1,7 +1,8 @@
 # In-game phone and the companion page
 
 Every player carries a phone (it is built in, outside the inventory). **X** takes it out over
-whatever hotbar slot is selected and puts it away again; choosing a slot also puts it away.
+whatever is selected (a weapon slot, the hands) and puts it away again; choosing a weapon also puts
+it away.
 While it is out it is **always raised** in the focused, camera-ready pose (hold point state
 `phone_portrait`): there is no aim / "hold right mouse" mode. Mouse look still turns the view.
 
@@ -31,7 +32,7 @@ CONNECT PORTAL (centred modal: QR, URL, "Waiting for device…", Use in-game pho
    ├─ Use in-game phone ───> mode INGAME  (card: In-game phone · "Connect a device")
    └─ Close ───────────────> nothing decided (card: Not connected)
 
-MATCH   equip (X / hotbar) never opens the portal:
+MATCH   equip (X / a weapon key) never opens the portal:
    device connected ──> the phone just comes up; the real phone drives it (no HUD panel)
    no device ─────────> the in-game phone (HUD panel), as before
    device drops ──────> toast "Phone disconnected — using in-game phone", the panel slides back

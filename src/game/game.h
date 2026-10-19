@@ -46,6 +46,7 @@ typedef struct Game {
     CamHeadStab cam_stab;        // first-person head camera stabilizer (src/player/camera_fp.c)
     u8 sel_slot;                 // selection (UserCmd.slot): INV_SEL_* (docs/INVENTORY.md "Selection")
     u8 sel_weapon;               // the last weapon slot selected (the hands fall back to it)
+    bool attack_wait_release;    // fire masked until released (the hands fell back to a weapon mid-press)
     UserCmd last_cmd;
     vec2 frame_look;
     bool use_pressed_frame;
