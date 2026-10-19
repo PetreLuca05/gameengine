@@ -117,6 +117,8 @@ typedef struct FrameResources {
     VkDescriptorSet frame_set_pip;
     GpuBuffer ubo_phone[2];   // phone camera views (src/render/phone_view.c)
     VkDescriptorSet frame_set_phone[2];
+    GpuBuffer ubo_preview;    // the inventory character preview (src/render/char_preview_view.c)
+    VkDescriptorSet frame_set_preview;
     GpuBuffer dyn;        // host-visible: lines, text, ui
     GpuBuffer bones;      // host-visible SSBO: skinning palettes + last frame's (perf_fix_disable PF-0020 only, made on first use)
     bool bones_ring;      // the frame sets bind R->bone_ring (PF-0020), not `bones`
@@ -127,14 +129,15 @@ typedef struct FrameResources {
     int deferred_count;
 } FrameResources;
 
-// Every frame descriptor set of a frame slot (main, scope PiP, phone views): bindings shared by
-// all of them (shadow map, sky, weather, cookie) are written to each.
-#define FRAME_SET_COUNT 4
+// Every frame descriptor set of a frame slot (main, scope PiP, phone views, character preview):
+// bindings shared by all of them (shadow map, sky, weather, cookie) are written to each.
+#define FRAME_SET_COUNT 5
 DG_INLINE void frame_sets_of(const FrameResources *f, VkDescriptorSet *out) {
     out[0] = f->frame_set;
     out[1] = f->frame_set_pip;
     out[2] = f->frame_set_phone[0];
     out[3] = f->frame_set_phone[1];
+    out[4] = f->frame_set_preview;
 }
 
 // Must match shaders/common.glsl (std140).

@@ -206,6 +206,9 @@ void items_game_shutdown(void);
 // game_ground_ref.c: reference viewer, camera presets, colour sampler (docs/GROUND_REFERENCE.md)
 void ground_ref_register(void);
 void ground_ref_draw(void);
+// game_char_preview.c: char_preview_show / char_worn / char_preview_check (docs/CHARACTERS.md "Character preview")
+void char_preview_register(void);
+void char_preview_dev_draw(void);
 void terrain_game_frame(vec3 cam);
 // game_shadow_sky.c: sky-driven shadows (docs/SHADOWS.md)
 struct ShadowSkyInput;

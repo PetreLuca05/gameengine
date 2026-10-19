@@ -1,0 +1,81 @@
+#version 450
+// Inventory character preview resolve (src/render/char_preview_view.c, docs/CHARACTERS.md
+// "Character preview"): s x s samples of the preview's linear HDR per output pixel -> fixed exposure
+// -> the curve -> saturation; the depth says which samples the character covers (the background is
+// never drawn): alpha = covered / s^2, colour = the mean of the covered samples (straight alpha, no
+// dark fringe), sRGB-encoded (the UI composites encoded values with src-alpha blending, like the
+// ui3d item views). A pixel with no covered sample takes the mean colour of its covered neighbours at
+// alpha 0, so bilinear sampling of the texture never pulls black into the silhouette's edge.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D color_tex;
+layout(set = 0, binding = 1) uniform sampler2D depth_tex;
+layout(set = 0, binding = 8, rgba8) uniform writeonly image2D dst;
+// pc.p0: x exposure (linear), y saturation; pc.u0: x samples per side, y curve (0 PBR Neutral, 1 ACES)
+
+const mat3 ACES_IN = mat3(0.59719, 0.07600, 0.02840, 0.35458, 0.90834, 0.13383, 0.04823, 0.01566, 0.83777);
+const mat3 ACES_OUT = mat3(1.60475, -0.10208, -0.00327, -0.53108, 1.10813, -0.07276, -0.07367, -0.00605, 1.07602);
+vec3 aces_fit(vec3 v) {
+    v = ACES_IN * v;
+    vec3 a = v * (v + 0.0245786) - 0.000090537;
+    vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
+    return clamp(ACES_OUT * (a / b), 0.0, 1.0);
+}
+vec3 pbr_neutral(vec3 c) {
+    const float start = 0.8 - 0.04, desat = 0.15;
+    float x = min(c.r, min(c.g, c.b));
+    float off = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    c -= off;
+    float peak = max(c.r, max(c.g, c.b));
+    if (peak < start) return c;
+    const float d = 1.0 - start;
+    float np = 1.0 - d * d / (peak + d - start);
+    c *= np / peak;
+    float g = 1.0 - 1.0 / (desat * (peak - np) + 1.0);
+    return mix(c, vec3(np), g);
+}
+vec3 srgb_encode(vec3 c) { return mix(c * 12.92, 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c)); }
+
+// One sample: display-linear 0..1.
+vec3 grade(ivec2 q) {
+    vec3 c = sanitize(texelFetch(color_tex, q, 0).rgb) * pc.p0.x;
+    vec3 t = pc.u0.y == 1u ? aces_fit(c) : clamp(pbr_neutral(c), 0.0, 1.0);
+    return clamp(mix(vec3(luma(t)), t, pc.p0.y), 0.0, 1.0);
+}
+
+bool covered(ivec2 q) { return texelFetch(depth_tex, q, 0).r < 1.0; }
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    int s = int(clamp(pc.u0.x, 1u, 4u));
+    vec3 sum = vec3(0.0);
+    float n = 0.0;
+    for (int j = 0; j < s; j++)
+        for (int i = 0; i < s; i++) {
+            ivec2 q = p * s + ivec2(i, j);
+            if (!covered(q)) continue;
+            sum += grade(q);
+            n += 1.0;
+        }
+    if (n > 0.0) {
+        imageStore(dst, p, vec4(srgb_encode(sum / n), n / float(s * s)));
+        return;
+    }
+    // Empty: the colour of the covered samples around (dilation), still transparent.
+    for (int dy = -1; dy <= 1; dy++)
+        for (int dx = -1; dx <= 1; dx++) {
+            ivec2 o = p + ivec2(dx, dy);
+            if ((dx == 0 && dy == 0) || o.x < 0 || o.y < 0 || o.x >= sz.x || o.y >= sz.y) continue;
+            for (int j = 0; j < s; j++)
+                for (int i = 0; i < s; i++) {
+                    ivec2 q = o * s + ivec2(i, j);
+                    if (!covered(q)) continue;
+                    sum += grade(q);
+                    n += 1.0;
+                }
+        }
+    imageStore(dst, p, vec4(n > 0.0 ? srgb_encode(sum / n) : vec3(0.0), 0.0));
+}

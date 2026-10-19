@@ -936,6 +936,15 @@ if(MSVC)
   target_compile_options(test_lod PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 add_test(NAME lod COMMAND test_lod WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# Inventory character preview look + framing (docs/CHARACTERS.md "Character preview"): head top / image
+# bottom for any character scale, chest-height camera, JSON over the defaults, the shipped look parses.
+add_executable(test_char_preview tests/test_char_preview.c src/gameplay/char_preview_rig.c)
+set_target_properties(test_char_preview PROPERTIES C_STANDARD 11)
+target_link_libraries(test_char_preview PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_char_preview PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME char_preview COMMAND test_char_preview WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 # Classic instance cull arithmetic (src/render/classic_cull_math.h): bit for bit against the cull_instance
 # it was factored out of on 1M random instances and views; empty dither intervals emit no part.
 add_executable(test_classic_cull tests/test_classic_cull.c src/render/lod_fade.c src/render/shadow_casters.c src/render/fidelity/fidelity.c src/core/cvar.c)

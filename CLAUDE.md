@@ -32,7 +32,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | Area | Doc | Main code |
 |---|---|---|
 | Animation / net / damage | ANIMATION*.md, DAMAGE.md | src/anim, src/gameplay/characters.c |
-| Skeleton / meshes / modular characters | CHARACTERS.md | src/anim/skeleton.c, src/render/skeletal_mesh.c, src/assets/character.c, tools/bake_* |
+| Skeleton / meshes / modular characters; inventory character preview (`chars_preview`: own instance + studio-lit RGBA target, `char_preview_show`) and worn gear (`chars_set_worn`, `char_worn`) | CHARACTERS.md | src/anim/skeleton.c, src/render/skeletal_mesh.c, src/assets/character.c, tools/bake_*, src/gameplay/char_preview{,_rig}.c, src/render/char_preview_view.c, shaders/post/char_preview.comp, assets/ui/char_preview.json; tests: test_char_preview, tools/tests/char_preview.cfg + char_preview_check.py |
 | FP camera, hold point | CAMERA_HOLDPOINT.md | src/player/{holdpoint,hands,camera_fp}.c |
 | Detailed item models (every weapon / attachment / item: Blender scripts -> .dgim, parts with pivots / roles, sockets, LODs, hulls; per-vertex materials + baked wear masks layered per condition, no textures; `item_inspect`, `item_reload`, `item_condition`, `item_meshes`, `item_showcase` (dev room (-62, 0, 52)), `item_nearplane`) | ITEM_PIPELINE.md | assets/src/items/<id>.py, tools/blender/{item_lib,item_export,build_items}.py (`pip install bpy`), tools/bake_item, tools/validate_item, assets/items/{catalog,materials}.json + meshes, src/assets/item_mesh.c, src/game/game_items.c; tests: validate_items, test_item_mesh, tools/tests/item_nearplane.cfg |
 | Weapons, recoil, sway | RECOIL.md, ATTACHMENTS.md | src/gameplay/{weapons,recoil,items}.c, data/weapons |

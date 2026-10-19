@@ -1,0 +1,12 @@
+{
+  "_comment": "Inventory character preview look (docs/CHARACTERS.md \"Character preview\", src/gameplay/char_preview_rig.c; char_preview_show reloads it). framing: head_top = the image height above the head top (fraction), crown_m = the head top above the head-top bone (m x the character scale), bottom_t = the image bottom between the hip joints (0) and the knees (1), fov_deg = vertical lens, turn_deg = the character's default turn, square = how much of the idle stance's own turn is undone (0..1). lights: camera space (x right, y up, z towards the camera), linear colours x intensity; the rim lights are point lights placed from the chest point. output: exposure (linear), tonemap neutral | aces, saturation, supersample (samples per side). held.pose: low (the sprint hold) | aim.",
+  "framing": { "head_top": 0.21, "crown_m": 0.05, "bottom_t": 0.7, "fov_deg": 28, "turn_deg": 0, "square": 1.0 },
+  "lights": {
+    "key": { "dir": [-0.45, 0.6, 0.65], "color": [1.0, 0.96, 0.9], "intensity": 2.4 },
+    "fill": { "dir": [0.7, 0.05, 0.5], "color": [0.8, 0.86, 1.0], "intensity": 0.35 },
+    "rim": { "pos": [[-0.9, 0.7, -1.4], [1.0, 0.5, -1.4]], "color": [0.95, 0.97, 1.0], "intensity": 14.0, "radius": 6.0 },
+    "ambient": { "sky": [0.55, 0.6, 0.68], "ground": [0.25, 0.22, 0.2], "intensity": 0.3 }
+  },
+  "output": { "exposure": 0.85, "tonemap": "neutral", "saturation": 0.85, "supersample": 2 },
+  "held": { "pose": "low" }
+}

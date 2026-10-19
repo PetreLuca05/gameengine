@@ -293,6 +293,83 @@ character's `parts`.
 | `char_inspect_swap <slot> [next\|prev\|none\|id]` | Swap a part (host; clients only their own) |
 | `character_parts [entity]`, `character_set_part <slot> <id\|none> [entity]` | List / set parts |
 | `cl_skin <id>` | Your outfit (sent to the host, replicated) |
+| `char_preview_show [0\|1\|2\|3] [w h] [yaw_deg] [held item]` | The inventory character preview over the screen (see "Character preview"); 2 renders it without showing it, 3 holds its pose still; reloads `assets/ui/char_preview.json` |
+| `char_worn <head\|-> [chest\|-] [back\|-] [slot]` | Worn gear item ids on a player (default your own, `-` / `none` empties a slot), kept every frame; logs each fit (bone, offset) |
+| `char_preview_check` | Next frame: the live player's CharacterInst, poses and the render camera before / after the preview call must be bit-identical (PASS / FAIL) |
+
+## Character preview
+
+`chars_preview(w, player_slot, &in)` (characters.h; the inventory screen calls it every frame it shows the
+player, docs/INVENTORY.md) renders a second, client-only instance of that player's character into its own
+RGBA texture and returns it (0 until ready; nothing runs on frames without a call).
+
+- **The instance** (`src/gameplay/char_preview.c`): a CharacterInst outside `w->chars` (never simulated,
+  replicated, hit-tested or drawn by the world passes) with the shown player's definition and parts (only
+  read from the live instance; the own player's `cl_skin` / `cl_parts` apply at once) plus `in.worn`. Its own
+  CharRuntime plays the controller's idle clip (no foot IK / turn / lean / damage / spine; missing clips fall
+  back as the controller does). `in.held_item` goes through the hold system (`proc_hold`, the low ready by
+  default: `"held": { "pose": "aim" }` aims it) and is drawn with its attachments. The idle stance's own
+  turn is undone once (shoulders and some of the hips square to the camera); `in.yaw` turns it further.
+  It stands at the world origin facing -Z; the live player's CharacterInst, pose, item, third-person flag
+  and the main camera are never written (`char_preview_check`).
+- **The pass** (`src/render/char_preview_view.c`, render.c `render_char_preview_pass`): skinned draws with
+  `SkinnedDraw.view = RENDER_VIEW_CHAR_PREVIEW` form skinned pass 4 and are in no other pass; the worn gear and
+  the held item are captured into the preview's own static list (`render_char_preview_capture_begin/end`).
+  Forward lit (PIPE_SKIN / PIPE_LIT) at `supersample` x the size into a transient RGBA16F + depth, with its own
+  frame UBO (the 5th frame set) carrying the studio rig in place of the world's light: key = the sun slot,
+  fill = the moon slot (both unshadowed), two rim point lights, hemispheric ambient; no shadows, sky
+  environment / SH, cloud shadow, fog, weather, interiors, city windows, spot lights or screen-space inputs.
+  The same image at noon, at midnight and in a storm.
+- **The resolve** (`shaders/post/char_preview.comp`): fixed exposure, the curve (PBR Neutral / ACES),
+  saturation; per output pixel the covered samples (depth < 1) give alpha = covered / s^2 and colour = their
+  mean: straight alpha, sRGB-encoded in an RGBA8 target, which is what `gd_image` (shaders/ui.frag, src-alpha
+  blending of display-encoded values) expects; empty pixels carry their covered neighbours' colour at alpha 0
+  (no dark halo under bilinear sampling). The UI pass of the same frame samples it.
+- **Framing** (`char_preview_rig.c`, pure, `tests/test_char_preview.c`): a level camera at chest height. A
+  level perspective camera maps heights at the character's plane linearly onto the image, so from the first
+  idle pose's skeleton the head top (head-top bone + `crown_m` x scale) lands `head_top` of the image height
+  from the top and the bottom edge cuts the legs `bottom_t` of the way from the hip joints to the knees.
+  The same camera for every skin; it scales with the character.
+- **The look** (`assets/ui/char_preview.json`, reloaded by `char_preview_show`): `framing` (head_top 0.21,
+  crown_m 0.05, bottom_t 0.7, fov_deg 28, turn_deg, square), `lights` in camera space (x right, y up, z towards
+  the camera: key top-front-left, a cool fill, rim lights behind the shoulders, ambient), `output` (exposure
+  0.85, tonemap neutral, saturation 0.85, supersample 2), `held.pose`. Matched to the inventory reference shot:
+  dark, low contrast, a soft key, a subtle rim on the silhouette over the blurred backdrop.
+- **Cost**: one character at LOD0 into ~900 x 1000 x 2^2 samples plus a 9-tap resolve, only on frames that
+  call it.
+
+## Worn gear
+
+`chars_set_worn(w, player_slot, worn[CWORN_COUNT])` (the game calls it every frame: the host from the
+inventory, clients from the replicated state) sets the item defs a player wears: `CWORN_HEAD` (helmet),
+`CWORN_CHEST` (plate carrier), `CWORN_BACK` (backpack). Each is its detailed mesh (`ItemDef.model`, `.dgim`)
+drawn rigidly on a bone of the pose being drawn: in the world for every player (third person, the local
+player's shadow and phone cameras: the owner's copy is `MAT_SHADOW_ONLY` + `DrawItem.self`, which phone
+cameras draw like the body's `MAT_SELF`), with the first-person body (chest and back only, unshadowed: the
+helmet would fill the view) and in the character preview (`CharPreviewIn.worn`).
+
+Placement is in the bind space of the character's body mesh: a per-bone retargeted skin keeps its file bind
+(`SkmBone.bind_delta`), so the gear follows the skin's own head and torso, not only the Skeleton's.
+
+- Default fit (no `"worn"` block): an anchor of the item mesh's rest bounds goes to a target measured once
+  per body mesh from its LOD0 vertices (by the bone each mostly follows); without a body mesh, the
+  Skeleton's bind pose.
+
+| Slot | Bone | Item anchor (item space: helmets face -Z, packs carry their straps on -Z) | Target on the body |
+|---|---|---|---|
+| head | Head | the crown: bounds top, centre | the skull's top + 20 mm (shell + pads), over the skull's centre |
+| chest | Spine2 | the top centre (the shoulder straps) | the shoulders' top (clavicle / Spine2 vertices) + 10 mm, the torso's depth centre (spine + clavicle vertices) 8 mm forward; scaled up (<= 1.25) to the torso's depth + 45 mm so the plates stay outside a deep chest |
+| back | Spine2 | the top edge on the body side (bounds min z + 45 mm of straps) | 30 mm below the shoulders' top, on the back's surface (largest z of the spine / clavicle vertices) |
+
+- An item JSON block `"worn": { "bone": "Spine1", "pos": [x, y, z], "rot": [x, y, z], "scale": 1 }` overrides:
+  the bone (name, namespace-free), the item origin relative to that bone in the body's model axes at bind
+  (m: x right, y up, z back), the rotation (deg, applied y x z); `rot` alone turns the item about its
+  fitted anchor.
+- `char_worn` logs each fit and the body's measures. None of `helmet`, `plate_carrier`, `backpack`,
+  `backpack_hiking`, `sling_bag` needs a `"worn"` block. On the default player skin (Ch32): helmet on Head,
+  origin (+0.119 +0.079 -0.040) m from the joint (the helmet mesh is centred 0.119 m off its grip origin);
+  plate carrier on Spine2 (0 +0.208 +0.096), scale 1.05; hiking pack on Spine2 (0 +0.135 +0.199). The Dummy's
+  box torso still swallows a corner of the front plate in the idle's hunch.
 
 ## PBR maps (textured skins)
 
@@ -359,6 +436,13 @@ normal + one ORM RGBA8 atlas per skin (2048 x 1024 with mips: 11 MB each for two
   refused at join.
 
 ## Tests
+
+`tests/test_char_preview.c` (ctest `char_preview`): the preview framing (head top and image bottom for any
+character scale, the chest-height camera, the lens), the JSON over the defaults, the shipped look parses.
+`tools/tests/char_preview.cfg` + `char_preview_check.py`: the first-person view unchanged while the preview
+renders, the preview identical at noon / midnight / in a storm, the live player untouched
+(`char_preview_check`), gear in the preview (front / side / back), a held rifle, gear on a teammate and on the
+own body in third person.
 
 `tests/test_characters.c` (ctest `characters`):
 

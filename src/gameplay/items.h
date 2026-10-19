@@ -100,6 +100,10 @@ typedef struct ItemDef {
     bool builtin;              // always carried, outside the inventory (taken out with its own key)
     bool hotbar;               // "hotbar": true: goes to the hotbar like weapons / consumables (a tool held in the hands: the flashlight)
     char hold_style_alt[16];   // "hold": { "style_landscape" }: two-handed landscape hold style
+    // Worn on a character ("worn", docs/CHARACTERS.md "Worn gear"): the bone (empty = the slot's), the
+    // item origin relative to it in the character's model axes at the bind pose (m: x right, y up, z back)
+    // and its rotation (deg, applied y x z), the scale; without pos / rot / scale: the slot's fit from the bounds.
+    struct { char bone[32]; vec3 pos, rot; float scale; bool has_pos, has_rot, has_scale; } worn;
     struct {
         vec3 body_center, body_half;   // the phone body (box)
         Xform screen;                  // screen centre, facing +Z of this frame

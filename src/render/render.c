@@ -2,6 +2,7 @@
 // its "shadows" marker, G-buffer prepass, screen-space lighting, lit scene, fog, transparency,
 // viewmodel, post stack, final + UI; async compute passes on a second queue, PF-0027) -> present.
 #include "render/phone_view.h"
+#include "render/char_preview_view.h"
 #include "render/shadow_csm.h"
 #include "vk_internal.h"
 #include "post/post.h"
@@ -18,6 +19,17 @@
 #include "stb_image_write.h"
 
 static void on_render_cvar_changed(Cvar *cv) { (void)cv; }
+
+// The inventory character preview's static draws (render_char_preview_capture_begin: the held item,
+// the worn gear), drawn only by its pass, and the camera render_camera_info reports meanwhile.
+#define CPV_MAX_DRAWS 256
+static DrawItem g_cpv_draws[CPV_MAX_DRAWS];
+static u32 g_cpv_draw_count;
+static bool g_cpv_capture;
+static vec3 g_cpv_cam;
+static float g_cpv_fov;
+static bool g_mark_self;     // render_mark_self: render_draw items are the local player's own (DrawItem.self)
+static bool g_draw_self;     // draw_items in a phone camera pass: MAT_SHADOW_ONLY items marked self are drawn
 
 // Stretched resolution simulator (r_stretch): the competitive "4:3 stretched" look. The 3D view is
 // projected as if the screen were k times narrower (same vertical FOV) and fills the full width, so
@@ -197,8 +209,9 @@ static void create_frames(void) {
         f->ubo = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         f->ubo_pip = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         for (int k = 0; k < 2; k++) f->ubo_phone[k] = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
+        f->ubo_preview = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         f->dyn = vkr_buffer_create(DYN_BUFFER_SIZE, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, true);
-        f->instances = vkr_buffer_create(sizeof(GpuSkinInstance) * MAX_SKIN_DRAWS * 8, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // main + shadow + 5 culled shadow (PF-0011) + vm / phone
+        f->instances = vkr_buffer_create(sizeof(GpuSkinInstance) * MAX_SKIN_DRAWS * 8, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // main + shadow + 5 culled shadow (PF-0011) + vm / phone / preview
         f->prev_models = vkr_buffer_create(sizeof(mat4) * (MAX_DRAWS + MAX_VM_DRAWS), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
 
         VkDescriptorSetAllocateInfo ai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
@@ -208,10 +221,11 @@ static void create_frames(void) {
         VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &f->frame_set));
         VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &f->frame_set_pip));
         for (int k = 0; k < 2; k++) VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &f->frame_set_phone[k]));
-        // The PiP / phone sets: their own frame UBO, the same skinning / previous-model buffers.
+        VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &f->frame_set_preview));
+        // The PiP / phone / preview sets: their own frame UBO, the same skinning / previous-model buffers.
         VkDescriptorSet sets[FRAME_SET_COUNT];
         frame_sets_of(f, sets);
-        GpuBuffer *ubos[FRAME_SET_COUNT] = { &f->ubo, &f->ubo_pip, &f->ubo_phone[0], &f->ubo_phone[1] };
+        GpuBuffer *ubos[FRAME_SET_COUNT] = { &f->ubo, &f->ubo_pip, &f->ubo_phone[0], &f->ubo_phone[1], &f->ubo_preview };
         for (int s = 0; s < FRAME_SET_COUNT; s++) {
             VkDescriptorBufferInfo bi = { ubos[s]->buffer, 0, sizeof(FrameData) };
             VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
@@ -274,6 +288,7 @@ static void destroy_frames(void) {
         vkr_buffer_destroy_now(&f->ubo);
         vkr_buffer_destroy_now(&f->ubo_pip);
         for (int k = 0; k < 2; k++) vkr_buffer_destroy_now(&f->ubo_phone[k]);
+        vkr_buffer_destroy_now(&f->ubo_preview);
         vkr_buffer_destroy_now(&f->dyn);
         vkr_buffer_destroy_now(&f->bones);   // a no-op unless made (bind_bones)
         vkr_buffer_destroy_now(&f->instances);
@@ -383,6 +398,7 @@ void render_shutdown(void) {
         vkw_shutdown();
         render_ui_shutdown();
         phone_view_shutdown();
+        char_preview_view_shutdown();
         vkr_target_destroy(&R->occl);
         vkls_shutdown();
         vks_shutdown();
@@ -478,6 +494,9 @@ bool render_begin_frame(void) {
     R->draw_count = R->vm_draw_count = R->light_count = 0;
     R->spot_count = 0;
     R->skin_draw_count = R->skin_bone_count = 0;
+    g_cpv_draw_count = 0;
+    g_cpv_capture = false;
+    g_mark_self = false;
     R->skin_direct = false;   // palettes go to skin_bones until this frame's slot is free (below)
     R->skin_base = 0;
     R->skin_epoch++;
@@ -517,8 +536,8 @@ bool render_begin_frame(void) {
 }
 
 void render_camera_info(vec3 *pos, float *fov_deg) {
-    *pos = R->cam.pos;
-    *fov_deg = R->cam.fov_deg;
+    *pos = g_cpv_capture ? g_cpv_cam : R->cam.pos;
+    *fov_deg = g_cpv_capture ? g_cpv_fov : R->cam.fov_deg;
 }
 
 void render_set_camera(const RenderCamera *cam) {
@@ -554,9 +573,23 @@ void render_set_interiors(const RenderInterior *v, int n) {
 }
 
 void render_draw(const DrawItem *item) {
+    if (g_cpv_capture) {   // the character preview's own list (never a world pass)
+        if (item->mesh && g_cpv_draw_count < CPV_MAX_DRAWS) g_cpv_draws[g_cpv_draw_count++] = *item;
+        return;
+    }
     if (!item->mesh || R->draw_count >= MAX_DRAWS) return;
-    R->draws[R->draw_count++] = *item;
+    R->draws[R->draw_count] = *item;
+    R->draws[R->draw_count++].self = g_mark_self;
 }
+
+void render_mark_self(bool on) { g_mark_self = on; }
+
+void render_char_preview_capture_begin(vec3 cam_pos, float fov_deg) {
+    g_cpv_capture = true;   // (the list is reset by render_begin_frame)
+    g_cpv_cam = cam_pos;
+    g_cpv_fov = fov_deg;
+}
+void render_char_preview_capture_end(void) { g_cpv_capture = false; }
 
 // docs/perf/FINDINGS.md PF-0020: the palette goes where the shaders read it (the ring when direct),
 // keyed so that the parts of one pose share one copy (the caller knows which parts gather the same
@@ -926,7 +959,7 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
         if (alpha_mode == 1 && !blended) continue;
         if (shadow_pass && (d->mat.flags & MAT_NO_SHADOW)) continue;
         if (shadow_pass && !((g_shadow_layers >> (d->layer & 7)) & 1u)) continue;   // the light's culling mask
-        if (!shadow_pass && (d->mat.flags & MAT_SHADOW_ONLY)) continue;
+        if (!shadow_pass && (d->mat.flags & MAT_SHADOW_ONLY) && !(g_draw_self && d->self)) continue;
         if (shadow_pass && (g_shadow_min_radius > 0.0f || g_shadow_cull)) {
             vec3 c; float r;
             item_bounds(d, &c, &r);
@@ -1043,8 +1076,10 @@ typedef struct SkinPass { SkinBatch batches[MAX_SKIN_DRAWS]; u32 batch_count; } 
 typedef struct CpuSkin { VkDeviceSize offset; bool ok; } CpuSkin;
 
 // Skinned passes: 0 = main (world), 1 = shadow, 2 = viewmodel (first-person arms, after the depth
-// clear), 3 = phone cameras (the world + the local player's own body, MAT_SELF: selfies).
+// clear), 3 = phone cameras (the world + the local player's own body, MAT_SELF: selfies), 4 = the
+// inventory character preview (its draws alone: SkinnedDraw.view).
 static bool skin_in_pass(const SkinnedDraw *d, int pass) {
+    if (pass == 4 || d->view != RENDER_VIEW_WORLD) return pass == 4 && d->view == RENDER_VIEW_CHAR_PREVIEW;
     bool vm = (d->flags & MAT_VIEWMODEL) != 0;
     if (pass == 1) return d->cast_shadow && !vm;
     if (pass == 2) return vm;
@@ -1861,7 +1896,7 @@ static VkImageLayout g_swap_layout;
 static struct {
     FrameResources *f;
     CpuSkin *cpu_skinned;
-    SkinPass *skin_main, *skin_vm, *skin_phone;
+    SkinPass *skin_main, *skin_vm, *skin_phone, *skin_preview;
     bool any_skin_vm;
     VkDeviceSize line_off[2], text_off, ui_voff, ui_ioff;
     FgRes hdr, depth, vm_depth, normal, material, velocity, swap, scene_copy, ldr;
@@ -2284,7 +2319,9 @@ static void exec_alt_scene(VkCommandBuffer cmd, void *u) {
     vec4 saved[6];
     memcpy(saved, R->frustum, sizeof(saved));
     memcpy(R->frustum, a->frustum, sizeof(saved));
+    g_draw_self = true;   // the local player's own gear (selfies), like its body (MAT_SELF)
     draw_items(cmd, R->draws, R->draw_count, false, true, 0, PIPE_LIT);
+    g_draw_self = false;
     memcpy(R->frustum, saved, sizeof(saved));
     draw_skinned(cmd, 3, PIPE_SKIN, PIPE_LIT, F.skin_phone);
     vkx_draw_particles_pip(cmd, set);
@@ -2316,6 +2353,94 @@ int render_alt_scene_pass(int slot, const char *name, FgRes color, FgRes depth, 
     pd->camera_pos = v4(cam.x, cam.y, cam.z, fd->camera_pos.w);
     pd->screen = v4((float)w, (float)h, 1.0f / (float)w, 1.0f / (float)h);
     int p = fg_pass(name, exec_alt_scene, a);
+    fg_write(p, color, FG_COLOR);
+    fg_write(p, depth, FG_DEPTH);
+    return p;
+}
+
+// The inventory character preview (char_preview_view.c, docs/CHARACTERS.md "Character preview"): its
+// draws alone (the skinned pass 4 + the captured static draws) on a transparent background (alpha 0:
+// the resolve takes the coverage from the depth), forward lit by the frame UBO of its studio rig.
+typedef struct PreviewScene { FgRes color, depth; u32 w, h; } PreviewScene;
+static PreviewScene g_cpv;
+
+static void exec_char_preview(VkCommandBuffer cmd, void *u) {
+    const PreviewScene *a = (const PreviewScene *)u;
+    VkRenderingAttachmentInfo ca = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    ca.imageView = fg_view(a->color);
+    ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    ca.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;   // (clearValue zero: transparent black)
+    VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    da.imageView = fg_view(a->depth);
+    da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;   // the resolve's coverage
+    da.clearValue.depthStencil.depth = 1.0f;
+    VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+    ri.renderArea.extent.width = a->w;
+    ri.renderArea.extent.height = a->h;
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments = &ca;
+    ri.pDepthAttachment = &da;
+    vkCmdBeginRendering(cmd, &ri);
+    set_viewport(cmd, a->w, a->h);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &F.f->frame_set_preview, 0, NULL);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
+    post_push_lit_inputs(cmd, NULL, false);   // no screen-space inputs
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LIT]);
+    draw_items(cmd, g_cpv_draws, g_cpv_draw_count, false, false, 0, PIPE_LIT);
+    draw_skinned(cmd, 4, PIPE_SKIN, PIPE_LIT, F.skin_preview);
+    vkCmdEndRendering(cmd);
+}
+
+// The preview's scene pass: this frame's FrameData with the preview camera and the studio rig in
+// place of the world's light (no sun / moon shadows, sky environment / SH, cloud shadow, fog,
+// weather, interiors, city windows, spot lights, screen-space inputs or debug views; the two rim
+// lights are the point lights, unshadowed). Returns the pass index (< 0 when disabled).
+int render_char_preview_pass(const RenderCharPreview *v, FgRes color, FgRes depth, u32 w, u32 h, FrameData *fd) {
+    g_cpv = (PreviewScene){ color, depth, w, h };
+    FrameData *pd = (FrameData *)F.f->ubo_preview.mapped;
+    memcpy(pd, fd, sizeof(FrameData));
+    mat4 vp = mat4_mul(v->proj, v->view);
+    pd->view_proj = pd->view_proj_nj = pd->prev_view_proj_nj = vp;
+    pd->vm_view_proj_nj = pd->prev_vm_view_proj_nj = vp;
+    pd->view = v->view;
+    pd->proj = pd->vm_proj = v->proj;
+    pd->jitter = v4(0, 0, 0, 0);
+    pd->post_flags = v4(0, 0, 0, 0);
+    pd->post_params = v4(1, 1, 1, 1);
+    pd->post_fog = v4(0, 80, 0, 0);
+    pd->ss_info = v4(0, 0, 0, 0);
+    pd->camera_pos = v4(v->cam_pos.x, v->cam_pos.y, v->cam_pos.z, fd->camera_pos.w);
+    pd->screen = v4((float)w, (float)h, 1.0f / (float)w, 1.0f / (float)h);
+    pd->params = v4(0, fd->params.y, 0, 0);
+    vec3 kd = v3_len2(v->key_dir) > 0 ? v3_norm(v->key_dir) : v3(0, 1, 0), fdir = v3_len2(v->fill_dir) > 0 ? v3_norm(v->fill_dir) : v3(0, 1, 0);
+    pd->sun_dir = v4(kd.x, kd.y, kd.z, 1.0f);
+    pd->sun_color = v4(v->key_color.x, v->key_color.y, v->key_color.z, 0.0f);   // w 0: no cast shadows
+    pd->fill_dir = v4(fdir.x, fdir.y, fdir.z, 1.0f);
+    pd->fill_color = v4(v->fill_color.x, v->fill_color.y, v->fill_color.z, 0.0f);
+    pd->sky_ambient = v4(v->sky_ambient.x, v->sky_ambient.y, v->sky_ambient.z, 1.0f);
+    pd->ground_ambient = v4(v->ground_ambient.x, v->ground_ambient.y, v->ground_ambient.z, 2.0f);   // w: the two rim lights
+    pd->sky_flags = v4(0, 1, 0, 0);   // hemispheric ambient, no environment / SH, no cloud shadow
+    pd->fog = v4(0, 0, 0, 0);
+    pd->ssky0.y = 0.0f;
+    pd->ssky1.w = 0.0f;
+    pd->ssky2.y = 0.0f;               // r_shadow_debug views
+    pd->shadow_vm.z = 0.0f;
+    pd->spot_info = v4(0, 0, 0, 0);
+    pd->interior_info = v4(0, 0, 0, 0);
+    pd->city = v4(0, 0, 0, 0);
+    pd->wx0 = pd->wx1 = pd->wx2 = v4(0, 0, 0, 0);
+    pd->lod_fade.x = 0.0f;            // no dither rotation
+    memset(pd->lights, 0, sizeof(pd->lights));
+    for (int k = 0; k < 2; k++) {
+        pd->lights[k].pos_radius = v4(v->rim_pos[k].x, v->rim_pos[k].y, v->rim_pos[k].z, fmaxf(v->rim_radius, 0.5f));
+        pd->lights[k].color_intensity = v4(v->rim_color[k].x, v->rim_color[k].y, v->rim_color[k].z, 1.0f);
+        pd->light_shadow[k] = v4(-1, 0, 0, 0);   // unshadowed
+    }
+    int p = fg_pass("char_preview", exec_char_preview, &g_cpv);
     fg_write(p, color, FG_COLOR);
     fg_write(p, depth, FG_DEPTH);
     return p;
@@ -2643,6 +2768,7 @@ static void build_frame_graph(FrameData *fd) {
     }
     post_set_sight(&R->sight, F.pip_color, F.pip_from_view, R->vm_proj, R->pip_fov);
     phone_view_build(fd);   // phone camera views (sampled from the next frame on)
+    char_preview_view_build(fd);   // the inventory character preview (sampled by this frame's UI)
 
     F.ldr = post_resolve();
     render_ui_build(F.ldr, R->swap_extent.width, R->swap_extent.height);
@@ -2650,6 +2776,7 @@ static void build_frame_graph(FrameData *fd) {
     p = fg_pass("final", exec_final, NULL);
     fg_read(p, F.ldr, FG_SAMPLED);
     render_ui_final_reads(p);
+    char_preview_final_reads(p);
     fg_write(p, F.swap, FG_COLOR);
     if (p < 0) {
         static int warned;
@@ -2803,13 +2930,14 @@ void render_end_frame(void) {
     R->phone_views_last = phone_view_pending();
     if (R->phone_views_last) R->phone_view_frame = R->frame_index;
     g_skin_shadow_gpu = false;
-    static SkinPass skin_main, skin_shadow, skin_vm, skin_phone, skin_shadow_k[5];
-    skin_main.batch_count = skin_shadow.batch_count = skin_vm.batch_count = skin_phone.batch_count = 0;
+    static SkinPass skin_main, skin_shadow, skin_vm, skin_phone, skin_preview, skin_shadow_k[5];
+    skin_main.batch_count = skin_shadow.batch_count = skin_vm.batch_count = skin_phone.batch_count = skin_preview.batch_count = 0;
     for (int k = 0; k < 5; k++) skin_shadow_k[k].batch_count = 0;
     bool skin_shadow_cull = false;
     F.skin_main = &skin_main;
     F.skin_vm = &skin_vm;
     F.skin_phone = &skin_phone;
+    F.skin_preview = &skin_preview;
     for (u32 i = 0; i < R->skin_draw_count; i++) F.any_skin_vm |= (R->skin_draws[i].flags & MAT_VIEWMODEL) != 0;
     ArenaMark skin_mark = arena_mark(&g_engine.frame_arena);
     if (R->skin_draw_count) {
@@ -2832,7 +2960,8 @@ void render_end_frame(void) {
             for (int k = 0; k < 5 && skin_shadow_cull; k++)
                 if (k < 4 ? R->shadow_active[k] && R->shadow_redraw[k] : R->moon_active) used += cull_skin_shadow(f, k, used, &skin_shadow, &skin_shadow_k[k]);
             used += build_skin_pass(f, 2, used, &skin_vm);
-            if (phone_view_pending()) build_skin_pass(f, 3, used, &skin_phone);
+            if (phone_view_pending()) used += build_skin_pass(f, 3, used, &skin_phone);
+            if (char_preview_pending()) build_skin_pass(f, 4, used, &skin_preview);   // (main, vm and preview draws are disjoint: 8 x fits)
         }
     }
 
