@@ -45,7 +45,7 @@ world: weapon bench   ──▶ BENCH (free attachment changes, stats)
 | `src/ui/gui/gui_theme.c` | `assets/ui/theme.json`. |
 | `src/ui/menus.c` | Screen stack, pause screen (from `assets/ui/screens/pause.json`), confirm dialog, commands. |
 | `src/ui/screens/` | Settings, multiplayer, inventory, bench. |
-| Settings → Graphics | A **Default** button on top (asks first; `settings_graphics_defaults`, console `r_defaults`): every archived `r_*` / `post_*` / `vfx_*` cvar plus `cl_fov`, `cl_ads_world_zoom`, `cl_hands_fov`, `gore_level`, `sight_brightness` back to its registered default, then the Engine Fidelity level's table defaults with the custom tweaks cleared; the display (resolution, window mode, vsync) and the benchmark results stay. Two sub-tabs, **Normal** and **Debug** (see "Settings → Graphics: Normal and Debug" below). Bounded rows (`row_fid_*`): options above the level greyed with "requires &lt;level&gt;", features the level lacks locked with "Requires Engine Fidelity: &lt;level&gt;". |
+| Settings → Graphics | A **Default** button on top (asks first; `settings_graphics_defaults`, console `r_defaults`): every archived `r_*` / `post_*` / `vfx_*` cvar plus `cl_fov`, `cl_ads_fov`, `cl_weapon_fov`, `gore_level`, `sight_brightness` back to its registered default, then the Engine Fidelity level's table defaults with the custom tweaks cleared; the display (resolution, window mode, vsync) and the benchmark results stay. Two sub-tabs, **Normal** and **Debug** (see "Settings → Graphics: Normal and Debug" below). Bounded rows (`row_fid_*`): options above the level greyed with "requires &lt;level&gt;", features the level lacks locked with "Requires Engine Fidelity: &lt;level&gt;". |
 | `src/ui/inventory/` | The inventory screen (docs/INVENTORY.md): layout + drag and drop (pure, tested), grids, inspect, cell images, editor. |
 | `src/gameplay/inventory/` | The grid inventory model: tree, rules, intents, wire. Pure (tested). |
 | `src/ui/item_view.c`, `src/ui/icons.c` | Item models for the UI, the icon atlas and bakes. |
@@ -73,7 +73,7 @@ they moved to (`ui_screen settings:<n>`, `menu skin` opens HUD).
   scale, **stretched resolution** (`r_stretch`, with the equivalent stretched resolution of this
   display), **upscaling** (every upscaler: Off / TAA-U / FSR 1 / FSR 2 and DLSS, both slots running
   FSR 1 for now, + its resolution), HDR10 (+ paper white), brightness, colour-blind filter, show FPS.
-* Comfort: field of view (or the server's), sprint FOV effect, screen effects, **gore**. Motion blur,
+* Comfort: Field of View (or the server's), ADS Field of View, Weapon Field of View (docs/CAMERA_HOLDPOINT.md "Field of view"), screen effects, **gore**. Motion blur,
   depth of field, film grain, chromatic aberration, vignette and sharpening follow the qualities.
 * Head bob, camera shake, weapon sway and weapon kick are not settings: locked at the designed values.
 

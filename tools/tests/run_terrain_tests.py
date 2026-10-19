@@ -119,10 +119,10 @@ def test_seam(bin_dir, work):
     60..80 m stays under 3x the median change over 40..110 m."""
     fails = []
     cfg = os.path.join(work, "seam.cfg")
-    h, vfov = 15.0, 75.0
+    h, fov = 15.0, 107.5124   # Field of View (horizontal at 16:9): 75 deg vertical
     with open(cfg, "w") as f:
         f.write("set r_maxfps 60\nset cl_fov %g\nmap terrain_yard\nwait 20\ntime_set 11:30 instant\ntime_pause\nweather_set overcast 0\nweather_lock 1\nset r_fidelity 4\n"
-                "setpos 60 %g -85 180 0\nwait 1\nnoclip\nwait 40\nscreenshot seam.png\nwait 2\nquit\n" % (vfov, 10.0 + h))
+                "setpos 60 %g -85 180 0\nwait 1\nnoclip\nwait 40\nscreenshot seam.png\nwait 2\nquit\n" % (fov, 10.0 + h))
     run(bin_dir, cfg, work, os.path.join(work, "seam.log"))
     p = os.path.join(work, "seam.png")
     if not os.path.exists(p):

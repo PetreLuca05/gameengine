@@ -570,6 +570,12 @@ static UserCmd build_cmd(void) {
     c.use_target = G->focus;
     c.view_tick = net_client_view_tick256();
     phone_fill_cmd(&c);
+    // The FOV settings, for whoever spectates this player (docs/CAMERA_HOLDPOINT.md "Field of view").
+    {
+        FovPrefs fp = camera_fov_prefs_local();
+        c.fov_h16 = fov_pack_h16(fp.fov);
+        c.fov_flags = fov_pack_flags(fp.ads_mode, fp.weapon_fov);
+    }
     // Where the shots start (docs/AIM.md): this player's first-person camera (the host checks it).
     {
         Player *lp = game_local_player();

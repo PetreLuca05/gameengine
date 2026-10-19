@@ -62,7 +62,7 @@ static struct {
     const AttachmentDef *optic;
     WeaponDef wd;              // effective equipped weapon (copy)
     bool have_wd;
-    float ads_t, base_fov, sight_fov, vm_zoom, world_zoom, sens_scale;
+    float ads_t, base_fov, ads_base_fov, ads_fov, sight_fov, vm_zoom, world_zoom, sens_scale;
     bool sway_on;
     int sway_n[2];
     vec2 sway_min[2], sway_max[2];
@@ -87,21 +87,10 @@ static float sight_pip_scale(const AttachmentDef *a) {
 
 // ------------------------------------------------------------------ FOV + sensitivity
 
-static float sens_scale(float sight_fov, float hip_fov) {
-    const char *m = S.sens_mode->str;
-    float c = S.sens_coef->f;
-    if (sight_fov <= 1.0f || hip_fov <= 1.0f || !strcmp(m, "off")) return 1.0f;
-    if (!strcmp(m, "fov_ratio")) return c * sight_fov / hip_fov;
-    // monitor_distance: the same mouse motion moves a point at c x (half the screen height) from
-    // the centre by the same amount in both FOVs (c -> 0: zoom ratio, c = 1: the screen edge).
-    float k = fmaxf(c, 1e-3f);
-    float a = atanf(k * tanf(sight_fov * 0.5f * DG_DEG2RAD)), b = atanf(k * tanf(hip_fov * 0.5f * DG_DEG2RAD));
-    return b > 1e-6f ? a / b : 1.0f;
-}
-
 void sights_camera(const Player *p, const WeaponDef *wd, CameraAds *out) {
     memset(out, 0, sizeof(*out));
     S.base_fov = camera_base_fov();
+    S.ads_base_fov = camera_ads_base_fov();
     holdpoint_set_ads_relief_scale(S.relief_scale ? S.relief_scale->f : 1.0f);
     holdpoint_set_look_lag_scale(S.look_lag ? S.look_lag->f : 1.0f);
     S.have_wd = wd != NULL;
@@ -114,15 +103,18 @@ void sights_camera(const Player *p, const WeaponDef *wd, CameraAds *out) {
     S.complete = gun && S.ads_t >= 1.0f;
     S.vm_zoom = gun ? attach_ads_vm_zoom(wd, S.optic) : 1.0f;
     S.world_zoom = gun ? attach_ads_world_zoom(wd, S.optic, camera_ads_world_zoom_default()) : 1.0f;
-    // The sight's FOV for the sensitivity: a scope's magnification (inside the lens, against the base
-    // FOV), irons / red dots the world camera's ADS zoom.
-    S.sight_fov = !gun ? S.base_fov : (scope ? attach_sight_fov(S.optic, S.base_fov) : camera_ads_fov(S.base_fov, S.world_zoom, 1.0f));
+    // The aimed world FOV (ADS Field of View, docs/CAMERA_HOLDPOINT.md "Field of view") and the sight's
+    // FOV for the sensitivity, from the resulting FOVs: a scope's magnification (inside the lens,
+    // against the ADS base), irons / red dots the aimed world FOV.
+    S.ads_fov = gun ? camera_ads_world_fov(S.world_zoom) : S.base_fov;
+    S.sight_fov = !gun ? S.base_fov : (scope ? attach_sight_fov(S.optic, S.ads_base_fov) : S.ads_fov);
     if (gun) {
         out->vm_zoom = S.vm_zoom;
         out->world_zoom = S.world_zoom;
+        out->ads_fov = S.ads_fov;
         out->t = S.ads_t;
     }
-    S.sens_scale = gun ? sens_scale(S.sight_fov, S.base_fov) : 1.0f;
+    S.sens_scale = gun ? fov_sens_scale(S.sens_mode->str, S.sens_coef->f, S.sight_fov, S.base_fov) : 1.0f;
     input_set_ads_fov_scale(S.sens_scale);
 }
 
@@ -133,7 +125,7 @@ void sights_frame(const RenderCamera *cam, bool first_person) {
     memset(rs, 0, sizeof(*rs));
     rs->ads_t = S.ads_t;
     rs->complete = S.complete;
-    rs->base_fov = S.base_fov;
+    rs->base_fov = S.ads_base_fov;
     rs->sight_fov = S.sight_fov;
     rs->debug = S.sight_debug->i;
     S.sight_valid = false;
@@ -588,8 +580,8 @@ static void align_frame(void) {
     }
 }
 
-// FOV / DoF switch: while aiming the world FOV is exactly the hip FOV narrowed by the sight's world
-// zoom along smoothstep(ads_t); the frame ADS completes must already show the aimed world FOV, the
+// FOV / DoF switch: while aiming the world FOV is exactly the hip FOV blended to the aimed world FOV
+// (ADS Field of View) along smoothstep(ads_t); the frame ADS completes must already show the aimed world FOV, the
 // aimed hands / weapon FOV and the ADS DoF; the first frame it is incomplete again must show none of
 // them (the user's DoF mode is back).
 static void fov_frame(const RenderCamera *cam) {
@@ -597,14 +589,14 @@ static void fov_frame(const RenderCamera *cam) {
     float vm = render_vm_fov();
     RenderCamera hip_cam = *cam;
     hip_cam.ads_t = 0;
-    hip_cam.vm_fov_deg = camera_hands_fov();
+    hip_cam.vm_fov_deg = game_arms_hip_fov();
     float vm_hip = render_vm_fov_for(&hip_cam, 0.0f);
     float vm_target = S.vm_zoom > 1.0f ? 2.0f * atanf(tanf(RENDER_ADS_REF_FOV * 0.5f * DG_DEG2RAD) / S.vm_zoom) * DG_RAD2DEG : vm_hip;   // absolute (render_vm_fov_for)
     bool complete = S.complete;
     bool was = t->prev_t >= 1.0f;
     float hip = cam->vm_fov_deg > 1.0f ? cam->vm_fov_deg : cam->fov_deg;   // the hip FOV (sprint included)
     if (S.ads_t <= 0.0f || t->hip_fov <= 1.0f) t->hip_fov = hip;   // (also when the test starts mid-aim)
-    float world_now = camera_ads_fov(t->hip_fov, S.world_zoom, S.ads_t), world_aimed = camera_ads_fov(t->hip_fov, S.world_zoom, 1.0f);
+    float world_now = fov_ads_blend(t->hip_fov, S.ads_fov, S.ads_t), world_aimed = fov_ads_blend(t->hip_fov, S.ads_fov, 1.0f);
     if (S.ads_t > 0.0f && fabsf(cam->fov_deg - world_now) > 1e-3f) {
         if (!t->fov_bad) {
             t->fov_checks++;
@@ -619,6 +611,7 @@ static void fov_frame(const RenderCamera *cam) {
         if (!ok) t->fov_fail++;
         log_info("sight_test fov: ADS complete -> world FOV %.3f (hip %.3f, world zoom %.3f: target %.3f), hands FOV %.3f (target %.3f) ADS DoF %d -> %s", cam->fov_deg,
                  t->hip_fov, S.world_zoom, world_aimed, vm, vm_target, S.rs.ads_dof, ok ? "ok" : "FAIL");
+        log_info("sight_test fov: sensitivity x%.4f (%s, sight FOV %.3f, hip %.3f)", S.sens_scale, S.sens_mode->str, S.sight_fov, S.base_fov);
     } else if (!complete && was) {
         bool ok = !S.rs.ads_dof && (S.vm_zoom <= 1.0f || fabsf(vm - vm_target) > 1e-5f || fabsf(vm_hip - vm_target) < 1e-3f)   /* off the aimed FOV (unless hip = aimed) */ && fabsf(cam->fov_deg - world_now) < 1e-3f;   // back on the ADS curve below 1 (flat at the top: no fixed margin)
         t->fov_checks++;
@@ -632,9 +625,16 @@ static void fov_frame(const RenderCamera *cam) {
 static void cmd_fov_report(int argc, const char **argv) {
     (void)argc;
     (void)argv;
-    Cvar *cl = cvar_find("cl_fov"), *sv = cvar_find("sv_fov"), *svm = cvar_find("sv_fov_max");
-    log_info("fov_report: cl_fov %.1f sv_fov %.1f sv_fov_max %.1f -> base %.2f, camera now %.2f (vertical deg), hands %.2f, ADS world zoom %.3f", cl ? cl->f : 0.0f,
-             sv ? sv->f : 0.0f, svm ? svm->f : 0.0f, camera_base_fov(), G->view.fov, render_vm_fov(), S.world_zoom);
+    Cvar *sv = cvar_find("sv_fov"), *svm = cvar_find("sv_fov_max");
+    FovPrefs fp = camera_fov_prefs();
+    static const char *const ads[] = { "independent", "affected" }, *const wf[] = { "narrow", "default", "wide" };
+    int w = render_width(), h = render_height();
+    float aspect = h > 0 ? (float)w / (float)h : FOV_REF_ASPECT;
+    log_info("fov_report: fov %.1f (horizontal at 16:9) ads %s weapon %s sv_fov %.1f sv_fov_max %.1f -> base %.2f (vertical deg, %.2f horizontal at %.3f), ADS base %.2f, ADS %.2f "
+             "(world zoom %.3f), camera now %.2f, hands now %.2f (hip %.2f), sensitivity x%.4f",
+             fp.fov, ads[DG_CLAMP(fp.ads_mode, 0, 1)], wf[DG_CLAMP(fp.weapon_fov, 0, 2)], sv ? sv->f : 0.0f, svm ? svm->f : 0.0f, camera_base_fov(),
+             fov_v_to_h(camera_base_fov(), aspect), aspect, camera_ads_base_fov(), camera_ads_world_fov(S.world_zoom > 1.0f ? S.world_zoom : 1.0f), S.world_zoom,
+             G->view.fov, render_vm_fov(), game_arms_hip_fov(), S.sens_scale);
 }
 
 // sight_pip_res [optic multiplier]: every scope's pip_resolution and the PiP size it gets at the current

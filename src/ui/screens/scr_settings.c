@@ -131,7 +131,7 @@ void settings_confirm_result(bool keep) {
 // cleared. Kept: the display (Apply / Revert, confirmed) and the fidelity benchmark results. Tier
 // and locked cvars are not the player's (docs/SETTINGS_AUDIT.md).
 static const char *const k_gfx_keep[] = { "r_width", "r_height", "r_mode", "r_vsync" };
-static const char *const k_gfx_extra[] = { "cl_fov", "cl_sprint_fov", "cl_showfps" };
+static const char *const k_gfx_extra[] = { "cl_fov", "cl_ads_fov", "cl_weapon_fov", "cl_showfps" };
 
 static bool gfx_cvar(const Cvar *c) {
     if (!(c->flags & CVAR_EDITABLE)) return false;
@@ -336,7 +336,7 @@ static void graphics_quality(GuiCursor *c) {
 // The tab header: "Why can't I change X?" (hover: the fair-play reason) and Default.
 static const char k_why_fixed[] =
     "Settings that change what you can see compared with other players are the same for everyone, for fair play: foliage and grass, fog and weather, view, "
-    "shadow and detail distances, lens effects, exposure and brightness beyond a small range, the hands FOV. The quality settings change how good the "
+    "shadow and detail distances, lens effects, exposure and brightness beyond a small range. The quality settings change how good the "
     "world looks and how fast it runs, never what you can see. The host's lobby rules may set some of them for a whole game.";
 
 static void graphics_header(GuiCursor *c) {
@@ -423,23 +423,28 @@ static void graphics_display(GuiCursor *c) {
 
 static void graphics_comfort(GuiCursor *c) {
     section(c, "Comfort");
+    // The FOV model (docs/CAMERA_HOLDPOINT.md "Field of view"): Field of View, ADS Field of View, Weapon
+    // Field of View. A host may force one Field of View (sv_fov) or cap it (sv_fov_max).
     {
-        // The world camera FOV is the player's (60 .. 120), unless the host forces one (sv_fov) or caps it (sv_fov_max).
         Cvar *svf = cv("sv_fov"), *svm = cv("sv_fov_max");
         if (svf && svf->f >= 1.0f) {
-            GuiRect r = gw_setting_row(c, "Field of view", "This server sets the same FOV for every player.", rid("fov_fixed"));
+            GuiRect r = gw_setting_row(c, "Field of View", "This server sets the same field of view for every player.", rid("fov_fixed"));
             char buf[64];
-            snprintf(buf, sizeof(buf), "%.0f\xC2\xB0 (server)", camera_base_fov());
+            snprintf(buf, sizeof(buf), "%.0f (server)", svf->f);
             gw_label(r, buf, gui_s(TH->t_body), GW_REGULAR, TH->text_faint, GUI_LEFT);
         } else {
-            row_slider_cvar(c, "Field of view", "cl_fov", 60, 120, 1, "%.0f\xC2\xB0",
-                            svm && svm->f >= 1.0f ? "Vertical camera FOV of the world (this server caps it). Aiming zooms by the sight's own amount."
-                                                  : "Vertical camera FOV of the world (75 = 107\xC2\xB0 horizontal at 16:9). Aiming zooms by the sight's own amount.");
+            row_slider_cvar(c, "Field of View", "cl_fov", FOV_MIN, FOV_MAX, 1, "%.0f",
+                            svm && svm->f >= 1.0f ? "Adjust the field of view of the player camera (this server caps it). Higher values show more of the world."
+                                                  : "Adjust the field of view of the player camera. Higher values show more of the world; wider screens see more to the sides.");
         }
     }
-    row_slider_cvar(c, "Hands FOV", "cl_hands_fov", 50, 90, 1, "%.0f\xC2\xB0",
-                    "Vertical FOV of your arms and the held item only (the world keeps Field of view). Aiming uses the sight's own FOV.");
-    row_slider_cvar(c, "Sprint FOV effect", "cl_sprint_fov", 0, 7, 0.5f, "%.1f\xC2\xB0", "The view widens a little while sprinting (0 = off).");
+    static const char *const ads_fov[] = { "Independent", "Affected" };
+    row_combo_cvar(c, "ADS Field of View", "cl_ads_fov", ads_fov, 2,
+                   "Affected: the field of view while aiming down sights scales with Field of View. Independent: aiming down sights uses the default field of "
+                   "view, whatever Field of View is set to.");
+    static const char *const weapon_fov[] = { "Narrow", "Default", "Wide" };
+    row_combo_cvar(c, "Weapon Field of View", "cl_weapon_fov", weapon_fov, 3,
+                   "Adjust the field of view of your weapon and arms, independent of Field of View. Narrow brings the weapon closer, Wide shows more of it.");
     row_slider_cvar(c, "Screen effects", "r_post_feedback", 0.5f, 1, 0.05f, "%.2f", "Damage, flash and low-health effects (photosensitivity).");
     static const char *const gore[] = { "Off", "Low", "High" };
     row_combo_cvar(c, "Gore", "gore_level", gore, 3, "Off: neutral impact puffs (hits stay readable), no blood.");

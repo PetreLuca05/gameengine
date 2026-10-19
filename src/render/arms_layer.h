@@ -10,6 +10,8 @@
 //   tuned    offset / rotation / scale per hold point state and per item (assets/player/arms_layer.json),
 //            about the hold point; in ADS only the push along the view axis, the roll and the scale
 //            about the sight (the sight stays on the view axis)
+//   preset   Weapon Field of View: the layer moves sideways with the preset's FOV so the sight keeps
+//            its place on screen (the item looks larger with Narrow, smaller with Wide)
 //   sway     the player's cosmetic "Weapon sway" (the pose's own sway shown smaller)
 //   kick     the player's cosmetic "Weapon kick" (the pose's own kick shown smaller) + the first-person
 //            screen kick towards the eye
@@ -22,6 +24,7 @@
 #include "core/base.h"
 #include "core/dgmath.h"
 #include "player/holdpoint.h"
+#include "player/fov.h"
 
 struct cJSON;
 
@@ -47,6 +50,7 @@ typedef struct ArmsLayerDef {
     float seam_r0, seam_r1;           // shoulder seam: arm vertices within r0 of the upper-arm joint are drawn with the
                                       // world camera, past r1 with the arms camera (m)
     float znear;                      // the arms projection's near plane (m)
+    float weapon_fov[WEAPON_FOV_COUNT];   // Weapon Field of View presets: narrow, default, wide (hip, horizontal deg at 16:9)
 } ArmsLayerDef;
 
 typedef struct ArmsLayerState {
@@ -77,6 +81,8 @@ typedef struct ArmsLayerIn {
     vec3 sway_ads_rot;                // ... and aimed (deg about the sight)
     float sway_scale;                 // the player's cosmetic Weapon sway (1 = the pose's sway as it is)
     float screen_kick;                // first-person screen kick (m towards the eye)
+    float lateral_scale;              // Weapon Field of View: the sight's x / y scale by this at the hip so it keeps its
+                                      // place on screen (fov_lateral_scale against the Default preset; 0 / 1 = none)
     float dt;
 } ArmsLayerIn;
 

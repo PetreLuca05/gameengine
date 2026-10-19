@@ -1,36 +1,70 @@
 #include "camera.h"
+#include "fov.h"
 #include "core/engine.h"
 #include "core/cvar.h"
 #include <math.h>
 
-typedef struct CameraCvars { Cvar *fov, *sv_fov, *sv_fov_max, *max_aspect, *ads_world_zoom, *sprint_fov, *hands_fov; } CameraCvars;
+typedef struct CameraCvars { Cvar *fov, *sv_fov, *sv_fov_max, *max_aspect, *ads_world_zoom, *sprint_fov, *hands_fov, *ads_fov, *weapon_fov; } CameraCvars;
 
 static CameraCvars *cc(void) { return g_engine.camera_cvars; }
+
+// The viewed player's FOV settings (a spectated player's, forwarded in its commands); unset: the local cvars.
+static FovPrefs g_view_prefs;
+static bool g_view_prefs_set;
 
 void camera_register_cvars(void) {
     CameraCvars *c = ARENA_PUSH(&g_engine.perm_arena, CameraCvars);
     g_engine.camera_cvars = c;
-    // The world camera FOV is the player's (Settings -> Graphics -> View): vertical degrees, Hor+ up
-    // to sv_fov_max_aspect, wider screens keep that aspect's horizontal FOV. A host may force one FOV
-    // for everyone (sv_fov) or cap it (sv_fov_max). Hands FOV (the arms layer): cl_hands_fov.
-    c->fov = cvar_reg_float("cl_fov", 75.0f, 60.0f, 120.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "world camera vertical FOV (deg; 75 = 107 deg horizontal at 16:9)");
-    c->sv_fov = cvar_reg_float("sv_fov", 0.0f, 0.0f, 120.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "host override of every player's world FOV (vertical deg, replicated; 0 = each player's cl_fov)");
-    c->sv_fov_max = cvar_reg_float("sv_fov_max", 0.0f, 0.0f, 120.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "host cap of the players' cl_fov (vertical deg, replicated; 0 = no cap)");
-    c->max_aspect = cvar_reg_float("sv_fov_max_aspect", 16.0f / 9.0f, 0.0f, 4.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE,
-                                   "widest aspect that sees more to the sides; wider screens keep its horizontal FOV (0 = unlimited Hor+)");
-    c->ads_world_zoom = cvar_reg_float("cl_ads_world_zoom", 1.5f, 1.0f, 1.5f, CVAR_LOCKED,
-                                       "ADS: the world camera narrows by this (tangent ratio) when fully aimed, on top of the hands / weapon zoom (1 = off; a sight's \"world_zoom\" overrides it)");
-    c->sprint_fov = cvar_reg_float("cl_sprint_fov", 7.0f, 0.0f, 7.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "extra FOV while sprinting (deg)");
+    // The FOV model (docs/CAMERA_HOLDPOINT.md "Field of view", player/fov.h): three settings in
+    // Settings -> Graphics -> Comfort. Field of View is horizontal degrees at 16:9, Hor+ (the vertical
+    // FOV is the same on every aspect). A host may force one FOV for everyone (sv_fov) or cap it
+    // (sv_fov_max), in the same units. Weapon Field of View: the arms layer only (game_arms.c).
+    c->fov = cvar_reg_float("cl_fov", FOV_DEFAULT, FOV_MIN, FOV_MAX, CVAR_ARCHIVE | CVAR_EDITABLE,
+                            "Field of View: the world camera at the hip (horizontal deg at 16:9, Hor+; 80 = 50.5 deg vertical)");
+    c->ads_fov = cvar_reg_int("cl_ads_fov", FOV_ADS_INDEPENDENT, 0, 1, CVAR_ARCHIVE | CVAR_EDITABLE,
+                              "ADS Field of View: 0 Independent (aiming goes back to the default 80, then the sight's zoom), 1 Affected (the sight's FOV x Field of View / 80)");
+    c->weapon_fov = cvar_reg_int("cl_weapon_fov", WEAPON_FOV_DEFAULT, 0, WEAPON_FOV_COUNT - 1, CVAR_ARCHIVE | CVAR_EDITABLE,
+                                 "Weapon Field of View: 0 Narrow, 1 Default, 2 Wide (your arms and held item only, never the world; arms_layer.json weapon_fov)");
+    c->sv_fov = cvar_reg_float("sv_fov", 0.0f, 0.0f, 150.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE,
+                               "host override of every player's Field of View (horizontal deg at 16:9, replicated; 0 = each player's cl_fov)");
+    c->sv_fov_max = cvar_reg_float("sv_fov_max", 0.0f, 0.0f, 150.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE,
+                                   "host cap of the players' Field of View (horizontal deg at 16:9, replicated; 0 = no cap)");
+    c->max_aspect = cvar_reg_float("sv_fov_max_aspect", 0.0f, 0.0f, 4.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE,
+                                   "widest aspect that sees more to the sides; wider screens keep its horizontal FOV (0 = Hor+ on every aspect)");
+    c->ads_world_zoom = cvar_reg_float("cl_ads_world_zoom", 1.15f, 1.0f, 1.5f, CVAR_LOCKED,
+                                       "ADS: the irons' / red dots' world zoom against the ADS base (tangent ratio; 1 = none; a sight's \"world_zoom\" overrides it)");
+    c->sprint_fov = cvar_reg_float("cl_sprint_fov", 0.12f, 0.0f, 0.3f, CVAR_LOCKED, "sprint widening at full sprint: the current FOV's tangent x (1 + this)");
     // The arms layer's FOV (docs/CAMERA_HOLDPOINT.md "Rule 3"): your arms and the held item, never the
-    // world. Vertical like cl_fov, Hor+ to the same widest aspect; aimed, the sight's own FOV.
-    c->hands_fov = cvar_reg_float("cl_hands_fov", 65.0f, 50.0f, 90.0f, CVAR_ARCHIVE | CVAR_EDITABLE,
-                                  "Hands FOV: vertical FOV of your arms and held item (deg; the world keeps cl_fov)");
+    // world. The player picks Weapon Field of View; this overrides the preset (dev, tuning).
+    c->hands_fov = cvar_reg_float("cl_hands_fov", 0.0f, 0.0f, 130.0f, CVAR_LOCKED,
+                                  "dev: the arms layer's hip FOV (horizontal deg at 16:9) instead of the Weapon Field of View preset (0 = the preset)");
 }
 
-float camera_hands_fov(void) {
+FovPrefs camera_fov_prefs_local(void) {
+    FovPrefs p = { cc()->fov->f, cc()->ads_fov->i, cc()->weapon_fov->i };
+    return p;
+}
+
+void camera_set_view_prefs(const FovPrefs *p) {
+    g_view_prefs_set = p != NULL;
+    if (p) g_view_prefs = *p;
+}
+
+FovPrefs camera_fov_prefs(void) { return g_view_prefs_set ? g_view_prefs : camera_fov_prefs_local(); }
+
+static float screen_aspect(void) {
     int w = render_width(), h = render_height();
-    float aspect = (w > 0 && h > 0) ? (float)w / (float)h / render_stretch_factor() : 16.0f / 9.0f;
-    return camera_fov_for_aspect(cc()->hands_fov->f, cc()->max_aspect->f, aspect);
+    return (w > 0 && h > 0) ? (float)w / (float)h / render_stretch_factor() : FOV_REF_ASPECT;
+}
+
+// Field of View as it applies (horizontal deg at 16:9): the host's override / cap, else the viewed player's.
+static float setting_h16(void) { return camera_fov_setting(camera_fov_prefs().fov, cc()->sv_fov->f, cc()->sv_fov_max->f); }
+
+float camera_fov_v(float h16) { return camera_fov_for_aspect(fov_h16_to_v(h16), cc()->max_aspect->f, screen_aspect()); }
+
+float camera_hands_fov(const float presets[WEAPON_FOV_COUNT]) {
+    float h = cc()->hands_fov->f >= 1.0f ? cc()->hands_fov->f : fov_weapon(presets, camera_fov_prefs().weapon_fov);
+    return camera_fov_v(h);
 }
 
 float camera_fov_for_aspect(float fov_v, float max_aspect, float aspect) {
@@ -43,18 +77,13 @@ float camera_fov_setting(float cl_fov, float sv_fov, float sv_fov_max) {
     return sv_fov_max >= 1.0f ? fminf(cl_fov, sv_fov_max) : cl_fov;
 }
 
-float camera_base_fov(void) {
-    int w = render_width(), h = render_height();
-    float aspect = (w > 0 && h > 0) ? (float)w / (float)h / render_stretch_factor() : 16.0f / 9.0f;
-    return camera_fov_for_aspect(camera_fov_setting(cc()->fov->f, cc()->sv_fov->f, cc()->sv_fov_max->f), cc()->max_aspect->f, aspect);
-}
+float camera_base_fov(void) { return camera_fov_v(setting_h16()); }
+
+float camera_ads_base_fov(void) { return camera_fov_v(fov_ads_base(camera_fov_prefs().ads_mode, setting_h16())); }
+
+float camera_ads_world_fov(float sight_zoom) { return camera_fov_v(fov_ads(camera_fov_prefs().ads_mode, setting_h16(), sight_zoom)); }
 
 float camera_ads_world_zoom_default(void) { return cc()->ads_world_zoom->f; }
-
-float camera_ads_fov(float hip_fov, float world_zoom, float ads_t) {
-    float k = 1.0f + (fmaxf(world_zoom, 1.0f) - 1.0f) * smoothstepf(0.0f, 1.0f, saturate(ads_t));
-    return 2.0f * atanf(tanf(hip_fov * 0.5f * DG_DEG2RAD) / k) * DG_RAD2DEG;
-}
 
 void camera_apply_look(ViewState *v, vec2 d) {
     v->yaw = wrap_angle(v->yaw + d.x);
@@ -110,15 +139,16 @@ RenderCamera camera_update(ViewState *v, const PlayerMove *m, float dt, const Ca
     vec3 eye = v3_add(v3(m->pos.x, v->smooth_eye_y, m->pos.z), v->shake);
     v->eye = eye;
 
-    // FOV: the player's base (cl_fov / the host's sv_fov), sprint widens it (smoothed). ADS narrows
-    // the world (the sight's world zoom, cl_ads_world_zoom 1.5x, along smoothstep(ads_t): exact the frame
-    // ADS completes); the arms / weapon projection narrows by its own, stronger vm_ads_zoom and a
-    // scope magnifies inside its lens.
+    // FOV (docs/CAMERA_HOLDPOINT.md "Field of view"): Field of View (or the host's sv_fov), sprint
+    // widens it (a multiplier, smoothed). ADS blends to the aimed world FOV (ADS Field of View: the
+    // default 80 or Field of View, narrowed by the sight's world zoom) along smoothstep(ads_t): exact
+    // the frame ADS completes. The arms layer has its own FOV (Weapon Field of View) and a scope
+    // magnifies inside its lens.
     float hip = camera_base_fov();
-    if (m->sprinting && grounded && ads_t <= 0.0f) hip += c->sprint_fov->f * saturate(speed / 6.0f);
+    if (m->sprinting && grounded && ads_t <= 0.0f) hip = fov_sprint(hip, c->sprint_fov->f * saturate(speed / 6.0f));
     if (v->fov_hip <= 1.0f) v->fov_hip = hip;
     v->fov_hip = lerpf(v->fov_hip, hip, exp_decay(8.0f, dt));
-    v->fov = (ca && ca->world_zoom > 1.0f && ads_t > 0.0f) ? camera_ads_fov(v->fov_hip, ca->world_zoom, ads_t) : v->fov_hip;
+    v->fov = (ca && ca->ads_fov > 1.0f && ads_t > 0.0f) ? fov_ads_blend(v->fov_hip, ca->ads_fov, ads_t) : v->fov_hip;
 
     // Slight roll while hanging, pitch nudge during mantle (movement shake); the death tilt.
     float roll_target = m->mode == MOVE_HANG ? 0.03f * shake : 0.0f;

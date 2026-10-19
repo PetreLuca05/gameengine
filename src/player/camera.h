@@ -4,6 +4,7 @@
 
 #include "core/dgmath.h"
 #include "player.h"
+#include "player/fov.h"
 #include "render/render.h"
 
 typedef struct ViewState {
@@ -21,12 +22,13 @@ typedef struct ViewState {
     vec3 shake;                // the movement shake's eye offset this frame (cl_move_shake: bob + landing dip; world)
 } ViewState;
 
-// ADS input (game_sights.c). The world FOV narrows by world_zoom and the arms / weapon projection by
-// vm_zoom along the weapon's ADS progress (exactly those once t reaches 1).
+// ADS input (game_sights.c). The world FOV blends to ads_fov and the arms / weapon projection narrows
+// by vm_zoom along the weapon's ADS progress (exactly those once t reaches 1).
 typedef struct CameraAds {
     float t;                   // 0 hip .. 1 fully aimed (WeaponState.ads_t)
     float vm_zoom;             // arms / weapon magnification at t = 1 (tan ratio, >= 1; 0 / 1 = none)
-    float world_zoom;          // world camera magnification at t = 1 (tan ratio, ~1.1; 0 / 1 = none)
+    float world_zoom;          // the sight's world magnification (tan ratio at the ADS base; 0 / 1 = none)
+    float ads_fov;             // the aimed world FOV (vertical deg, camera_ads_world_fov; 0 = no ADS)
 } CameraAds;
 
 void camera_register_cvars(void);
@@ -34,15 +36,25 @@ void camera_register_cvars(void);
 void camera_apply_look(ViewState *v, vec2 look_delta);
 // Builds the render camera from the interpolated movement state.
 RenderCamera camera_update(ViewState *v, const PlayerMove *m, float dt, const CameraAds *ads, bool dead);
-// The world camera's vertical FOV for this screen: cl_fov (or the host's sv_fov override / sv_fov_max
-// cap), kept at sv_fov_max_aspect's horizontal FOV on wider screens; before sprint widening, the ADS
-// world zoom and the fire FOV punch.
+// The FOV settings (player/fov.h): the local cvars, and the viewed player's (a spectated player's
+// forwarded values while set: camera_set_view_prefs, NULL = the local ones again).
+FovPrefs camera_fov_prefs_local(void);
+FovPrefs camera_fov_prefs(void);
+void camera_set_view_prefs(const FovPrefs *p);
+// The vertical FOV for this screen of a horizontal FOV at 16:9 (Hor+; sv_fov_max_aspect caps it when set).
+float camera_fov_v(float h16);
+// The world camera's vertical FOV for this screen: Field of View (or the host's sv_fov override /
+// sv_fov_max cap); before sprint widening, ADS and the fire FOV punch.
 float camera_base_fov(void);
-float camera_hands_fov(void);   // the arms layer's hip FOV (cl_hands_fov, Hor+)
+// The ADS base (the default 80 or Field of View: ADS Field of View; scopes magnify against it) and the
+// aimed world FOV for a sight's world zoom, vertical deg for this screen.
+float camera_ads_base_fov(void);
+float camera_ads_world_fov(float sight_zoom);
+// The arms layer's hip FOV (vertical deg): the Weapon Field of View preset (narrow, default, wide:
+// horizontal deg at 16:9), or cl_hands_fov (dev).
+float camera_hands_fov(const float presets[WEAPON_FOV_COUNT]);
 float camera_fov_for_aspect(float fov_v, float max_aspect, float aspect);   // pure
 float camera_fov_setting(float cl_fov, float sv_fov, float sv_fov_max);    // pure: override > cap > the player's
-// The world FOV at ADS progress t (0..1) for a sight's world zoom (tangent ratio): pure.
-float camera_ads_fov(float hip_fov, float world_zoom, float ads_t);
 float camera_ads_world_zoom_default(void);   // cl_ads_world_zoom
 
 #endif

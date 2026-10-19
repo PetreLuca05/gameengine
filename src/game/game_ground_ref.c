@@ -61,10 +61,11 @@ static void cmd_ref_cam(int argc, const char **argv) {
     if (!v) { log_info("ground_ref_cam: no view %s", argv[1]); cJSON_Delete(root); return; }
     const cJSON *map = cJSON_GetObjectItemCaseSensitive(v, "map"), *pos = cJSON_GetObjectItemCaseSensitive(v, "pos");
     char cmd[512];
+    // The reference's horizontal FOV at 16:9 is the FOV model's unit; sv_fov takes it outside the
+    // players' 80 .. 120 band (docs/CAMERA_HOLDPOINT.md "Field of view").
     float fov_h = (float)cJSON_GetObjectItemCaseSensitive(v, "fov")->valuedouble;
-    float fov_v = 2.0f * atanf(tanf(fov_h * 0.5f * DG_DEG2RAD) * 9.0f / 16.0f) * DG_RAD2DEG;   // cl_fov is vertical
-    snprintf(cmd, sizeof(cmd), "%s%s%sset cl_fov %.1f\ntime_set %s instant\ntime_pause\nweather_set %s 0\nweather_lock 1\nsetpos %g %g %g %g %g\n",
-             (cJSON_IsString(map)) ? "map " : "", (cJSON_IsString(map)) ? map->valuestring : "", (cJSON_IsString(map)) ? "\n" : "", fov_v,
+    snprintf(cmd, sizeof(cmd), "%s%s%sset sv_fov %.1f\ntime_set %s instant\ntime_pause\nweather_set %s 0\nweather_lock 1\nsetpos %g %g %g %g %g\n",
+             (cJSON_IsString(map)) ? "map " : "", (cJSON_IsString(map)) ? map->valuestring : "", (cJSON_IsString(map)) ? "\n" : "", fov_h,
              cJSON_GetObjectItemCaseSensitive(v, "time")->valuestring, cJSON_GetObjectItemCaseSensitive(v, "weather")->valuestring,
              cJSON_GetArrayItem(pos, 0)->valuedouble, cJSON_GetArrayItem(pos, 1)->valuedouble, cJSON_GetArrayItem(pos, 2)->valuedouble,
              cJSON_GetObjectItemCaseSensitive(v, "yaw")->valuedouble, cJSON_GetObjectItemCaseSensitive(v, "pitch")->valuedouble);

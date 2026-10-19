@@ -129,7 +129,7 @@ interpolated state and forwarded angles. The glide restarts on a target switch.
 | `cl_move_shake` | 0 | Comfort "Movement shake" |
 | `cam_kick_scale` | 1 | Comfort "Camera shake" (firing; 0.25 … 1) |
 | `cam_collision_radius` | 0.11 | wall distance (m) |
-| `cl_fov`, `sv_fov`, `sv_fov_max`, `sv_fov_max_aspect` | 75, 0, 0, 16:9 | the world camera's vertical FOV (Hor+ up to the max aspect); ADS narrows it by the sight's world zoom |
+| `cl_fov`, `sv_fov`, `sv_fov_max`, `sv_fov_max_aspect` | 80, 0, 0, 0 | Field of View: horizontal degrees at 16:9, Hor+ ("Field of view" below) |
 | `cam_debug` | 0 | 1: draws the head eye (red), nominal eye (green), camera (white), hold point axes, pivot, sight, muzzle, grips, collision cast + a stats line; 2: also logs |
 
 ## Rule 3: the arms layer
@@ -149,13 +149,10 @@ in that camera's space places the drawn arms + item, in this order (`src/render/
 | tuned | `offset` (right, up, forward m), `rotation` (pitch, yaw, roll °) and `scale` (0.9 … 1.1) about the hold point, per hold point state and per item (`items`), blended over the state's `blend`. In ADS only the push along the view axis, the roll and the scale apply, about the sight |
 | kick | the player's cosmetic "Weapon kick" (`wpn_visual_scale`: the pose's kick shown smaller) + the first-person screen kick |
 | equip | a newly selected item comes up from below the arms frustum to its hold over `equip.time` (0.3 s: the gun is ready then). It starts `equip.pitch` muzzle down and its item length + `equip.margin` under the bottom edge |
-| aim | a rotation about the eye that puts the barrel where the world camera shows the shot: sway, the ADS counter of the camera kick, Hands FOV ≠ world FOV |
+| aim | a rotation about the eye that puts the barrel where the world camera shows the shot: sway, the ADS counter of the camera kick, the arms FOV ≠ world FOV |
 
-**Hands FOV** (`cl_hands_fov`, Settings → Graphics → Comfort, 50 … 90°, default 65):
-- It is vertical, with the same Hor+ rule as the world FOV.
-- Aimed, the arms use the sight's own FOV (`RENDER_ADS_REF_FOV` / the sight's ADS zoom), so the sight
-  picture is the same for everyone.
-- It changes nothing but the arms projection. The fidelity levels don't bound it (like the world FOV).
+**The arms FOV** is Weapon Field of View ("Field of view" below): a preset at the hip, the sight's own
+FOV aimed. It changes nothing but the arms projection, and the fidelity levels don't bound it.
 
 **The shoulder seam:** the body is drawn by the world camera, the arms by the arms camera. Arm
 vertices within `seam.r0` of an upper-arm joint keep the world camera's screen position, past
@@ -176,6 +173,68 @@ item or the held one. Also: preview a state (`holdpoint_force_state`), the equip
 near plane, a wireframe of the arms layer (`r_arms_wireframe`), the body / arms toggles
 (`cl_fp_layers`), save / reload. Console: `arms_layer_set`, `arms_layer_info`, `arms_layer_save`,
 `arms_layer_reload`.
+
+## Field of view
+
+Three settings, after Call of Duty: Modern Warfare II (Settings → Graphics → Comfort). The math is
+pure (`src/player/fov.c`, `tests/test_fov.c`); `camera.c` applies it to the world camera,
+`game_sights.c` to ADS, sensitivity and the scope picture, `game_arms.c` / `arms_layer.c` to the arms
+layer.
+
+| Setting | Cvar | Values | What it changes |
+|---|---|---|---|
+| Field of View | `cl_fov` | 80 … 120 (default 80), horizontal degrees at 16:9 | the world camera at the hip, never the arms layer |
+| ADS Field of View | `cl_ads_fov` | 0 Independent (default), 1 Affected | the world camera while aiming |
+| Weapon Field of View | `cl_weapon_fov` | 0 Narrow, 1 Default (default), 2 Wide | the arms layer's projection at the hip, never the world |
+
+**Hor+.** The setting is a horizontal FOV at 16:9; the vertical FOV is the same on every aspect, so
+21:9 sees more to the sides and 4:3 less:
+
+    V = 2·atan(tan(H16 / 2) · 9/16)          H(aspect) = 2·atan(tan(V / 2) · aspect)
+
+| Field of View | vertical | 16:9 | 21:9 | 4:3 |
+|---|---|---|---|---|
+| 80 | 50.5° | 80° | 96.4° | 64.4° |
+| 100 | 67.7° | 100° | 113.7° | 83.5° |
+| 120 | 88.5° | 120° | 131.4° | 104.3° |
+
+A host may force one Field of View for everyone (`sv_fov`) or cap it (`sv_fov_max`), in the same units
+(0 = off). `sv_fov_max_aspect` (0 = Hor+ on every aspect) can stop wider screens from seeing more.
+
+**ADS Field of View.** The sight's FOV at the default 80 is `H_s = 2·atan(tan(40°) / z)`, where `z` is
+the sight's world zoom: a sight's `world_zoom`, a weapon's `ads_world_zoom`, else `cl_ads_world_zoom`
+(1.15, the irons and red dots).
+- **Independent:** `H_ads = H_s`. Aiming goes back to 80, then the sight's zoom applies: ADS looks the
+  same whatever Field of View is.
+- **Affected:** `H_ads = H_s · Field of View / 80`.
+- Scopes magnify inside their lens against the ADS base: 80 (Independent) or Field of View (Affected)
+  (`RenderSight.base_fov`).
+- The blend from the hip runs over the weapon's ADS time on the existing curve: the magnification
+  `k(t) = 1 + (tan(V_hip/2) / tan(V_ads/2) − 1) · smoothstep(t)`, `V(t) = 2·atan(tan(V_hip/2) / k)`;
+  exactly `V_ads` the frame ADS completes, no snap.
+- The ADS look sensitivity (`ads_sens_mode`, `ads_sens_coef`) is computed from the resulting FOVs:
+  the hip FOV and the aimed world FOV (a scope: its lens FOV against the ADS base).
+
+**Weapon Field of View.** The presets are `weapon_fov` in `assets/player/arms_layer.json` (narrow,
+default, wide; hip, horizontal degrees at 16:9; Default comes from the reference framing below,
+Narrow −10°, Wide +15°). They change only the arms layer's projection. The layer moves sideways at
+the same depth by `tan(V_preset / 2) / tan(V_default / 2)`, so the sight keeps its pixel: Narrow draws
+the gun and arms thicker, Wide thinner with more of the arms. Aimed, the arms use the sight's own FOV
+(`RENDER_ADS_REF_FOV` / the sight's ADS zoom), the same for every preset, and the sight is on the
+view axis, so the reticle stays centred. `cl_hands_fov` (dev, locked) overrides the preset.
+
+**Multipliers.** Sprint widens the current FOV's tangent by `1 + cl_sprint_fov · speed / 6` (0.12 at
+full sprint, locked). The fire FOV punch scales it by `1 − punch / 75` (punches are authored against
+a 75° view). There is no vehicle FOV and no bodycam.
+
+**Spectators.** A player's three settings ride in every `UserCmd` (`fov_h16`, `fov_flags`, protocol 36).
+A spectator in first person uses the target's (`camera_set_view_prefs`), so it sees the target's view.
+
+**Tests:** `ctest -R fov` (Hor+ at 16:9 / 21:9 / 4:3, Independent = the sight at 80 for any Field of
+View, Affected = sight × FOV / 80, the blend's ends / monotony / steepest frame, sensitivity from the
+resulting FOVs, the multipliers, the presets and the lateral scale, the command round trip);
+`ctest -R arms_layer` (the hip sight keeps its pixel across the presets, aimed it stays centred);
+`tools/tests/fov_setting.cfg` + `fov_report` (80 / 120, both ADS modes, the presets, `sv_fov`).
 
 ## Solve order (no feedback loop)
 
@@ -318,13 +377,14 @@ leaf): the weight is then the blend weight of the other leaves. This is `holdpoi
 
 ## Networking
 
-Nothing new goes on the wire. Remote players already replicate aim yaw and pitch, body yaw, weapon,
+Nothing new goes on the wire for the pose. Remote players already replicate aim yaw and pitch, body yaw, weapon,
 and ADS / sprint / crouch flags. Each client runs the same stage A, spine look, hold point and IK for
 them; the owner's frame re-solve runs the same functions (rule 1). The shots leave the first-person
 camera (the nominal eye, `UserCmd.eye_cam`, checked by the host: docs/AIM.md).
 
 Spectators in first person reproduce the gliding camera from the forwarded inputs and the arms layer
-from the shared `assets/player/arms_layer.json`.
+from the shared `assets/player/arms_layer.json`, with the target's FOV settings (forwarded in its
+commands, "Field of view").
 
 ## Tuning and debug
 
@@ -370,10 +430,14 @@ from the shared `assets/player/arms_layer.json`.
 
 `ctest -R arms_layer` (`tests/test_arms_layer.c`):
 - the identity layer is the eye's view;
-- ADS keeps the sight at the screen centre for any Hands FOV, push, roll or scale;
+- ADS keeps the sight at the screen centre for any arms FOV, push, roll or scale;
 - tuning moves the layer on screen without touching its input;
 - the equip raise starts below the view and ends on the hold;
-- the aim correction lands the barrel on the shot's pixel.
+- the aim correction lands the barrel on the shot's pixel;
+- Weapon Field of View: the hip sight keeps its pixel across Narrow / Default / Wide, aimed it stays
+  centred.
+
+`ctest -R fov`: the FOV model ("Field of view").
 
 In the game:
 - `tools/tests/hp_test.cfg` runs `holdpoint_test`.

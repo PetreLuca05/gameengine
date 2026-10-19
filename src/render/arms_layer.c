@@ -26,7 +26,12 @@ void arms_layer_defaults(ArmsLayerDef *d) {
     d->seam_r0 = 0.06f;
     d->seam_r1 = 0.16f;
     d->znear = 0.01f;
+    d->weapon_fov[WEAPON_FOV_NARROW] = 60.0f;
+    d->weapon_fov[WEAPON_FOV_DEFAULT] = 70.0f;
+    d->weapon_fov[WEAPON_FOV_WIDE] = 85.0f;
 }
+
+static const char *const k_weapon_fov[WEAPON_FOV_COUNT] = { "narrow", "default", "wide" };
 
 static const cJSON *jget(const cJSON *o, const char *k) { return o ? cJSON_GetObjectItemCaseSensitive(o, k) : NULL; }
 static float jf(const cJSON *o, const char *k, float def) {
@@ -78,6 +83,8 @@ void arms_layer_parse(ArmsLayerDef *d, const cJSON *root) {
     d->seam_r0 = fmaxf(0.0f, jf(seam, "r0", d->seam_r0));
     d->seam_r1 = fmaxf(d->seam_r0 + 0.01f, jf(seam, "r1", d->seam_r1));
     d->znear = clampf(jf(root, "znear", d->znear), 0.002f, 0.05f);
+    const cJSON *wf = jget(root, "weapon_fov");
+    for (int i = 0; i < WEAPON_FOV_COUNT; i++) d->weapon_fov[i] = clampf(jf(wf, k_weapon_fov[i], d->weapon_fov[i]), 30.0f, 130.0f);
 }
 
 static float r4(float v) { return roundf(v * 10000.0f) / 10000.0f; }
@@ -100,9 +107,10 @@ char *arms_layer_to_json(const ArmsLayerDef *d) {
     cJSON_AddStringToObject(o, "_comment",
                             "First-person arms layer (docs/CAMERA_HOLDPOINT.md \"Rule 3\"): the arms + held item drawn with their own camera. Per hold point state "
                             "(and per item under \"items\"): offset (right, up, forward m), rotation (pitch, yaw, roll deg) and scale (0.9 .. 1.1) about the hold "
-                            "point, fov_add (deg on the Hands FOV); in ADS only offset[2] (push), rotation[2] (roll) and scale (about the sight) apply. equip: the "
-                            "raise from below the view. seam: arm vertices near the shoulder blend from the world camera (r0) to the arms camera (r1). Edit live "
-                            "with arms_tuner.");
+                            "point, fov_add (deg on the Weapon Field of View); in ADS only offset[2] (push), rotation[2] (roll) and scale (about the sight) apply. "
+                            "equip: the raise from below the view. seam: arm vertices near the shoulder blend from the world camera (r0) to the arms camera (r1). "
+                            "weapon_fov: the Weapon Field of View presets (hip, horizontal deg at 16:9; the layer moves sideways with them so the sight keeps "
+                            "its place on screen). Edit live with arms_tuner.");
     cJSON *st = cJSON_AddObjectToObject(o, "states");
     for (int s = 0; s < HP_STATE_COUNT; s++) {
         cJSON *e = cJSON_AddObjectToObject(st, holdpoint_state_name(s));
@@ -123,6 +131,8 @@ char *arms_layer_to_json(const ArmsLayerDef *d) {
     cJSON_AddNumberToObject(seam, "r0", r4(d->seam_r0));
     cJSON_AddNumberToObject(seam, "r1", r4(d->seam_r1));
     cJSON_AddNumberToObject(o, "znear", r4(d->znear));
+    cJSON *wf = cJSON_AddObjectToObject(o, "weapon_fov");
+    for (int i = 0; i < WEAPON_FOV_COUNT; i++) cJSON_AddNumberToObject(wf, k_weapon_fov[i], r4(d->weapon_fov[i]));
     char *s = cJSON_Print(o);
     cJSON_Delete(o);
     return s;
@@ -241,6 +251,13 @@ void arms_layer_eval(const ArmsLayerDef *d, ArmsLayerState *st, const ArmsLayerI
     vec3 pivot = in->has_item ? v3_lerp(xf_point(item, in->pivot), xf_point(item, in->sight), ads) : v3(0.12f, -0.18f, -0.35f);
     // Tuned placement about the hold point.
     mat4 T = about(pivot, hp_euler_deg(p.rotation), p.scale, hp_cam_pos(p.offset));
+    // Weapon Field of View: sideways at the same depth by the preset's tangent ratio, so the sight keeps
+    // its pixel at the hip (aimed it is on the view axis already).
+    if (in->has_item && in->lateral_scale > 0.0f && fabsf(in->lateral_scale - 1.0f) > 1e-6f) {
+        vec3 s = mat4_mul_point(T, xf_point(item, in->sight));
+        float k = (in->lateral_scale - 1.0f) * (1.0f - ads);
+        T = mat4_mul(mat4_translate(v3(s.x * k, s.y * k, 0.0f)), T);
+    }
     pivot = mat4_mul_point(T, pivot);
     // Cosmetic sway (Weapon sway < 1): the pose's sway shown smaller - about the pivot at the hip, about
     // the sight aimed (the hold point turns it there).

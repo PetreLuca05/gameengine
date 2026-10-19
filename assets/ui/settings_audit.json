@@ -343,6 +343,12 @@
    "reason": "Hand pose editor / hands rig tuning: dev tools.",
    "category": "animation"
   },
+  "cl_ads_fov": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "ADS Field of View: Independent (aiming goes back to the default 80, then the sight's zoom) or Affected (scales with Field of View). Personal comfort within the Field of View band.",
+   "category": "player"
+  },
   "cl_ads_sensitivity": {
    "class": "EDITABLE",
    "ui": "Controls",
@@ -382,7 +388,7 @@
   "cl_fov": {
    "class": "EDITABLE",
    "ui": "Graphics > Comfort",
-   "reason": "World FOV: personal comfort within the band 60 .. 120 deg vertical (was 50 .. 120). sv_fov / sv_fov_max still override.",
+   "reason": "Field of View (the MWII model, docs/CAMERA_HOLDPOINT.md \"Field of view\"): 80 .. 120, horizontal deg at 16:9, Hor+ (the vertical FOV is the same on every aspect). Personal comfort; sv_fov / sv_fov_max still override.",
    "category": "camera"
   },
   "cl_fp_body": {
@@ -404,9 +410,9 @@
    "category": "player"
   },
   "cl_hands_fov": {
-   "class": "EDITABLE",
-   "ui": "Graphics > Comfort",
-   "reason": "Hands FOV 50 .. 90 deg vertical: only the arms layer (your arms + the held item); the world, aiming and the sight picture are unchanged (comfort / cosmetic).",
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Dev override of the arms layer's hip FOV (tuning): players pick Weapon Field of View (the FOV model has exactly three settings).",
    "category": "camera"
   },
   "cl_healthbars": {
@@ -488,9 +494,9 @@
    "category": "player"
   },
   "cl_sprint_fov": {
-   "class": "EDITABLE",
-   "ui": "Graphics > Comfort",
-   "reason": "Sprint FOV kick: comfort (motion sickness), bounded 0 .. 7 deg: it can only narrow the change.",
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Sprint widening: a multiplier on the current FOV, fixed at the designed value (the FOV model has exactly three settings).",
    "category": "camera"
   },
   "cl_sprint_toggle": {
@@ -510,6 +516,12 @@
    "ui": "—",
    "reason": "Visibility: changes what you can see relative to other players. Wireframe / hitboxes / collision / CPU skinning / third person: wallhack-class views, dev only.",
    "category": "camera"
+  },
+  "cl_weapon_fov": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Weapon Field of View Narrow / Default / Wide: only the arms layer's projection (your arms + the held item), never the world; aimed, the sight picture is the same for everyone (cosmetic).",
+   "category": "player"
   },
   "cl_weapon_sway": {
    "class": "LOCKED",

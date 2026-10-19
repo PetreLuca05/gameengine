@@ -7,8 +7,10 @@
 //     the raise the layer is exactly the hold's.
 //  5) Aim: the barrel's vanishing point lands where the world camera shows the shot (sway / kick
 //     counter with Hands FOV != world FOV).
+//  6) Weapon Field of View: the presets keep the hip sight on its pixel, aimed it stays centred.
 #include "render/arms_layer.h"
 #include "player/holdpoint.h"
+#include "player/fov.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -164,6 +166,42 @@ int main(void) {
         }
         CHECK(worst < 2e-3f, "aim: the barrel is %g NDC from the shot's pixel", worst);
         printf("  aim: the barrel within %.2g NDC of the shot's pixel (6 offsets x Hands FOVs)\n", worst);
+    }
+    // 6) Weapon Field of View: the presets' arms FOVs with the lateral scale keep the hip sight on its
+    //    pixel (within 1 % of the screen) and the item's on-screen length; its thickness (a 4 cm
+    //    cross-section at the sight) grows with Narrow and shrinks with Wide; aimed, the sight stays centred.
+    {
+        static const float presets[WEAPON_FOV_COUNT] = { 60.0f, 70.0f, 85.0f };
+        float ref_v = fov_h16_to_v(presets[WEAPON_FOV_DEFAULT]);
+        vec2 ref_px = v2(0, 0);
+        float worst = 0, worst_ads = 0, size[WEAPON_FOV_COUNT];
+        for (int w = 0; w < WEAPON_FOV_COUNT; w++) {
+            float v = fov_h16_to_v(presets[w]);
+            arms_layer_reset(&st);
+            ArmsLayerIn in = base_in(eye);
+            in.fov_hands = v;
+            in.lateral_scale = fov_lateral_scale(v, ref_v);
+            arms_layer_eval(&d, &st, &in, &out);
+            mat4 proj = mat4_perspective(v * DG_DEG2RAD, 16.0f / 9.0f, 0.01f, 100.0f);
+            vec3 sight_w = xf_point(eye, xf_point(in.item_cam, in.sight)), side_w = xf_point(eye, xf_point(in.item_cam, v3_add(in.sight, v3(0.04f, 0, 0))));
+            vec2 px = ndc(proj, out.view, sight_w);
+            size[w] = v2_len(v2_sub(ndc(proj, out.view, side_w), px));
+            if (w == WEAPON_FOV_NARROW) ref_px = px;   // (any preset: they must all agree)
+            worst = fmaxf(worst, v2_len(v2_sub(px, ref_px)) * 0.5f);   // NDC -> fraction of the screen
+            // Aimed: the presented sight on the axis lands on the centre whatever the preset.
+            arms_layer_reset(&st);
+            in.hp_state = HP_ADS;
+            in.ads_w = 1.0f;
+            in.present = xf_mul(xf_make(v3_sub(v3(0, 0, -0.12f), in.sight), quat_identity()), xf_inverse(in.item_cam));
+            arms_layer_eval(&d, &st, &in, &out);
+            worst_ads = fmaxf(worst_ads, v2_len(ndc(proj, out.view, sight_w)));
+        }
+        CHECK(worst < 0.01f, "Weapon FOV: the hip sight moves %.4f of the screen across the presets", worst);
+        CHECK(size[WEAPON_FOV_NARROW] > size[WEAPON_FOV_DEFAULT] && size[WEAPON_FOV_DEFAULT] > size[WEAPON_FOV_WIDE], "Weapon FOV: Narrow must draw the item larger, Wide smaller (%.3f %.3f %.3f)",
+              size[0], size[1], size[2]);
+        CHECK(worst_ads < 1e-4f, "Weapon FOV: aimed, the sight is %g NDC off the centre", worst_ads);
+        printf("  Weapon FOV: the hip sight within %.2g of the screen across Narrow / Default / Wide (4 cm at the sight %.3f / %.3f / %.3f NDC), aimed %.2g NDC off the centre\n",
+               worst, size[0], size[1], size[2], worst_ads);
     }
     printf("%d checks, %d failed\n", g_checks, g_fails);
     return g_fails ? 1 : 0;

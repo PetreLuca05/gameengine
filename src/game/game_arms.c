@@ -129,15 +129,13 @@ void game_arms_init(void) {
     game_arms_load();
 }
 
-// The Hands FOV (hip) of this frame: the player's setting (Hor+ like the world FOV) plus the state's
-// fov_add; aimed, the sight's own FOV (render_vm_fov_for).
+float game_arms_hip_fov(void) { return camera_hands_fov(AL.def.weapon_fov); }
+
+// The arms FOV of this frame: Weapon Field of View (Hor+ like the world FOV, never the world's) plus
+// the state's fov_add; aimed, the sight's own FOV (render_vm_fov_for), the same for every preset.
 static float hands_fov(const RenderCamera *cam, float fov_add) {
-    // The tuning's FOV add never leaves the Hands FOV setting's own band (50 .. 90).
-    Cvar *hf = cvar_find("cl_hands_fov");
-    float set = hf ? hf->f : 65.0f;
-    fov_add = clampf(fov_add, 50.0f - set, 90.0f - set);
     RenderCamera hc = *cam;
-    hc.vm_fov_deg = camera_hands_fov() + fov_add;
+    hc.vm_fov_deg = clampf(game_arms_hip_fov() + fov_add, 20.0f, 120.0f);
     return render_vm_fov_for(&hc, 0.0f);
 }
 
@@ -178,6 +176,8 @@ void game_arms_frame(const RenderCamera *cam, vec2 aim_deg, float aim_pitch, flo
     in->sway_ads_rot = fa.sway_ads_rot;
     in->sway_scale = wc && wc->sway_cosmetic ? wc->sway_cosmetic->f : 1.0f;
     in->screen_kick = screen_kick;
+    // Weapon Field of View: sideways with the preset so the sight keeps its place (against Default).
+    in->lateral_scale = fov_lateral_scale(game_arms_hip_fov(), camera_fov_v(AL.def.weapon_fov[WEAPON_FOV_DEFAULT]));
     in->dt = (float)g_engine.frame_dt;
     arms_layer_eval(&AL.def, &AL.st, in, &AL.out);
     RenderArmsLayer rl;

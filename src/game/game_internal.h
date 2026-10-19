@@ -261,6 +261,9 @@ bool game_arms_load(void);
 bool game_arms_save(const char *path_override);
 struct ArmsLayerDef *game_arms_def(void);
 bool game_arms_last(struct ArmsLayerIn *in, struct ArmsLayerOut *out);
+// The arms layer's hip FOV (vertical deg): the viewed player's Weapon Field of View preset
+// (arms_layer.json weapon_fov; cl_hands_fov overrides it, dev), Hor+ like the world.
+float game_arms_hip_fov(void);
 void game_fire_on_shot(const struct ShotEvent *ev);
 void game_fire_tick(void);                               // per sim tick, before chars_present_tick
 const struct FireAnimOut *game_fire_sample(float alpha); // this frame's interpolated output (camera layer, hands)

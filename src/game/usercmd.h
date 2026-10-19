@@ -36,6 +36,9 @@ typedef struct UserCmd {
     u32 phone_rot;     // phone held by a paired real phone: packed rotation relative to the view yaw (docs/PHONE.md)
     u8 phone_flags;    // CHAR_PHONE_* (anim/character_rt.h): landscape / driven / recording
     u8 phone_zoom;     // phone camera zoom x 32 (spectators see the same lens)
+    // The player's FOV settings (player/fov.h fov_pack_*): spectators in first person see its own
+    // Field of View, ADS Field of View and Weapon Field of View. 0 = none.
+    u8 fov_h16, fov_flags;
     // Where the shots start (docs/AIM.md): the first-person camera (the nominal eye / head's "camera"
     // socket) relative to the simulated eye, camera space (x right, y up, -z forward), mm; validated
     // by the host against its own copy of the pose. All zero = none (the capsule eye).

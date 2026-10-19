@@ -207,16 +207,16 @@ per-frame re-solve. The barrel pull is used only if the slide isn't enough.
 
 ## FOV and sensitivity
 
-- **The world camera FOV is the player's.** `cl_fov` (vertical degrees, default 75 = 107° horizontal
-  at 16:9, 50..120) is the Settings → Graphics → View "Field of view" slider and is saved. A host can
-  force one FOV for everyone with `sv_fov` (0 = off, the default) or cap the players' choice with
-  `sv_fov_max` (0 = no cap), both replicated, for servers that want no FOV advantage. Screens up to
-  `sv_fov_max_aspect` (16:9) see more to the sides (Hor+); wider screens keep the 16:9 horizontal
-  FOV. Sprint widening (`cl_sprint_fov`) and the fire FOV punch still apply.
-- **ADS zooms the world.** The world camera narrows by the sight's world zoom (a tangent
-  ratio: `cl_ads_world_zoom`, fixed 1.5 = 75° → 54.2°, no Settings slider and not saved; a sight's
-  `world_zoom` / a weapon's `ads_world_zoom` overrides it) along `smoothstep(ads_t)`, exactly the aimed
-  value the frame ADS completes (`camera_ads_fov`).
+- **The FOV model** (docs/CAMERA_HOLDPOINT.md "Field of view"): Field of View (`cl_fov`, 80..120,
+  horizontal degrees at 16:9, Hor+), ADS Field of View (`cl_ads_fov`, Independent / Affected) and
+  Weapon Field of View (`cl_weapon_fov`, the arms layer only), Settings → Graphics → Comfort. A host
+  can force one FOV for everyone with `sv_fov` (0 = off, the default) or cap the players' choice with
+  `sv_fov_max` (0 = no cap), both replicated. Sprint widening and the fire FOV punch are multipliers.
+- **ADS zooms the world.** Aimed, the world FOV is the sight's FOV at the ADS base: `2·atan(tan(40°) /
+  z)` at 80 (Independent) or that × Field of View / 80 (Affected), z the sight's world zoom (a
+  tangent ratio: `cl_ads_world_zoom`, fixed 1.15, not saved; a sight's `world_zoom` / a weapon's
+  `ads_world_zoom` overrides it), reached along the magnification's `smoothstep(ads_t)`, exactly the
+  aimed value the frame ADS completes (`fov_ads_blend`).
 - **ADS puts the hands and the weapon at one fixed FOV.** Aimed, their projection is the sight's own
   FOV, `2·atan(tan(75°/2) / attach_ads_vm_zoom)` (`RENDER_ADS_REF_FOV`), whatever `cl_fov` and the
   hip hands FOV are: the same sight picture for every player. It blends from the hip hands FOV along
@@ -224,10 +224,9 @@ per-frame re-solve. The barrel pull is used only if the slide isn't enough.
   (at most 2.35x aimed, `REDDOT_MAX_VM_ZOOM`, the rifle's: a 1x optic on the sniper / DMR, whose irons
   are narrow, doesn't fill the screen), a scope `main_zoom`; each as a FOV against a 75° view, so the gun and sight look as they did
   when this zoomed the whole view. The default irons are `75 · 0.8` = 60° against 75°, the
-  1.25x ADS hands zoom. The hip value is `cl_hands_fov`: the Settings → Graphics → Comfort "Hands
-  FOV" slider (50..90, default 65; the arms layer's own FOV, docs/CAMERA_HOLDPOINT.md "Rule 3").
-  The slider sets only the hip value; aiming narrows it by the same `attach_ads_vm_zoom` as before
-  (`render_vm_fov_for`), so the sights look the same at any hands FOV. The sight is on the view
+  1.25x ADS hands zoom. The hip value is the Weapon Field of View preset (the arms layer's own FOV,
+  docs/CAMERA_HOLDPOINT.md "Field of view"); aiming narrows to the sight's FOV whatever the preset
+  (`render_vm_fov_for`), so the sights look the same with every preset. The sight is on the view
   axis, so it projects to the exact screen centre under either projection.
 - **Scopes magnify inside the lens.** The picture-in-picture image carries the whole
   magnification (`attach_sight_zoom`: `zoom`, or `ads_fov` against 75°) relative to the base
@@ -239,8 +238,8 @@ per-frame re-solve. The barrel pull is used only if the slide isn't enough.
 ### Sensitivity
 
 Sensitivity while aiming is `cl_ads_sensitivity` times the sight FOV factor. The sight FOV is the
-FOV the world is seen at: irons and red dots the aimed world FOV (the base FOV at the ADS world zoom,
-1.5x), a 4x scope `2·atan(tan(base/2)/4)` (its lens magnification).
+FOV the world is seen at: irons and red dots the aimed world FOV (ADS Field of View: the sight's FOV at
+the ADS base), a 4x scope `2·atan(tan(base/2)/4)` (its lens magnification).
 `ads_sens_mode` sets the factor:
 
 | Mode | Factor |
@@ -385,7 +384,7 @@ ADS DoF switches on exactly while the aim is complete (`ads_dof`):
 | `ads_debug 1` | The sight socket projected against the exact screen centre (px, mm off axis, degrees, eye relief), world / hands FOV, sight zoom, PiP FOV, PiP size and the screen pixels it covers, sensitivity, DoF mode |
 | `sight_debug 1..6` | 1 lens mask, 2 raw PiP, 3 eye box, 4 reticle only, 5 glass only, 6 lens hit / occlusion |
 | `cl_fov` | World camera vertical FOV (50..120, default 75; Settings "Field of view") |
-| `cl_ads_world_zoom` | ADS world zoom (tangent ratio 1..1.5, default 1.5, not saved, no Settings slider); sights override it with `world_zoom` |
+| `cl_ads_world_zoom` | ADS world zoom of the irons / red dots against the ADS base (tangent ratio 1..1.5, default 1.15, not saved, no Settings slider); sights override it with `world_zoom` |
 | `sv_fov`, `sv_fov_max`, `sv_fov_max_aspect` | Host override of every player's FOV (0 = off), cap of `cl_fov` (0 = none), the widest Hor+ aspect (16:9; 0 = unlimited); replicated |
 | `fov_report` | cl_fov / sv_fov / base / current world and hands FOV |
 | `r_scope_pip_scale` | PiP resolution (fraction of the render height), × the optic's `pip_resolution`, bounded by the fidelity level |
@@ -402,7 +401,7 @@ ADS DoF switches on exactly while the aim is complete (`ads_dof`):
 | `sight_test sweep` | The same pitch / yaw sweep for the weapon as equipped |
 | `sight_test aspect` | The sight socket through 16:9, 21:9 and 4:3 projections: ≤ 0.5 px from the centre |
 | `sight_test parallax` | Red dot: an eye 2 cm off axis still sees the dot on the 50 m target within 1 MOA |
-| `sight_test fov` … `sight_test_report` | While aiming the world FOV is exactly the hip FOV at the ADS world zoom along smoothstep(ads_t); the frame ADS completes already has the aimed world FOV, hands / weapon FOV and the ADS DoF; the first incomplete frame has none of them |
+| `sight_test fov` … `sight_test_report` | While aiming the world FOV is exactly the hip FOV blended to the aimed world FOV (ADS Field of View) along the magnification's smoothstep(ads_t); the frame ADS completes already has the aimed world FOV, hands / weapon FOV and the ADS DoF; the first incomplete frame has none of them |
 | `tools/tests/fov_setting.cfg` | The Settings FOV slider, cl_fov 60 vs 110, the sv_fov override (`fov_report`) |
 | `tools/tests/scope_world.cfg` + `scope_match.py` | Hip vs ADS (irons, red dot), a 4x scope by day, in rain + fog, at night with the flashlight, after shooting (impacts, decals, smoke); lens vs world on a fog wall |
 | `sight_test net` | `NF_ATTACH` through the real snapshot encoder: full, 2-slot delta, unchanged (no field) |

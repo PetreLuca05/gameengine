@@ -907,6 +907,10 @@ void game_render(void) {
     if (wd && wd->kind == WPN_MELEE) ads = false;
     input_set_ads(ads && !spec);   // ADS look sensitivity is for the own mouse
     bool dead = p && p->sim.move.mode == MOVE_DEAD;
+    // The FOV settings are the viewed player's: a spectated player's own, forwarded in its commands
+    // (docs/CAMERA_HOLDPOINT.md "Field of view").
+    FovPrefs vprefs;
+    camera_set_view_prefs(spec && fov_unpack(vcmd->fov_h16, vcmd->fov_flags, &vprefs) ? &vprefs : NULL);
     CameraAds cads;
     sights_camera(p, wd, &cads);
     RenderCamera cam = camera_update(&G->view, &interp, (float)g_engine.frame_dt, &cads, dead);
@@ -921,7 +925,7 @@ void game_render(void) {
         const FireAnimOut *fo = game_fire_sample(G->alpha);
         vec3 kr = v3_scale(v3(fo->cam_rot.x, fo->cam_rot.y, fo->cam_rot.z), ck);
         float kb = fo->cam_back * ck;
-        cam.fov_deg = fmaxf(5.0f, cam.fov_deg - fo->fov_punch * ck);
+        cam.fov_deg = fmaxf(5.0f, fov_punch(cam.fov_deg, fo->fov_punch * ck));   // a multiplier on the current FOV
         // Sway and ADS bob move the weapon (about the eye), not the camera: the sight centre stays
         // exactly on the bullets' line (weapon_aim_offset_deg is what the shots use). The visual camera
         // kick turns the view but not the aim: while aimed the weapon counters it, so the reticle keeps

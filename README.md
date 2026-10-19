@@ -243,7 +243,7 @@ live tuning, and `crosshair_reload` re-reads `assets/ui/crosshair.json`. See [do
 | `r_lod_debug 1` | character LOD, pixel height, update rate, active systems |
 | `r_cpu_skinning 1` | CPU skinning fallback |
 | `cl_fp_body 0/1` | own body + model arms in first person (0 = placeholder cube hands) |
-| `cl_fov`, `cl_ads_world_zoom`, `cl_hands_fov` | camera FOV (the host may force `sv_fov` / cap `sv_fov_max`) / the slight ADS world zoom / Hands FOV (the arms layer: your arms + item only), in Settings |
+| `cl_fov`, `cl_ads_fov`, `cl_weapon_fov` | Field of View (80 .. 120, horizontal at 16:9, Hor+; the host may force `sv_fov` / cap `sv_fov_max`) / ADS Field of View (Independent / Affected) / Weapon Field of View (the arms layer only), in Settings → Graphics → Comfort |
 | `pl_debug_mantle 1` | mantle / vault / hang shape casts (lasts 2 s per check) |
 | `hands_debug 1` | IK chains, hand targets, elbow pole vectors |
 | `wpn_debug_melee 1` | melee sweep rays |
