@@ -30,7 +30,7 @@ void arms_layer_defaults(ArmsLayerDef *d) {
     d->weapon_fov[WEAPON_FOV_NARROW] = 60.0f;
     d->weapon_fov[WEAPON_FOV_DEFAULT] = 70.0f;
     d->weapon_fov[WEAPON_FOV_WIDE] = 85.0f;
-    d->screen_scale = 1.125f;
+    d->screen_scale = 0.85f;
     d->screen_anchor = v2(0.75f, 1.0f);
 }
 

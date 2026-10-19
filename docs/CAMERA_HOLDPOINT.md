@@ -158,7 +158,7 @@ in that camera's space places the drawn arms + item, in this order (`src/render/
 FOV aimed. It changes nothing but the arms projection, and the fidelity levels don't bound it.
 
 **Screen size** (`screen`, 2026-10-20): at the hip the arms + item picture is drawn at `screen.scale`
-(1.125: first 0.75, then 1.5x that; 0.25 .. 2) of its size about `screen.anchor` (screen fractions
+(0.85; it was 0.75, then 1.125; 0.25 .. 2) of its size about `screen.anchor` (screen fractions
 from the top left: 0.75, 1 = on the bottom edge where the guns leave the screen), so a gun keeps its
 place and is just bigger or smaller; what leaves the bottom edge still does. It goes back to 1 aimed with the camera weight (the sight's own ADS progress),
 so the sight lands on the screen centre at its own size. It is a 2D scale after the arms projection
