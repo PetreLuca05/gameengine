@@ -2165,24 +2165,17 @@ static void muzzle_print(void) {
     vec3 fw = quat_rotate(E.mz_item.r, v3(0, 0, -1));
     log_info("hpe muzzle:   world %.4f %.4f %.4f  barrel %.4f %.4f %.4f  effective %.4f %.4f %.4f%s%s", E.mz_world.x, E.mz_world.y, E.mz_world.z, fw.x, fw.y, fw.z, E.mz_eff.x,
              E.mz_eff.y, E.mz_eff.z, E.mz_device[0] ? " device " : "", E.mz_device);
-    // The game's side (docs/AIM.md): the held gun's sockets as the character rebuilt them on its last
-    // tick (the live def + attachments), the point shots leave from, and the aim claim (the muzzle in
-    // the player's view, what the UserCmd carries) back in the world. All three = the effective
-    // marker one tick after an edit.
+    // The game's side: the held gun's sockets as the character rebuilt them on its last tick (the live
+    // def + attachments) and the point the flash / tracer start from (= the effective marker one tick
+    // after an edit; the bullets themselves leave the camera, docs/AIM.md).
     Game *g = game();
     Player *p = game_local_player();
     CharacterInst *c = local_char();
-    vec3 pos, dir, cam;
-    int age = 0;
+    vec3 pos, dir;
     if (!g || !p || !c || !c->item_weapon || !chars_item_muzzle(g->world, p->ent, &pos, &dir)) return;
     vec3 s = c->item_sock.muzzle;
-    log_info("hpe muzzle:   game socket %.4f %.4f %.4f  shoots from %.4f %.4f %.4f (%.1f mm from the effective marker)", s.x, s.y, s.z, pos.x, pos.y, pos.z,
+    log_info("hpe muzzle:   game socket %.4f %.4f %.4f  flash from %.4f %.4f %.4f (%.1f mm from the effective marker)", s.x, s.y, s.z, pos.x, pos.y, pos.z,
              v3_dist(pos, E.mz_eff) * 1000.0f);
-    if (chars_muzzle_cam(g->world, p->ent, &cam, &age)) {
-        vec3 cw = aim_cam_to_world(player_eye_pos(&p->sim.move), p->sim.move.yaw, p->sim.move.pitch, cam);
-        log_info("hpe muzzle:   aim claim %.4f %.4f %.4f (view space)  world %.4f %.4f %.4f (%.1f mm from the effective marker, %d ticks old)", cam.x, cam.y, cam.z, cw.x, cw.y, cw.z,
-                 v3_dist(cw, E.mz_eff) * 1000.0f, age);
-    }
 }
 
 // hpe muzzle [<x> <y> <z> | select | deselect | bore | tip | default | revert | save | show on|off]

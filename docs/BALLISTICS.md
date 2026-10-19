@@ -65,7 +65,7 @@ The original planning notes, with the survey of the old code, are in `BALLISTICS
 - A few cm at 500 m. Off with `bal_spin_drift 0`.
 
 **Launch**
-- From the weapon's muzzle socket along its barrel: the gameplay hold pose, which the hold aim points at the camera ray's aim point (docs/AIM.md "Hold aim"); nothing turns the bullet itself. Plus the spread cone (`recoil_cone_dir`, unchanged).
+- From the first-person camera along the view plus recoil (docs/AIM.md): the bullets land where the crosshair says. Plus the spread cone (`recoil_cone_dir`, unchanged). The tracer is drawn from the visible barrel and blends onto the bullet's path over the first 15 m (`BalLive.visual_offset`); remote replays take the shooter's held item's muzzle.
 - Pitched up by the zero elevation, solved by bisection on the same sim (standard atmosphere, no wind) for `zero_distance`:
   - pistol 25 m, SMG 50 m, rifle / LMG 100 m, DMR 200 m, sniper 300 m.
 - Plus the device's point-of-impact shift (`poi_moa`).

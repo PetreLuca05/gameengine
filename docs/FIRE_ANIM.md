@@ -62,7 +62,7 @@ After hold point placement, global sway and ADS alignment, and before the hand I
 | 2 | Mass springs: pitch, yaw, roll, kickback, vertical | gun pos / rot | same; hip about the pivot, ADS about the sight (forward-only translation) |
 | 3 | Hands + body: hand error, trigger, grip, shoulder | `hand_pos/rot`, `trigger`, `shoulder` | `proc_hold` (weapon_hold.c `fire_hand_lag`: the hands trail the kick; trigger / grip fingers) |
 | 4 | Mechanical: slide / bolt / pump, wobble, eject cue | `slide`, `wobble_rot` | `hands.c draw_weapon` (`"mech"` parts, attachment slots); casing in `game_fire_tick` |
-| 5 | Camera: delayed spring (pitch / yaw × `cam_kick_rot`, 0: the camera stays on the aim line, docs/AIM.md), FOV punch, roll twitch, push-back, screen kick, blur, chroma | `cam_*`, `fov_punch`, ... | `game_render.c` camera, `game_post.c` (`mb_viewmodel`, chromatic / vignette) |
+| 5 | Camera: delayed spring (pitch / yaw / roll: the view kicks, the crosshair stays on the true aim point, docs/AIM.md), FOV punch, push-back, screen kick, blur, chroma | `cam_*`, `fov_punch`, ... | `game_render.c` camera, `game_post.c` (`mb_viewmodel`, chromatic / vignette) |
 | 6 | Sync | flash on the kicked muzzle (`game_fire_flush_flash`), sound on the shot tick | weapons.c `weapons_set_local_flash` |
 
 Two instances (docs/CAMERA_HOLDPOINT.md "Rule 1"):
@@ -117,7 +117,6 @@ Cvars and commands:
 | `wpn_fire_anim_scale` | master scale (1) |
 | `wpn_kick_scale` | the gun kick on the hold point (1) |
 | `cam_kick_scale` | the camera layer |
-| `cam_kick_rot` | the camera layer's pitch / yaw (0: off, so the centred crosshair stays on the bullets' line; 1 = the full turn, A/B only) |
 | `cl_fire_punch` | the perceptual punches |
 | `wpn_fire_debug 1` / `2` | log every shot / every frame |
 

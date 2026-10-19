@@ -52,8 +52,7 @@ What the owner's pose used to get, and no longer gets:
   eye** (head bone × eye socket, the view's rotation), like every remote copy.
 - **ADS:** the pose's hold point never aims down the sights, and there's no ADS spine lean: the model
   stays unchanged. A *presentation hold point* (`ProcState.hp_view`) evaluates the same inputs with
-  ADS. The arms layer draws the presented item, and the aim claims (`muzzle_cam` / `barrel_cam`, on
-  the shooter and on the host alike) come from it.
+  ADS. The arms layer draws the presented item.
 - **The fire animation:** one per character, for everyone: gun kick, hands trailing it, trigger pull.
   The owner's first-person instance only moves the camera and the arms layer.
 - **The cosmetic Weapon sway:** it no longer scales anyone's pose.
@@ -233,20 +232,9 @@ Pitch + is muzzle up, yaw + is muzzle left, roll + is cant left.
 (`holdpoint_ads_item`). Any weapon with a
 correct `sight` socket aligns automatically: less than 0.02 mm and 0.001° in the tests.
 
-### Hold aim
-
-Guns only (docs/AIM.md "Hold aim"): the gameplay pose turned about its pivot (hip: the pivot socket,
-ADS: the sight) so its bore line (muzzle socket along −Z) passes through the camera ray's aim point
-`aim_p` (camera space), at most `wpn_hold_aim_max` (12°; ADS 3°). Weight 1 in hip / ADS / crouch / prone
-/ one-handed, 0 in sprint / empty / inspect / phone, blended with the state blend, times
-`1 − pull^curve` (pushed against a wall the gun points where the pull turned it). Outputs: `gp_item`
-(before), `aim_item` (after), `aim_raw` (what `aim_hold_solve` ran on), `aim_hold`, `aim_pivot`,
-`aim_w`, `aim_max`, `aim_angle_deg`, `aim_miss`, `aim_clamped`. `weapon_hold.c` maps them to model space
-through the arm solve's reach shift (`gp_item_model`, `aim_item_model`, `aim_pivot_model`).
-
 ### Procedural layer (presentation)
 
-It moves the drawn item only, on top of the gameplay pose (it never moves a bullet). It is scaled
+It moves the drawn item only (it never moves a bullet: shots leave the camera, docs/AIM.md). It is scaled
 down to `ads_scale` in ADS, and every rotation is around the **pivot**:
 
 | Layer | Driven by |
@@ -270,11 +258,9 @@ at the wrist. Override it with `"pivot"` in the item's sockets or `holdpoint` bl
 
 ### Weapon collision
 
-A cast runs from the gameplay pose's hold point along the item's length. When it hits, the pull
-(0..1, `curve` exponent, fast in and slow out) moves the item back by `back`, up by `up`, and pitches
-it by `pitch` around the pivot. It moves the gameplay pose: the bullet follows the pulled barrel, the
-hold aim fades out with the pull, and the crosshair moves to where the pulled barrel line ends
-(docs/AIM.md "Obstruction").
+A cast runs from the hold point along the item's length. When it hits, the pull (0..1, `curve`
+exponent, fast in and slow out) moves the item back by `back`, up by `up`, and pitches it by `pitch`
+around the pivot. It moves the drawn gun only: the bullets still leave the camera (docs/AIM.md).
 
 ### Reach
 
@@ -334,11 +320,8 @@ leaf): the weight is then the blend weight of the other leaves. This is `holdpoi
 
 Nothing new goes on the wire. Remote players already replicate aim yaw and pitch, body yaw, weapon,
 and ADS / sprint / crouch flags. Each client runs the same stage A, spine look, hold point and IK for
-them; the owner's frame re-solve runs the same functions (rule 1). The shooter's aim claims come from
-the presentation hold point (the gun it sees and aims, ADS included):
-- `muzzle_cam` / `barrel_cam` in the `UserCmd`, docs/AIM.md;
-- the host evaluates the same presentation hold point for every player and checks the claims against
-  it.
+them; the owner's frame re-solve runs the same functions (rule 1). The shots leave the first-person
+camera (the nominal eye, `UserCmd.eye_cam`, checked by the host: docs/AIM.md).
 
 Spectators in first person reproduce the gliding camera from the forwarded inputs and the arms layer
 from the shared `assets/player/arms_layer.json`.

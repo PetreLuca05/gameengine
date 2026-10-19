@@ -4,8 +4,6 @@
 #include "effects.h"
 #include "audio/audio.h"
 #include "weapons.h"
-#include "aim.h"
-#include "characters.h"
 #include "zombies/horde.h"
 #include "render/render.h"
 #include <math.h>
@@ -54,19 +52,8 @@ static void explode(World *w, vec3 at, const ItemDef *d, EntityId owner, u16 ite
 static void spawn_thrown(World *w, int slot, const PlayerSim *sim, u16 item, const ItemDef *d, float charge, float fuse_left) {
     const PlayerMove *m = &sim->move;
     vec3 eye = player_eye_pos(m);
-    // Aim model (docs/AIM.md): from the throwing hand, converging on the camera ray's aim point (the
-    // same muzzle-inside-geometry recovery as a gun), then a little loft over that line.
-    AimQuery q = weapon_aim_query(w, slot, m, NULL, dir_from_angles(m->yaw, m->pitch), NULL, 0);
-    q.hand = true;
-    vec3 palm;
-    if (chars_palm_world(w, w->players[slot].ent, 1, &palm)) {
-        q.have_claim = true;
-        q.claim = aim_world_to_cam(q.eye, q.yaw, q.pitch, palm);
-    }
-    AimSolve as;
-    weapon_aim_solve(w, slot, &q, &as);
-    float cy = atan2f(-as.dir.x, -as.dir.z), cp = asinf(clampf(as.dir.y, -1.0f, 1.0f));
-    vec3 dir = dir_from_angles(cy, clampf(cp + 8.0f * DG_DEG2RAD, -1.5f, 1.5f));
+    // A little loft over the aim line.
+    vec3 dir = dir_from_angles(m->yaw, clampf(m->pitch + 8.0f * DG_DEG2RAD, -1.5f, 1.5f));
     float speed = lerpf(d->thr.speed_min, d->thr.speed_max, saturate(charge));
     EntityId e = ent_spawn(w, ET_PROJECTILE);
     int i = (int)ENT_INDEX(e);
@@ -85,7 +72,8 @@ static void spawn_thrown(World *w, int slot, const PlayerSim *sim, u16 item, con
     pr->life = 120.0f;
     pr->fuse = d->thr.kind == THROW_GRENADE ? fuse_left : 0.0f;
     if (d->thr.kind == THROW_FLARE) { pr->burn = d->thr.light_time; w->anim[i] = 1.0f; }
-    ent_set_pos(w, e, as.origin, quat_yaw(m->yaw), true);
+    vec3 right = right_from_yaw(m->yaw);
+    ent_set_pos(w, e, v3_add(v3_madd(eye, dir, 0.45f), v3_add(v3_scale(right, 0.12f), v3(0, -0.12f, 0))), quat_yaw(m->yaw), true);
     ev_sound(w, "swing", eye, 0.6f, EVENT_ALL);
 }
 

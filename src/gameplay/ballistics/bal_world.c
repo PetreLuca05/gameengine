@@ -268,7 +268,7 @@ static BalLive *alloc_bullet(void) {
     return best;
 }
 
-static void spawn_shot(World *w, const BalShotRecord *rec, int slot, vec3 pos, vec3 aim, int role, u32 view_tick256) {
+static void spawn_shot(World *w, const BalShotRecord *rec, int slot, vec3 pos, vec3 aim, int role, u32 view_tick256, vec3 muzzle) {
     const BalCartridge *c = &B.data.cart[rec->cart];
     Rng rng = rng_make(rec->seed);
     int pellets = DG_MAX(1, rec->pellets);
@@ -289,6 +289,7 @@ static void spawn_shot(World *w, const BalShotRecord *rec, int slot, vec3 pos, v
         l->prev_pos = pos;
         l->trail[0] = pos;
         l->trail_count = 1;
+        l->visual_offset = v3_sub(muzzle, pos);
         (void)w;
     }
 }
@@ -324,7 +325,7 @@ void bal_fire(World *w, const BalFireIn *in) {
     const float moa = 3.14159265f / (180.0f * 60.0f);
     rec.poi[0] = dev->poi_moa[0] * moa;
     rec.poi[1] = dev->poi_moa[1] * moa;
-    spawn_shot(w, &rec, in->slot, in->origin, in->aim, host ? BAL_ROLE_HOST : BAL_ROLE_PREDICT, host ? in->view_tick256 : 0);
+    spawn_shot(w, &rec, in->slot, in->origin, in->aim, host ? BAL_ROLE_HOST : BAL_ROLE_PREDICT, host ? in->view_tick256 : 0, in->muzzle);
     if (host) {
         GameEvent ev;
         memset(&ev, 0, sizeof(ev));
@@ -333,7 +334,7 @@ void bal_fire(World *w, const BalFireIn *in) {
         ev.except = (u8)in->slot;
         ev.ent = w->players[in->slot].ent;
         ev.ent2 = (u32)in->slot + 1u;
-        ev.pos = in->origin;   // the muzzle: every replay starts where the host's bullets did
+        ev.pos = in->origin;   // the shooter's camera: every replay starts where the host's bullets did
         ev.dir = in->aim;
         memcpy(ev.data, &rec, sizeof(rec));
         ev_push(w, &ev);
@@ -786,8 +787,14 @@ static void spawn_pending(World *w) {
         if (now + 0.5 < t) { B.pending[keep++] = B.pending[i]; continue; }
         // Due (or late: fast-forward to the render clock, at most a second).
         int slot = DG_CLAMP(B.pending[i].slot, 0, MAX_PLAYERS - 1);
+        // The tracer from the shooter's visible barrel (the bullets from its camera).
+        vec3 muzzle = B.pending[i].pos;
+        if (ent_valid(w, w->players[slot].ent)) {
+            vec3 md;
+            chars_item_muzzle(w, w->players[slot].ent, &muzzle, &md);
+        }
         BalShotRecord rec = B.pending[i].rec;
-        spawn_shot(w, &rec, slot, B.pending[i].pos, B.pending[i].dir, BAL_ROLE_REPLAY, 0);
+        spawn_shot(w, &rec, slot, B.pending[i].pos, B.pending[i].dir, BAL_ROLE_REPLAY, 0, muzzle);
         int late = (int)floor(now - t);
         if (late > 0) {
             late = DG_MIN(late, SIM_HZ);

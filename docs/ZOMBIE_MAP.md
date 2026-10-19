@@ -44,7 +44,7 @@ unchanged (`spawn_horde` at (0, 0, 50), `bal_range`, the aim stand, the shadow c
 so the dev room scripts run on it with the map on the command line, without edits:
 
 ```
-deadground --test --nosound --log aim.log +map devroom_vegetation --script ../../tools/tests/aim_obstruct.cfg
+deadground --test --nosound --log ledge.log +map devroom_vegetation --script ../../tools/tests/ledge.cfg
 ```
 
 The dev room comes in by an include (below), so the map tracks `devroom.json` by itself. The world is

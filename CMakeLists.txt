@@ -865,7 +865,6 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME lint_settings COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_settings.py)
   # Recorded CC0 takes (docs/AUDIO_PROCEDURAL.md "Recorded samples"): every set on disk and credited.
   add_test(NAME audio_takes COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/audio_import/import_samples.py --check)
-  add_test(NAME aim_sockets COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/aim_sockets.py)
   add_test(NAME validate_items COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/validate_item/validate_item.py)
   add_test(NAME lint_looks COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_looks.py)
   # Ground textures (docs/GROUND_REFERENCE.md): the recipes validate, the generated / placeholder sets

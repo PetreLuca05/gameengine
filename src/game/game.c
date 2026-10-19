@@ -570,17 +570,11 @@ static UserCmd build_cmd(void) {
     c.use_target = G->focus;
     c.view_tick = net_client_view_tick256();
     phone_fill_cmd(&c);
-    // Aim model (docs/AIM.md): the first-person camera, and where the muzzle is and where the barrel
-    // points in this player's gameplay pose aimed at this command's aim point (the hold aim; the
-    // host checks all three). No hold solve (LOD, no gun): the latest pose as it is.
+    // Where the shots start (docs/AIM.md): this player's first-person camera (the host checks it).
     {
         Player *lp = game_local_player();
         vec3 mc;
         if (lp && chars_eye_cam(G->world, lp->ent, &mc, NULL)) aim_claim_pack(mc, c.eye_cam);
-        if (lp && !weapons_fill_aim_claim(G->world, G->local_slot, &c)) {
-            if (chars_muzzle_cam(G->world, lp->ent, &mc, NULL)) aim_claim_pack(mc, c.muzzle_cam);
-            if (chars_barrel_cam(G->world, lp->ent, &mc, NULL)) aim_dir_pack(mc, c.barrel_cam);
-        }
     }
     return c;
 }

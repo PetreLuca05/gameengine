@@ -249,7 +249,10 @@ static BalTracerLook draw_tracer(const BalLive *l, vec3 cam, float shutter, bool
     const BalCartridge *c = &bal_data()->cart[l->b.cart];
     BalTracerLook look = bal_tracer_look(&c->tracer, l->b.dist, l->b.time, arcade);
     if (look.intensity <= 0.0f) return look;
-    vec3 head = l->b.pos;
+    // Where it is drawn: the true path, starting at the visible muzzle and blending onto the bullet
+    // (which left the camera) over the first 15 m.
+    float blend = 1.0f - saturate(l->b.dist / 15.0f);
+    vec3 head = v3_madd(l->b.pos, l->visual_offset, blend);
     float speed = bal_bullet_speed(&l->b);
     vec3 dir = speed > 1e-3f ? v3_scale(l->b.vel, 1.0f / speed) : v3(0, 0, -1);
     float cam_d = v3_dist(head, cam);
@@ -265,7 +268,7 @@ static BalTracerLook draw_tracer(const BalLive *l, vec3 cam, float shutter, bool
         vec3 prev = v3_madd(head, dir, -streak);
         for (int t = 1; t < l->trail_count; t++) {
             vec3 p = l->trail[t];
-            if (v3_dist(p, l->launch) < 1.0f) break;   // not over the shooter's own barrel
+            if (v3_dist(p, l->launch) < 15.0f) break;   // the first metres: the head's blend from the muzzle
             float f = 1.0f - (float)t / (float)BAL_TRAIL;
             vec4 tc = v4(col.x * 0.45f * f, col.y * 0.45f * f, col.z * 0.45f * f, 1.0f);
             vfx_game_push_sprite(F.em_tail, p, v3_sub(prev, p), width * 0.7f, tc);
@@ -327,7 +330,7 @@ void bal_fx_frame(World *w, vec3 cam, float dt) {
             F.smoke_key[i] = alive ? key : 0;
         }
         if (!alive) continue;
-        // Where it is drawn: the true path (bullets leave the muzzle, docs/AIM.md).
+        // The bullet itself (the optic's shock ripple follows the true path).
         vec3 head = l->b.pos;
         float speed = bal_bullet_speed(&l->b);
         vec3 dir = speed > 1e-3f ? v3_scale(l->b.vel, 1.0f / speed) : v3(0, 0, -1);

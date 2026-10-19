@@ -126,8 +126,7 @@ void game_handle_event(const GameEvent *ev) {
     case EV_TRACER: {
         vec3 from = ev->pos;
         if (ev->id & 1u) {
-            // Remote shot: the flash at the shooter's visible barrel when we have it (the tracer starts at
-            // the shot's real origin, the muzzle the host fired from: docs/AIM.md).
+            // Remote shot: flash (and tracer start) at the shooter's visible barrel when we have it.
             vec3 mp, md = v3_norm(v3_sub(ev->dir, ev->pos));
             if (ent_valid(w, ev->ent) && chars_item_muzzle(w, ev->ent, &mp, &md)) from = mp;
             fx_muzzle_ex(from, md, (int)((ev->id >> 4) & 0xF), (int)((ev->id >> 8) & 0xF), false);
@@ -136,7 +135,7 @@ void game_handle_event(const GameEvent *ev) {
                 fx_shell_ex(from, v3_add(v3_scale(right, 2.2f), v3(0, 1.4f, 0)), (int)((ev->id >> 12) & 0xF));
             }
         }
-        fx_tracer(ev->pos, ev->dir);
+        fx_tracer(from, ev->dir);
         break;
     }
     case EV_SHOT: {

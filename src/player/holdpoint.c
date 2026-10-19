@@ -350,12 +350,6 @@ static float spring1(float x, float *v, float target, float k, float d, float dt
     return x;
 }
 
-// Hold aim weight of a state: the aiming holds aim the gun at P, the others (sprint, empty hands,
-// inspect, the phone) are posed as authored.
-static float aim_state_w(int state) {
-    return (state == HP_HIP || state == HP_ADS || state == HP_CROUCH || state == HP_PRONE || state == HP_VEHICLE_ONEHAND) ? 1.0f : 0.0f;
-}
-
 void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutput *out) {
     const HoldPointStyle *s = in->style;
     const HoldPointOverride *o = in->ovr;
@@ -437,8 +431,8 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     out->ads_w = ads_a;
     vec3 sight_c = xf_point(item, in->sight);   // the reticle centre (on the view axis once aimed)
 
-    // ---- weapon collision (gameplay pose): cast along the item from the hold point, pull back / up
-    // on hit. Cast from the gameplay pose (not the drawn one): sway never changes the pull.
+    // ---- weapon collision: cast along the item from the hold point, pull back / up on hit. Cast
+    // before the presentation: sway never changes the pull.
     float want = 0;
     if (in->raycast && in->has_item && in->length > 0.05f) {
         Xform hold = xf_mul(item, in->anchor);
@@ -464,39 +458,6 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
         item.t = v3_add(pv, quat_rotate(Rc, v3_sub(item.t, pv)));
         item.t = v3_add(item.t, v3(0, s->col_up * pull, s->col_back * pull));
     }
-    out->gp_item = item;
-
-    // ---- hold aim (docs/AIM.md "Hold aim"): the gameplay pose turned about its pivot (hip: the pivot
-    // socket; ADS: the sight, which stays on the view axis) so the barrel line passes through the aim
-    // point P, at most aim_max. Weighted by the state (1 hip / ADS / crouch / prone / one-handed, 0
-    // sprint / empty / inspect / phone, eased with the state blend) and faded out by the wall pull:
-    // pushed against a wall, the gun points where the pull turned it.
-    out->aim_hold = quat_identity();
-    out->aim_pivot = xf_point(item, pivot_item);   // without the hold aim: the raw turns nothing (weight 0)
-    if (in->aim_valid && in->has_item) {
-        float ws = lerpf(aim_state_w(st->ads_from), aim_state_w(state), 1.0f - k);
-        vec3 sight_c = xf_point(item, in->sight), pivot_c = xf_point(item, pivot_item);
-        vec3 bl = v3_len2(in->barrel) > 1e-12f ? in->barrel : v3(0, 0, -1);
-        AimHoldRaw raw;
-        raw.muzzle = xf_point(item, in->muzzle);
-        raw.barrel = v3_norm(quat_rotate(item.r, bl));
-        raw.pivot = ads_a >= 1.0f ? sight_c : (ads_a <= 0.0f ? pivot_c : v3_lerp(pivot_c, sight_c, ads_a));
-        raw.w = ws * (1.0f - clampf(pull, 0.0f, 1.0f));
-        raw.max_rad = lerpf(in->aim_max_hip, fminf(in->aim_max_hip, in->aim_max_ads), ads_a);
-        raw.valid = true;
-        AimHold h = aim_hold_solve(&raw, in->aim_p);
-        item.r = quat_norm(quat_mul(h.rot, item.r));
-        item.t = v3_add(raw.pivot, quat_rotate(h.rot, v3_sub(item.t, raw.pivot)));
-        out->aim_raw = raw;
-        out->aim_hold = h.rot;
-        out->aim_pivot = raw.pivot;
-        out->aim_w = raw.w;
-        out->aim_max = raw.max_rad;
-        out->aim_angle_deg = h.angle_deg;
-        out->aim_miss = h.miss;
-        out->aim_clamped = h.clamped;
-    }
-    out->aim_item = item;
 
     // ---- presentation (the drawn pose only): weapon sway (docs/RECOIL.md "Weapon sway") + kick
     // Components: breathing (idle figure-eight + breath + extra wobble), look lag (trails mouse

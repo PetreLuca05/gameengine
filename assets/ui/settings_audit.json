@@ -49,12 +49,6 @@
    "reason": "Input: sensitivities, inversion, ADS scaling, deadzone, toggles.",
    "category": "weapons"
   },
-  "aim_debug": {
-   "class": "LOCKED",
-   "ui": "—",
-   "reason": "Debug view / log: dev builds only (debug views can show geometry and entities through walls).",
-   "category": "weapons"
-  },
   "anim_corpse_collision": {
    "class": "LOCKED",
    "ui": "—",
@@ -271,12 +265,6 @@
    "reason": "Debug view / log: dev builds only (debug views can show geometry and entities through walls).",
    "category": "weapons"
   },
-  "block_fire_when_barrel_blocked": {
-   "class": "LOCKED+RULE",
-   "ui": "Lobby rules",
-   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
-   "category": "weapons"
-  },
   "cam_anchor_radius": {
    "class": "LOCKED",
    "ui": "—",
@@ -323,12 +311,6 @@
    "class": "LOCKED",
    "ui": "—",
    "reason": "First-person camera rig (the gliding nominal eye, docs/CAMERA_HOLDPOINT.md): where the eye sits decides what peeks over cover. One rig for all.",
-   "category": "camera"
-  },
-  "cam_kick_rot": {
-   "class": "LOCKED",
-   "ui": "—",
-   "reason": "A camera turned off the aim line moves the crosshair off the screen centre (AIM.md): the fire camera layer's pitch / yaw stay off for everyone.",
    "category": "camera"
   },
   "cam_kick_scale": {
@@ -575,18 +557,6 @@
    "class": "EDITABLE",
    "ui": "HUD > Crosshair",
    "reason": "Crosshair style / colour / size / opacity / outline: style only (the gap stays the exact spread plus this).",
-   "category": "weapons"
-  },
-  "crosshair_obstruct": {
-   "class": "LOCKED",
-   "ui": "—",
-   "reason": "Crosshair obstruction: where the bullet will land (AIM.md).",
-   "category": "weapons"
-  },
-  "crosshair_obstruct_lerp": {
-   "class": "LOCKED",
-   "ui": "—",
-   "reason": "Crosshair obstruction: where the bullet will land (AIM.md).",
    "category": "weapons"
   },
   "crosshair_opacity": {
@@ -2887,12 +2857,6 @@
    "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
    "category": "weapons"
   },
-  "wpn_barrel_tolerance": {
-   "class": "LOCKED+RULE",
-   "ui": "Lobby rules",
-   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
-   "category": "weapons"
-  },
   "wpn_bob_scale": {
    "class": "LOCKED",
    "ui": "—",
@@ -2917,12 +2881,6 @@
    "reason": "Debug view / log: dev builds only (debug views can show geometry and entities through walls).",
    "category": "weapons"
   },
-  "wpn_hold_aim_max": {
-   "class": "LOCKED+RULE",
-   "ui": "Lobby rules",
-   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
-   "category": "weapons"
-  },
   "wpn_kick_scale": {
    "class": "LOCKED",
    "ui": "—",
@@ -2933,12 +2891,6 @@
    "class": "LOCKED",
    "ui": "—",
    "reason": "Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. No player-facing control (Weapon kick / sway / Camera shake were removed from Settings).",
-   "category": "weapons"
-  },
-  "wpn_muzzle_tolerance": {
-   "class": "LOCKED+RULE",
-   "ui": "Lobby rules",
-   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
    "category": "weapons"
   },
   "wpn_recoil_debug": {

@@ -1,18 +1,15 @@
 // Hold point: the single transform in front of the camera where every held item lives.
 //
 // Everything about where an item sits is defined relative to the camera (x right, y up, -z
-// forward), per hold style and per state, with per-item overrides. Two poses come out:
-//   gameplay pose (what the bullet follows, docs/AIM.md):
+// forward), per hold style and per state, with per-item overrides:
 //     state target (hip / ADS / sprint / crouch / prone / empty / inspect)
 //       -> inertialized blend between states (no pops when a state or the item changes)
 //       -> ADS computed from the item's sight socket (sight on the view axis at the eye relief)
 //       -> item (camera space) = hold point * inverse(anchor socket), soft pitch limit
-//       -> weapon collision (forward cast along the item, pull back / up along a curve)  = gp_item
-//       -> hold aim: turned about its pivot so the barrel line passes through the aim point P
-//          (at most aim_max, faded out by the wall pull and the non-aiming states)       = aim_item
-//   drawn pose = aim_item + presentation: look lag, idle sway + breathing, movement bob, landing,
-//     the fire kick, the ADS sight anchoring / push, the phone's driven rotation          = item
-// Presentation never reaches the gameplay pose, so it never moves a bullet.
+//       -> weapon collision (forward cast along the item, pull back / up along a curve)
+//       -> presentation: look lag, idle sway + breathing, movement bob, landing, the fire kick,
+//          the ADS sight anchoring / push, the phone's driven rotation                     = item
+// The gun never moves a bullet: shots leave the first-person camera along the view (docs/AIM.md).
 // The evaluation is pure and deterministic: the same inputs give bit-identical results, so the
 // local player and every remote copy of it solve the same pose (see docs/CAMERA_HOLDPOINT.md).
 #ifndef DG_HOLDPOINT_H
@@ -22,7 +19,6 @@
 #include "core/dgmath.h"
 #include "anim/anim.h"
 #include "player/sway.h"
-#include "gameplay/aim.h"
 
 struct cJSON;
 
@@ -124,15 +120,6 @@ typedef struct HoldPointInput {
     // in front of the eye. Presentation: applied after the procedural layer.
     float rot_w;
     quat rot_cam;
-    // Hold aim (docs/AIM.md "Hold aim", guns only): the gameplay pose turns about its pivot (hip: the
-    // pivot socket, ADS: the sight) so the bore line (muzzle socket along the barrel axis, item
-    // space) passes through aim_p (camera space: usually (0, 0, -D)), at most aim_max_hip /
-    // aim_max_ads (rad), blended with the states (none in sprint / empty / inspect / phone) and faded
-    // out by the wall pull.
-    bool aim_valid;
-    vec3 aim_p;
-    vec3 muzzle, barrel;              // item space; barrel 0 = -Z
-    float aim_max_hip, aim_max_ads;
     float dt;
     // Deterministic phases (docs/SPECTATE.md): breathing from the player's command clock (s) and
     // the movement bob from PlayerMove.stride, so the owner and its spectators sway in step. Unset
@@ -156,16 +143,7 @@ typedef struct HoldPointInput {
 
 typedef struct HoldPointOutput {
     Xform hold;                       // hold point (camera space): where the anchor socket goes
-    Xform item;                       // item transform (camera space): the drawn pose (aim_item + presentation)
-    // Gameplay pose (docs/AIM.md): before the hold aim (state, blend, pitch limit, wall pull) and
-    // after it (what the bullet follows). aim_raw is what aim_hold_solve ran on (camera space).
-    Xform gp_item, aim_item;
-    AimHoldRaw aim_raw;
-    quat aim_hold;                    // the hold aim's turn about aim_pivot
-    vec3 aim_pivot;
-    float aim_w, aim_max;             // weight (state x pull fade), limit (rad)
-    float aim_angle_deg, aim_miss;    // the turn, and P's distance from the aimed barrel line (m)
-    bool aim_clamped;
+    Xform item;                       // item transform (camera space): the drawn pose
     vec3 pivot;                       // rotation pivot (camera space)
     vec3 offset;                      // hold point offset from the style's hip pose (camera space)
     Xform ads_item;                   // the exact ADS item transform (tests / debug)

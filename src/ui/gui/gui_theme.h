@@ -19,8 +19,6 @@ typedef struct GuiTheme {
     u32 hud_panel, hud_text;
     u32 select;                   // radial wheel / hotbar selection (white)
     u32 ring;                     // timed-action ring (white)
-    u32 crosshair_obstructed;     // crosshair moved to an obstruction (amber, docs/AIM.md)
-    u32 crosshair_friendly;       // a teammate in the line of fire
     u32 ping[8];                  // ping types (wheel order: generic, enemy, loot, danger, go, help, vehicle, defend)
     u32 rarity[5];                // cosmetics: common, uncommon, rare, epic, legendary
     u32 chat_name[8];             // lobby chat: name colour per member id (cycled)

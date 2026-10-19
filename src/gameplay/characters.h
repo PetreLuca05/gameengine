@@ -16,7 +16,6 @@
 #include "render/lod_fade.h"
 #include "anim/fire_anim.h"
 #include "gameplay/hitboxes.h"
-#include "gameplay/aim.h"
 #include "physics/ragdoll.h"
 
 #define MAX_CHARACTERS 2048   // hordes (src/gameplay/zombies)
@@ -71,17 +70,7 @@ typedef struct CharacterInst {
     Xform veh_prev, veh_cur;   // seated: the vehicle transform at the two evaluated poses (re-attached when drawn)
     bool veh_valid;
     Xform item_cam_prev, item_cam_cur;   // hold point item in camera space (owner re-places per frame)
-    quat ads_aim_prev, ads_aim_cur;      // the exact ADS item rotation turned by the hold aim, same ticks (ADS checks)
-    vec3 muzzle_cam;                     // aim model: the muzzle socket relative to the player's simulated eye / view (docs/AIM.md),
-                                         // of the gameplay pose aimed at this tick's aim point (the drawn pose without a hold solve)
-    vec3 barrel_cam;                     // the barrel's forward axis (item -Z) in the same camera space
-    bool muzzle_cam_valid;
-    u32 muzzle_cam_tick;                 // chars tick of that pose
-    AimHoldRaw aim_raw;                  // the gameplay pose before the hold aim, same frame: every machine re-aims it at its P
-    bool aim_raw_valid;                  // the hold solve ran for a gun (not the LOD2+ baked arms; weight 0 without the hold aim)
-    u32 aim_raw_tick;
-    vec3 drawn_barrel_cam;               // the drawn item's barrel (sway, kick), same frame (aim_report)
-    vec3 eye_cam;                        // aim model: the head's camera socket, same frame (the camera ray's origin)
+    vec3 eye_cam;                        // the head's camera socket relative to the simulated eye / view (where the shots start, docs/AIM.md)
     bool eye_cam_valid;
     u32 eye_cam_tick;
     bool item_valid;
@@ -196,23 +185,11 @@ void char_detach(World *w, EntityId e);
 CharacterInst *char_get(const World *w, EntityId e);
 // Visual muzzle of the item a character holds (world space, barrel forward). VFX for remote shooters.
 bool chars_item_muzzle(World *w, EntityId e, vec3 *pos, vec3 *dir);
-// Aim model (docs/AIM.md): the held weapon's muzzle socket in camera space (x right, y up, -z forward)
+// The first-person camera (the head's "camera" socket) in camera space (x right, y up, -z forward)
 // relative to the player's simulated eye and view angles, from the latest evaluated tick pose, and its
-// age in ticks. The shooter claims it in its UserCmd; the host checks the claim against its own copy.
-bool chars_muzzle_cam(World *w, EntityId e, vec3 *cam, int *age_ticks);
-// The barrel's forward axis (item -Z) of the same pose, same camera space (unit): the bullet's direction.
-bool chars_barrel_cam(World *w, EntityId e, vec3 *dir, int *age_ticks);
-// The same for the first-person camera (the head's "camera" socket): where the player's view really
-// starts. The capsule eye (player_eye_pos) can be 10 cm (standing) to 30 cm (crouched) away from it.
+// age in ticks: where the shots start (docs/AIM.md). The capsule eye (player_eye_pos) can be 10 cm
+// (standing) to 30 cm (crouched) away from it. The shooter claims it in its UserCmd (eye_cam).
 bool chars_eye_cam(World *w, EntityId e, vec3 *cam, int *age_ticks);
-// The gameplay hold pose before the hold aim (docs/AIM.md "Hold aim"), same camera space: the muzzle,
-// barrel, pivot, weight and limit aim_hold_solve re-aims at any P (the command's claim, the host's
-// check, the crosshair). False without a hold solve (no gun, LOD2+ baked arms, dead).
-bool chars_aim_raw(World *w, EntityId e, AimHoldRaw *raw, int *age_ticks);
-// Hold aim diagnostics of the latest pose (aim_report): the wall pull, the weight, the limit, the
-// turn, and the drawn barrel (camera space as above).
-typedef struct CharAimInfo { float pull, w, max_deg, angle_deg, miss; vec3 drawn_barrel; } CharAimInfo;
-bool chars_aim_info(World *w, EntityId e, CharAimInfo *out);
 // Eye (camera socket) of a character's current pose, ragdoll included (death camera).
 bool chars_head_world(World *w, EntityId e, float alpha, vec3 *out);
 // Corpses (docs/REVIVE.md): the body of an ET_CORPSE entity. While its player is dead the player's

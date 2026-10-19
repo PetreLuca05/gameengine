@@ -45,8 +45,6 @@ static void defaults(GuiTheme *t) {
     t->hud_text = RGBA(236, 236, 230, 255);
     t->select = RGBA(255, 255, 255, 255);
     t->ring = RGBA(255, 255, 255, 255);
-    t->crosshair_obstructed = RGBA(255, 176, 48, 255);
-    t->crosshair_friendly = RGBA(90, 170, 255, 255);
     for (int i = 0; i < 8; i++) t->ping[i] = t->accent;
     t->rarity[0] = RGBA(170, 170, 166, 255);
     t->rarity[1] = RGBA(110, 196, 112, 255);
@@ -179,8 +177,6 @@ bool gui_theme_load(const char *path) {
 #undef C
         col(c, "select", &t.select);
         col(c, "ring", &t.ring);
-        col(c, "crosshair_obstructed", &t.crosshair_obstructed);
-        col(c, "crosshair_friendly", &t.crosshair_friendly);
         const cJSON *pc = cJSON_GetObjectItemCaseSensitive(c, "ping_types");
         for (int i = 0; i < 8 && cJSON_IsArray(pc) && i < cJSON_GetArraySize(pc); i++) col_item(cJSON_GetArrayItem(pc, i), &t.ping[i]);
         static const char *const rn[5] = { "rarity_common", "rarity_uncommon", "rarity_rare", "rarity_epic", "rarity_legendary" };

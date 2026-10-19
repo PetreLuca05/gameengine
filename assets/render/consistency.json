@@ -40,8 +40,6 @@
     "world_chunk_radius": { "value": 4, "why": "Draw distance (chunks around the player). Lobby rule only." },
     "world_lod_distance": { "value": 70, "why": "First terrain LOD switch (m). Lobby rule only." },
     "cl_ads_world_zoom": { "value": 1.5, "why": "ADS world zoom comes from the sight data, not a setting." },
-    "crosshair_obstruct": { "value": 1, "why": "The crosshair shows where the bullet lands when the muzzle is blocked (docs/AIM.md)." },
-    "cam_kick_rot": { "value": 0, "why": "The fire camera layer never turns the camera off the aim line, so the centred crosshair stays on the bullets' line (docs/AIM.md)." },
     "cl_interp": { "value": 100, "why": "Entity interpolation delay (ms): the same view delay of remote players for everyone." },
     "cl_predict_impacts": { "value": 1, "why": "Own impacts shown at once (predicted) for everyone." },
     "cl_predict_hit_reactions": { "value": 1, "why": "Unconfirmed hit reactions shown the same for everyone." },

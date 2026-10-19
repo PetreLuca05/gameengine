@@ -24,9 +24,6 @@ void camera_fp_register_cvars(void) {
                                       "the nominal eye must stay this close to the animated head eye (m): logged when not, the body is never moved (cam_anchor_report)");
     c->anim_influence = cvar_reg_float("cam_anim_influence", 0.0f, 0.0f, 1.0f, CVAR_LOCKED, "dev: 0 = the camera glides on the nominal eye, 1 = the raw head bone eye (comparison)");
     c->kick_scale = cvar_reg_float("cam_kick_scale", 1.0f, 0.25f, 1.0f, CVAR_LOCKED, "visual camera kick on shots (aim recoil is separate)");
-    // docs/AIM.md "Sway, recoil and the camera": a camera turned off the aim line would move the
-    // centred crosshair off the bullets' line, so the fire camera layer's pitch / yaw are off.
-    c->kick_rot = cvar_reg_float("cam_kick_rot", 0.0f, 0.0f, 1.0f, CVAR_LOCKED, "fire camera layer pitch / yaw (x the camera kick; 0 = the camera never leaves the aim line, roll twitch / FOV punch / push-back stay)");
     // Movement shake is not a setting (Settings has no head bob / camera shake controls): off, the camera glides.
     c->move_shake = cvar_reg_float("cl_move_shake", 0.0f, 0.0f, 1.0f, CVAR_LOCKED,
                                    "movement camera shake: head bob, landing dip, ledge / mantle tilt (0 = off: the camera glides)");

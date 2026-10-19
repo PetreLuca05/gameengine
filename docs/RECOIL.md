@@ -49,9 +49,8 @@ your start.
 Each locally predicted shot raises a `ShotEvent` (with its sub-tick time), and the game's hook
 feeds the gun-driven fire animation: a one-tick, mass-based gun kick, hands that lag it, a camera
 that follows the body 2-3 ticks later, FOV punch and the other perceptual layers. See
-**docs/FIRE_ANIM.md**. The aim is untouched, and so is the screen centre: the camera layer's pitch /
-yaw are off (`cam_kick_rot 0`), so the centred crosshair stays on the bullets' line; its roll twitch,
-FOV punch and push-back don't move the centre (docs/AIM.md "Sway, recoil and the camera"). The gun
+**docs/FIRE_ANIM.md**. The aim is untouched: the camera layer turns the view, and the crosshair stays
+on the true aim point (it moves off the screen centre with the kick and back, docs/AIM.md). The gun
 kick moves only the drawn gun, never a bullet. The weapons' `camera_kick` / `viewmodel_kick` blocks
 and `recoil_visual_*` are legacy: they are still parsed but no longer drive the view.
 
@@ -82,8 +81,7 @@ Every multiplier blends with the aim progress (`ads_t`), so aiming mid-burst nev
 | Spread | `spread.hip` × `hip.spread_mult` | `spread.ads` |
 | Bloom per shot / max / recovery | × `hip.bloom_mult` / `hip.bloom_max_mult` / `hip.bloom_recovery_mult` (more, higher, slower) | as configured |
 | Item (gun) kick (drawn gun only) | × `hip.kick_mult` (1: the full animation) about the hip anchor | × `ads.kick_mult` about the **reticle centre** |
-| Camera visual kick | roll, FOV punch, push-back (pitch / yaw × `cam_kick_rot`, 0) | the same; with `cam_kick_rot` > 0 the gun counters it so the reticle keeps marking the aim |
-| The gun's aim | the hold aim turns the barrel through the crosshair's aim point (≤ 12°) | the hold aim turns the gun about the sight (≤ 3°) so the bore passes through it |
+| Camera visual kick | pitch / yaw / roll, FOV punch, push-back (the crosshair stays on the aim point) | the same; the gun counters it so the reticle keeps marking the aim |
 
 Hip accuracy is governed by the cone: the crosshair gap opens with the bloom on a mag-dump.
 
@@ -117,7 +115,7 @@ the pistol. Camera climb over the same burst: hip 3.9°, ADS 7.7°.
 
 The held weapon sways on its hold point (`src/player/holdpoint.c`), applied before the recoil kick.
 The arms follow by IK, so the hands stay glued. Sway is cosmetic again: it moves only the drawn gun,
-never the gameplay pose the bullets follow (docs/AIM.md "Hold aim"), and never the crosshair.
+never a bullet (they leave the camera, docs/AIM.md), and never the crosshair.
 
 **Components:**
 * **Breathing:** layered slow sines: a figure-eight, two slower drifts and a breath bob.

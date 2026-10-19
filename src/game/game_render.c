@@ -759,7 +759,6 @@ static void draw_debug(World *w, vec3 cam) {
         }
     }
     chars_debug_draw(w, cam);
-    weapons_aim_debug_frame(w);   // aim_debug (docs/AIM.md)
     horde_debug_draw(w);
     if (G->r_drawhitboxes->i) {
         ENT_FOREACH(w, i) {
@@ -921,12 +920,6 @@ void game_render(void) {
         float ck = cvar_find("cam_kick_scale") ? cvar_find("cam_kick_scale")->f : 1.0f;   // visual camera kick (aim recoil unaffected)
         const FireAnimOut *fo = game_fire_sample(G->alpha);
         vec3 kr = v3_scale(v3(fo->cam_rot.x, fo->cam_rot.y, fo->cam_rot.z), ck);
-        // cam_kick_rot (0): the layer's pitch / yaw. The camera stays on the aim line, so the centred
-        // crosshair stays on the bullets' line (docs/AIM.md "Sway, recoil and the camera"); the roll
-        // twitch, the FOV punch and the push-back don't move the screen centre.
-        float kro = camera_fp_cvars()->kick_rot ? camera_fp_cvars()->kick_rot->f : 0.0f;
-        kr.x *= kro;
-        kr.y *= kro;
         float kb = fo->cam_back * ck;
         cam.fov_deg = fmaxf(5.0f, cam.fov_deg - fo->fov_punch * ck);
         // Sway and ADS bob move the weapon (about the eye), not the camera: the sight centre stays

@@ -28,7 +28,7 @@ typedef struct CamHeadStab {
 
 typedef struct CamFpCvars {
     struct Cvar *glide_stiffness, *glide_damping, *anchor_radius, *anim_influence, *recon_smooth, *third, *debug;
-    struct Cvar *radius, *death_follow, *death_spectate, *kick_scale, *kick_rot, *move_shake;
+    struct Cvar *radius, *death_follow, *death_spectate, *kick_scale, *move_shake;
 } CamFpCvars;
 
 // ------------------------------------------------------------------ nominal eye (pure, camera_fp_math.c)
