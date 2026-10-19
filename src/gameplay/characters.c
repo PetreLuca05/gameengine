@@ -2826,6 +2826,7 @@ static struct {
     bool view_valid;
     bool anchored[2];            // hand h is on a world anchor (ledge, vehicle control): drawn with the world camera
     float ikw;                   // the hold's hand IK weight this frame (the presentation follows clips below 1)
+    float carry;                 // the share a weapon's own run clip carries the item (controller "carry")
     Xform clav[2];               // the clip's clavicles the IK pass started from
     ProcState st;                // scratch copy of the tick's state
 } FP;
@@ -2949,6 +2950,7 @@ static void fp_prepare(World *w, CharacterInst *c, float alpha, float yaw, float
         in.aim_pitch = pitch;
         in.hp_given = true;
         FP.ikw = saturate(in.hand_ik_weight);
+        FP.carry = saturate(in.carry_w);
         FP.passes = proc_frame_solve(&FP.st, &in, clav, &legs, legs_model, &FP.pose, FP.model);
         FP.solved = true;
         FP.has_item = FP.st.has_item;
@@ -3310,6 +3312,7 @@ bool chars_fp_arms(CharsFpArms *o) {
     o->sway_ads_rot = FP.sway_ads_rot;
     // presented = move x drawn (proc_presented_move): hip and aimed alike, exactly onto the presented item.
     o->present = proc_presented_move(&FP.st, o->item_cam, FP.ikw);
+    o->clip_w = FP.carry;
     return true;
 }
 

@@ -51,6 +51,8 @@ typedef struct BlendNode {
     char slot_pattern[32];         // NK_CLIP: "reload_{weapon}" resolved per weapon type
     float speed;
     float hand_ik;                 // NK_CLIP: 1 = the procedural hold owns the hands, 0 = the clip does ("hand_ik": false)
+    bool carry;                    // NK_CLIP pattern: when it plays the weapon's own clip ("run_f_rifle", not the plain
+                                   // fallback), that clip carries the item in both hands ("carry": true)
     i16 param_x, param_y;
     int child_count;
     i16 child[AC_MAX_CHILDREN];
@@ -127,6 +129,7 @@ typedef struct AnimBinding {
     SlotBinding slots[AC_MAX_SLOTS];
     // pattern slots resolved per weapon type: [node][weapon_type] -> slot
     i16 pattern_slot[AC_MAX_NODES][16];
+    bool pattern_own[AC_MAX_NODES][16];   // ... resolved to the weapon type's own slot (not the plain fallback)
     i16 fallback_clip;             // idle
 } AnimBinding;
 
@@ -190,6 +193,9 @@ void ctrl_force_state(ControllerInst *c, int layer, int state, u32 state_ticks, 
 // Normalized time of the layer's current state, and whether a clamped state finished.
 float ctrl_state_time(const ControllerInst *c, int layer);
 bool ctrl_hand_ik_weight(const ControllerInst *c, float *w);   // procedural hold weight from upper layer
+// The share of the pose a "carry" clip owns (a weapon's own run clip carrying the item in both hands),
+// less whatever an upper layer's clip takes (a reload while running). 0 = none.
+float ctrl_carry_weight(const ControllerInst *c);
 // Root motion of the base layer for this tick (model space XZ + yaw), only clips flagged root_motion.
 void ctrl_root_delta(const ControllerInst *c, const ClipLookup *clips, float dt, vec3 *dpos, float *dyaw);
 // Height of the root bone (the hips) in the first frame a state plays (its heaviest clip at the

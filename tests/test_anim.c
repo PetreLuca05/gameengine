@@ -811,7 +811,7 @@ static void test_frame_solve(const ItemDB *db) {
     // and sprinting with a rifle (the sprint clip owns the arms, the gun stays in the right hand) while
     // it fires, every finger joint of the right hand keeps its rotation whatever the clips do; the left
     // hand's while it grips (the hold owns it: standing, walking). And the grip is on: the fingers are
-    // not the bind pose.
+    // not the bind pose. While the sprint clip carries the gun the left hand stays on its grip.
     {
         const WeaponDef *wd = &db->weapons[1];
         charrt_init(a, L, def);
@@ -821,7 +821,7 @@ static void test_frame_solve(const ItemDB *db) {
         in.weapon_type = proc_hold_style_index(&L->proc, wd->hold_style);
         in.weapon_id = 2;
         static quat ref[2][HAND_FINGERS][HAND_FINGER_JOINTS];
-        float worst = 0, worst_left = 0, off_bind = 0;
+        float worst = 0, worst_left = 0, off_bind = 0, glue_sprint = 0, hw_sprint = 1;
         int joints = 0;
         for (int t = 0; t < 360; t++) {
             in.sprint = t >= 240;
@@ -840,6 +840,11 @@ static void test_frame_solve(const ItemDB *db) {
             pi.hand_lag_pos = v3(0, -0.003f * k, 0.008f * k);
             pi.hand_lag_rot = v3(-1.5f * k, 0.2f, 0);
             charrt_post(a, &pi);
+            // The sprint clip carries the gun: the left hand stays on its grip (the left IK, weight 1 - w).
+            if (t >= 300) {
+                glue_sprint = fmaxf(glue_sprint, a->proc.glue_err_pos);
+                hw_sprint = fminf(hw_sprint, hw);
+            }
             for (int h = 0; h < 2; h++)
                 for (int f = 0; f < HAND_FINGERS; f++)
                     for (int q = 0; q < HAND_FINGER_JOINTS; q++) {
@@ -860,8 +865,11 @@ static void test_frame_solve(const ItemDB *db) {
         CHECK(joints > 0 && off_bind > 5.0f, "gripping fingers: the grip is not on (%d joints, %.1f deg from the bind pose)", joints, off_bind);
         CHECK(worst < 0.01f, "gripping fingers (right) moved %.4f deg while standing / walking / sprinting (a clip reached them)", worst);
         CHECK(worst_left < 0.01f, "gripping fingers (left) moved %.4f deg while standing / walking", worst_left);
+        CHECK(hw_sprint < 0.01f && glue_sprint < 0.002f, "sprint: the clip should own the arms (hand IK %.2f) with the left hand on the gun's grip (%.1f mm off)",
+              hw_sprint, glue_sprint * 1000.0f);
         printf("  gripping fingers: %d joints (grip %.0f deg from the bind pose), right hand within %.4f deg standing / walking / sprinting, left %.4f deg\n",
                joints, off_bind, worst, worst_left);
+        printf("  sprint: the clip carries the gun (hand IK %.2f), the left hand on its grip within %.2f mm\n", hw_sprint, glue_sprint * 1000.0f);
     }
     free(a);
 }

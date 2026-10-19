@@ -159,7 +159,11 @@ void game_arms_frame(const RenderCamera *cam, vec2 aim_deg, float aim_pitch, flo
     AL.fa = fa;
     ArmsLayerIn *in = &AL.in;
     memset(in, 0, sizeof(*in));
+    // A weapon's own run clip carrying the gun (controller "carry"): the arms camera glides from the
+    // head's eye to the world camera, so the run's motion shows on screen (the presentation lets go of
+    // the gun as well: the clip owns the arms, proc_presented_move).
     in->pose_eye = fa.pose_eye;
+    if (fa.clip_w > 0.0f) in->pose_eye.t = v3_lerp(fa.pose_eye.t, cam->pos, saturate(fa.clip_w));
     in->present = fa.present;
     in->has_item = fa.has_item;
     in->item_cam = fa.item_cam;

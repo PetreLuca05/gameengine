@@ -452,6 +452,14 @@ leaf): the weight is then the blend weight of the other leaves. This is `holdpoi
 
 - **During the clip:** the arms follow the animation and the item follows the right hand bone, since
   the item is always finalized from the solved right hand.
+- **A weapon's own run clip carries the gun** (controller leaf `"carry": true`, on `run_f_{weapon}`):
+  when the set binds the weapon's own clip (`run_f_rifle`: a Rifle Run), that clip owns the arms, the
+  gun follows its right hand and the left hand stays IK'd on the gun's grip (`ctrl_carry_weight`,
+  `ProcInput.carry_w`), so both hands stay on the gun while it moves with the animation. On screen the
+  presentation lets go of the gun and the arms camera glides from the head's eye to the world camera by
+  the carry share, so the run's motion shows (nothing holds the gun in place). Without the weapon's own
+  clip (the plain `run_f` fallback, the jog) the hold keeps the gun as before. Sprint / reload / melee /
+  equip clips keep their own left hand.
 - **Blending back:** the IK weight rises and the hold point retakes control. The hold point state
   blend is inertialized, so nothing pops.
 

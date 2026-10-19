@@ -1,6 +1,6 @@
 {
   "name": "player",
-  "_comment": "Slot -> clip (clips.json names, one FBX per clip in assets/human). Missing clips (docs/ANIMATION.md 'Missing clips') play idle: unbound base-layer states fall back to it, upper-body states stay procedural. idle_{weapon} / run_f_{weapon}: unlisted weapon types use idle / run_f. Jumps: one clip split at its take-off / touchdown (bake_anim --survey, anim_probe) into start (rising), air (held), land. Modifiers: @reverse, @mirror, @a:b (normalized sub-range).",
+  "_comment": "Slot -> clip (clips.json names, one FBX per clip in assets/human). Missing clips (docs/ANIMATION.md 'Missing clips') play idle: unbound base-layer states fall back to it, upper-body states stay procedural. idle_{weapon} / run_f_{weapon} / sprint_{weapon}: unlisted weapon types use idle / run_f / sprint. The long guns sprint with Sprint Forward (the rifle sprint): it carries the gun, both hands on it (controller \"carry\"). Jumps: one clip split at its take-off / touchdown (bake_anim --survey, anim_probe) into start (rising), air (held), land. Modifiers: @reverse, @mirror, @a:b (normalized sub-range).",
   "slots": {
     "idle": "idle",
     "idle_pistol": "pistol_idle",
@@ -26,6 +26,10 @@
     "run_bl": "jog_bl",
     "run_br": "jog_br",
     "sprint": "sprint",
+    "sprint_rifle": "sprint_forward",
+    "sprint_smg": "sprint_forward",
+    "sprint_lmg": "sprint_forward",
+    "sprint_shotgun": "sprint_forward",
 
     "jump_start": "jump@0.0:0.4",
     "jump_loop": "jump@0.38:0.4",

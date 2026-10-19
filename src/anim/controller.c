@@ -121,6 +121,9 @@ static int parse_node(Parse *p, const cJSON *o) {
         n->speed = jf(o, "speed", 1.0f);
         // An authored clip that carries the arms (sprint): the hand IK fades out with its blend weight.
         n->hand_ik = jb(o, "hand_ik", true) ? 1.0f : 0.0f;
+        // A weapon's own clip that carries the item in both hands (the rifle run): only when the
+        // pattern finds the weapon's slot; the plain fallback (the jog) leaves the hands to the hold.
+        n->carry = jb(o, "carry", false);
         if (strchr(clip, '{')) dg_strcpy(n->slot_pattern, sizeof(n->slot_pattern), clip);
         else n->slot = (i16)add_slot(p->d, clip);
         return id;
@@ -361,7 +364,10 @@ bool ctrl_bind(AnimBinding *b, const ControllerDef *def, const char *set_json, c
     if (b->fallback_clip < 0 && cl->count) b->fallback_clip = 0;
     // Pattern nodes: "{weapon}" substituted by each weapon type name.
     for (int n = 0; n < def->node_count; n++) {
-        for (int w = 0; w < 16; w++) b->pattern_slot[n][w] = -1;
+        for (int w = 0; w < 16; w++) {
+            b->pattern_slot[n][w] = -1;
+            b->pattern_own[n][w] = false;
+        }
         const BlendNode *nd = &def->nodes[n];
         if (nd->kind != NK_CLIP || !nd->slot_pattern[0]) continue;
         for (int w = 0; w < def->weapon_type_count; w++) {
@@ -370,6 +376,7 @@ bool ctrl_bind(AnimBinding *b, const ControllerDef *def, const char *set_json, c
             if (!br) continue;
             snprintf(name, sizeof(name), "%.*s%s%s", (int)(br - nd->slot_pattern), nd->slot_pattern, def->weapon_types[w], br + 8);
             const cJSON *v = cJSON_GetObjectItemCaseSensitive(slots, name);
+            b->pattern_own[n][w] = cJSON_IsString(v) && v->valuestring[0];
             if (!cJSON_IsString(v) || !v->valuestring[0]) {
                 // Unbound for this weapon type: the plain slot ("run_f_{weapon}" -> "run_f"), so a
                 // set only lists the weapon variants it has (zombies, unarmed keep their clips).
@@ -404,7 +411,7 @@ bool ctrl_bind(AnimBinding *b, const ControllerDef *def, const char *set_json, c
 
 // ------------------------------------------------------------------ blend weights
 
-typedef struct Leaf { i16 clip; bool mirror, reverse; float weight; float speed; float r0, r1; float ikw; } Leaf;
+typedef struct Leaf { i16 clip; bool mirror, reverse; float weight; float speed; float r0, r1; float ikw, carry; } Leaf;
 typedef struct LeafSet { Leaf l[24]; int n; } LeafSet;
 
 static float pv(const ControllerInst *c, int p) { return (p >= 0) ? c->params[p] : 0.0f; }
@@ -511,6 +518,7 @@ static void collect(const ControllerInst *c, int node, float weight, float speed
     if (n->kind == NK_CLIP) {
         if (out->n >= 24) return;
         Leaf *l = &out->l[out->n];
+        bool own = false;
         l->clip = -1;
         l->mirror = l->reverse = false;
         l->r0 = 0.0f;
@@ -519,6 +527,7 @@ static void collect(const ControllerInst *c, int node, float weight, float speed
             int wt = DG_CLAMP((int)c->params[AP_WEAPON_TYPE], 0, 15);
             i16 enc = c->bind->pattern_slot[node][wt];
             if (enc <= -2) l->clip = (i16)(-enc - 2);
+            own = n->carry && enc <= -2 && c->bind->pattern_own[node][wt];
         } else if (n->slot >= 0) {
             const SlotBinding *sb = &c->bind->slots[n->slot];
             l->clip = sb->clip;
@@ -529,7 +538,8 @@ static void collect(const ControllerInst *c, int node, float weight, float speed
         }
         l->weight = weight;
         l->speed = speed;
-        l->ikw = n->hand_ik;
+        l->ikw = own ? 0.0f : n->hand_ik;   // a carrying clip owns the arms
+        l->carry = own ? 1.0f : 0.0f;
         out->n++;
         return;
     }
@@ -576,6 +586,16 @@ static float state_hand_ik(const ControllerInst *c, const StateDef *st) {
     float ik = 0.0f;
     for (int i = 0; i < ls.n; i++) ik += ls.l[i].weight * ls.l[i].ikw;
     return ls.n ? saturate(ik) : 1.0f;
+}
+
+// Carry share of a state's blend: the weight of its leaves playing a weapon's own carrying clip.
+static float state_carry(const ControllerInst *c, const StateDef *st) {
+    if (st->node < 0) return 0.0f;
+    LeafSet ls;
+    resolve_leaves(c, st->node, &ls);
+    float k = 0.0f;
+    for (int i = 0; i < ls.n; i++) k += ls.l[i].weight * ls.l[i].carry;
+    return saturate(k);
 }
 
 static float leaves_duration(const LeafSet *ls, const ClipLookup *cl) {
@@ -789,6 +809,26 @@ bool ctrl_hand_ik_weight(const ControllerInst *c, float *w) {
     }
     *w = out;
     return out > 0.0f;
+}
+
+float ctrl_carry_weight(const ControllerInst *c) {
+    float carry = 0.0f, upper = 1.0f;
+    for (int li = 0; li < c->def->layer_count; li++) {
+        const LayerDef *L = &c->def->layers[li];
+        const LayerState *S = &c->layer[li];
+        if (L->states[S->state].node < 0 && (!S->blend_total || S->prev_state < 0)) continue;   // empty state: no say
+        float a = S->blend_total && S->prev_state >= 0 ? (float)S->blend_ticks / (float)S->blend_total : 1.0f;
+        if (li == 0) {
+            float cur = state_carry(c, &L->states[S->state]);
+            carry = a < 1.0f ? lerpf(state_carry(c, &L->states[S->prev_state]), cur, a) : cur;
+        } else {
+            float cur = state_hand_ik(c, &L->states[S->state]);
+            if (a < 1.0f) cur = lerpf(state_hand_ik(c, &L->states[S->prev_state]), cur, a);
+            float lw = L->weight * (L->weight_param >= 0 ? c->params[L->weight_param] : 1.0f);
+            upper = fminf(upper, lerpf(1.0f, cur, saturate(lw)));
+        }
+    }
+    return saturate(carry * upper);
 }
 
 // ------------------------------------------------------------------ evaluation

@@ -229,6 +229,7 @@ typedef struct CharsFpArms {
     Xform pose_eye;             // world: head bone x eye socket, the view's rotation
     Xform present;              // pose-eye space: the drawn item -> the presented one (identity: no hold, or a clip owns the hands)
     vec3 hand_c[2];             // world: the hands' centres (wrist .. middle knuckle), left / right (fp_framing)
+    float clip_w;               // 0..1 how much a weapon's own run clip carries the item (controller "carry")
     float ads_w;                // the presentation hold point's ADS weight (interpolated)
     bool has_item;
     Xform item_cam;             // the drawn item, pose-eye space

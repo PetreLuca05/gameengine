@@ -234,6 +234,8 @@ typedef struct ProcInput {
     int hold_style;            // HoldStyleId
     const ItemSockets *item;   // NULL = nothing held
     float hand_ik_weight;      // controller: 0 while reload / melee clips own the hands
+    float carry_w;             // controller: the share a weapon's own run clip carries the item in both hands (the
+                               // left hand stays on its grip, ctrl_carry_weight)
     bool foot_ik, spine, turn, hold, lean, damage;  // per-system enables (LOD + cvars)
     float lod_w;               // weight of the LOD0 systems (foot IK, lean, turn), faded over a pixel band (docs/LOD.md); 1 = full
     vec3 item_kick_pos, item_kick_rot;   // recoil kick applied to the item (aim space, m / deg)

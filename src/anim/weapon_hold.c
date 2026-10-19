@@ -275,6 +275,12 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     if (rsh >= 0 && v3_len2(hs.shoulder_r) > 0) proc_rotate_bone(s, pose, model, rsh, euler_deg(v3_scale(hs.shoulder_r, w)));
     if (lsh >= 0 && v3_len2(hs.shoulder_l) > 0) proc_rotate_bone(s, pose, model, lsh, euler_deg(v3_scale(hs.shoulder_l, w)));
 
+    // A weapon's own run clip carrying the gun (controller "carry": it owns the arms, the gun follows its
+    // right hand): the left hand stays on the gun's grip, the gun moves with the animation
+    // (docs/CAMERA_HOLDPOINT.md "Clips taking control"). Sprint / reload / melee / equip clips keep their
+    // own left hand.
+    float wl = hs.left_hand && it->has_left ? fmaxf(w, saturate(in->carry_w)) : w;
+
     // Solve right then left. If grip_l is out of reach, slide the item back along its own
     // barrel axis (stock into the shoulder, sights stay on the aim line) by exactly the
     // shortfall, up to max_shift; the left arm is never stretched.
@@ -331,7 +337,7 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
         float margin = 0.004f;
         // The shoulder reaches first (clavicle protraction, up to 45 deg): the item stays on its
         // hold point; only what the shoulder can't cover moves the item.
-        proc_clavicle_reach(s, pose, model, lsh, la, hand_l.t, reach, margin * 1.5f, 75.0f * w);
+        proc_clavicle_reach(s, pose, model, lsh, la, hand_l.t, reach, margin * 1.5f, 75.0f * wl);
         float need = v3_dist(model[la].t, hand_l.t);
         if (need > reach - margin * 0.5f && iter < 23 && slide < max_slide - 1e-5f) {
             vec3 to_sh = v3_norm(v3_sub(model[la].t, hand_l.t));
@@ -364,7 +370,7 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
             continue;
         }
         vec3 pole_l = quat_rotate(yaw_q, st->hand[0].pole);
-        left_ok = anim_ik_arm_pose(s, pose, model, la, lf, lh, hand_l.t, &hand_l.r, pole_l, w * st->hand[0].ikw);
+        left_ok = anim_ik_arm_pose(s, pose, model, la, lf, lh, hand_l.t, &hand_l.r, pole_l, wl * st->hand[0].ikw);
         Xform palm_l = xf_mul(model[lh], hf->palm[0]);
         st->glue_err_pos = v3_dist(palm_l.t, sock_l.t);
         st->glue_err_ang = socket_error_angle(palm_l.r, sock_l.r);
@@ -393,15 +399,15 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     // from the hold style's fixed base (its idle clip's first frame), so no clip and no shot moves
     // them (docs/HANDPOSE.md "No finger animation"). The right hand holds the item in every state
     // (a sprint / reload / melee clip that owns the arms carries the item in it): its fingers are the
-    // grip's at full weight; the left hand grips only while the hold owns it.
+    // grip's at full weight; the left hand while it grips (the hold, or a run clip carrying the gun).
     if (!in->no_fingers) {
         const HandFingerBase *fb = &hf->finger_base[DG_CLAMP(st->style, 0, HOLD_STYLE_MAX - 1)];
         if (!fb->ok) fb = &hf->finger_base[HOLD_STYLE_MAX];
         handpose_set_finger_base(s, pose, model, 1, fb, 1.0f);
         handpose_apply_fingers(s, pose, model, 1, st->hand[1].j, hf, 1.0f);
         if (hs.left_hand && it->has_left) {
-            handpose_set_finger_base(s, pose, model, 0, fb, w);
-            handpose_apply_fingers(s, pose, model, 0, st->hand[0].j, hf, w);
+            handpose_set_finger_base(s, pose, model, 0, fb, wl);
+            handpose_apply_fingers(s, pose, model, 0, st->hand[0].j, hf, wl);
         }
     }
     st->reach_shift = shift;

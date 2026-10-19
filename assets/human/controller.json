@@ -31,11 +31,11 @@
               { "pos": [-0.707, 0.707], "clip": "walk_fl" }, { "pos": [0.707, 0.707], "clip": "walk_fr" },
               { "pos": [-0.707, -0.707], "clip": "walk_bl" }, { "pos": [0.707, -0.707], "clip": "walk_br" } ] } },
             { "at": 4.2, "tree": { "blend2d": ["move_x", "move_y"], "mode": "directional", "children": [
-              { "pos": [0, 1], "clip": "run_f_{weapon}" }, { "pos": [0, -1], "clip": "run_b" },
+              { "pos": [0, 1], "clip": "run_f_{weapon}", "carry": true }, { "pos": [0, -1], "clip": "run_b" },
               { "pos": [-1, 0], "clip": "run_l" }, { "pos": [1, 0], "clip": "run_r" },
               { "pos": [-0.707, 0.707], "clip": "run_fl" }, { "pos": [0.707, 0.707], "clip": "run_fr" },
               { "pos": [-0.707, -0.707], "clip": "run_bl" }, { "pos": [0.707, -0.707], "clip": "run_br" } ] } },
-            { "at": 6.8, "clip": "sprint_{weapon}", "hand_ik": false } ] } },
+            { "at": 6.8, "clip": "sprint_{weapon}", "hand_ik": false, "carry": true } ] } },
 
         { "name": "crouch", "sync": true, "speed_match": true,
           "tree": { "blend1d": "speed", "children": [

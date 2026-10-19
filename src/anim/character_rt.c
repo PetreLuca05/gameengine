@@ -150,6 +150,7 @@ void charrt_proc_input(const CharRuntime *r, ProcInput *in, Xform root, float dt
     in->ads_t = r->in.ads ? 1.0f : 0.0f;
     in->hold_style = r->in.weapon_type;
     ctrl_hand_ik_weight(&r->ctrl, &in->hand_ik_weight);
+    in->carry_w = ctrl_carry_weight(&r->ctrl);
     in->foot_ik = in->spine = in->turn = in->hold = in->lean = in->damage = true;
     in->lod_w = 1.0f;
     // Hold point camera: the character's eye socket on the Head bone; blend key = held item.

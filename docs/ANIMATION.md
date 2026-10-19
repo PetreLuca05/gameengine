@@ -76,7 +76,7 @@ names them; the anim sets bind them to slots:
 | `Jog Forward Diagonal Left / Right` | `jog_fl`, `jog_fr` (2.8) | `walk_fl` / `run_fl`, `walk_fr` / `run_fr` |
 | `Jog Backward Diagonal Left / Right` | `jog_bl`, `jog_br` (their travel: 2.51) | `walk_bl` / `run_bl`, `walk_br` / `run_br` |
 | `Jog Strafe Left`, `Jog Strafe Right` | `jog_l`, `jog_r` (2.76, 2.12; the toes travel at +90.2° / -89.8°) | `walk_l` / `run_l`, `walk_r` / `run_r` |
-| `Sprint`, `Sprint Forward` | `sprint` (5.93), `sprint_forward` (6.4) | `sprint` (players), `sprint` (zombies) |
+| `Sprint`, `Sprint Forward` (the rifle sprint) | `sprint` (5.93), `sprint_forward` (6.4) | `sprint` (players: pistol, empty hands), `sprint_rifle` / `_smg` / `_lmg` / `_shotgun` (players: it carries the gun, both hands on it, controller `"carry"`, docs/CAMERA_HOLDPOINT.md "Clips taking control"), `sprint` (zombies) |
 | `Jump` | `jump` (`air_in_place`) | `jump_start` 0 .. 0.4 (take-off to just before touchdown), `jump_loop` 0.38 .. 0.4 (held), `jump_land` 0.42 .. 0.75, `jump_land_hard` 0.42 .. 1 |
 | `Running Jump` | `jump_run` (`air_in_place`, 0.9 s) | `jump_run` 0.05 .. 0.68 (take-off to the first touchdown), `jump_land_run` 0.68 .. 1 |
 | `Jumping To Hanging` | `jump_to_hang` | `hang_grab` |
