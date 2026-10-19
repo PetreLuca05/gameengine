@@ -14,7 +14,7 @@
   "min_gap": 3.0,
   "max_gap": 260.0,
   "ads_fade_time": 0.12,
-  "ads_dot": true,
+  "ads_dot": false,
   "ads_dot_size": 2.0,
   "shotgun_circle": true,
   "circle_segments": 48,

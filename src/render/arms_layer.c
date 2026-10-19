@@ -80,6 +80,7 @@ void arms_layer_parse(ArmsLayerDef *d, const cJSON *root) {
             a->set[s] = true;
             a->state[s] = parse_pose(e, d->state[s]);
         }
+        a->screen_scale = clampf(jf(it, "screen_scale", 0.0f), 0.0f, 2.0f);
     }
     const cJSON *eq = jget(root, "equip");
     d->equip_time = fmaxf(0.0f, jf(eq, "time", d->equip_time));
@@ -141,6 +142,7 @@ char *arms_layer_to_json(const ArmsLayerDef *d) {
         cJSON *it = cJSON_AddObjectToObject(items, d->items[i].id);
         for (int s = 0; s < HP_STATE_COUNT; s++)
             if (d->items[i].set[s]) put_pose(cJSON_AddObjectToObject(it, holdpoint_state_name(s)), d->items[i].state[s]);
+        if (d->items[i].screen_scale > 0.0f) cJSON_AddNumberToObject(it, "screen_scale", r4(d->items[i].screen_scale));
     }
     cJSON *eq = cJSON_AddObjectToObject(o, "equip");
     cJSON_AddNumberToObject(eq, "time", r4(d->equip_time));
@@ -333,7 +335,9 @@ void arms_layer_eval(const ArmsLayerDef *d, ArmsLayerState *st, const ArmsLayerI
     mat4 C = mat4_translate(v3_scale(hp_cam_pos(p.cam_pos), -cw));
     out->cam_w = cw;
     // The screen size follows the same weight: the picture is its own size aimed (the sight centred).
-    out->screen_scale = 1.0f + (clampf(d->screen_scale, 0.25f, 2.0f) - 1.0f) * cw;
+    const ArmsItem *si = in->has_item ? find_item(d, in->item_id) : NULL;
+    float ss = si && si->screen_scale > 0.0f ? si->screen_scale : d->screen_scale;   // the item's own, else the layer's
+    out->screen_scale = 1.0f + (clampf(ss, 0.25f, 2.0f) - 1.0f) * cw;
     out->sight = in->has_item ? xf_point(item, in->sight) : v3(0, 0, 0);
     // Cosmetic sway (Weapon sway < 1): the pose's sway shown smaller - about the pivot at the hip, about
     // the sight aimed (the hold point turns it there).

@@ -66,7 +66,7 @@ static void style_defaults(CrossStyle *s) {
     s->min_gap = 3.0f;
     s->max_gap = 260.0f;
     s->ads_fade_time = 0.12f;
-    s->ads_dot = true;
+    s->ads_dot = false;   // no crosshair at all while aimed (the sights are real)
     s->ads_dot_size = 2.0f;
     s->shotgun_circle = true;
     s->circle_segments = 48;

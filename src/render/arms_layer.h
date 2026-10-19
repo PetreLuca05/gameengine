@@ -44,6 +44,7 @@ typedef struct ArmsItem {
     char id[32];
     bool set[HP_STATE_COUNT];
     ArmsPose state[HP_STATE_COUNT];
+    float screen_scale;               // the item's own screen size at the hip (0: the layer's screen.scale)
 } ArmsItem;
 
 typedef struct ArmsLayerDef {

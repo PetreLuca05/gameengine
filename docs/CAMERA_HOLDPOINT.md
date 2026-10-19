@@ -163,7 +163,8 @@ FOV aimed. It changes nothing but the arms projection, and the fidelity levels d
 **Screen size** (`screen`, 2026-10-20): at the hip the arms + item picture is drawn at `screen.scale`
 (0.85; it was 0.75, then 1.125; 0.25 .. 2) of its size about `screen.anchor` (screen fractions
 from the top left: 0.75, 1 = on the bottom edge where the guns leave the screen), so a gun keeps its
-place and is just bigger or smaller; what leaves the bottom edge still does. It goes back to 1 aimed with the camera weight (the sight's own ADS progress),
+place and is just bigger or smaller; what leaves the bottom edge still does. An item can have its own
+(`items.<id>.screen_scale`: the pistol 1.5). It goes back to 1 aimed with the camera weight (the sight's own ADS progress),
 so the sight lands on the screen centre at its own size. It is a 2D scale after the arms projection
 (`arms_layer_screen_clip`, in `vm_proj`); nothing in 3D moves, the depth is unchanged, and
 `render_viewmodel_to_world` / `vm_apparent` apply the same map (`arms_layer_screen_view`), so the

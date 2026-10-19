@@ -47,6 +47,8 @@ crosshair's aim point, the crosshair moving to an obstruction) was reverted on 2
   while the fire animation's camera kick turns the view; then it stays on the true aim point and
   comes back with the camera. Third-person debug cameras: the aim point 50 m ahead.
 - The gap is the exact screen projection of the spread cone.
+- Aimed, there is none: it fades out over `ads_fade_time` and no dot replaces it (`ads_dot` false in
+  `assets/ui/crosshair.json`, 2026-10-20); the sights are the aim.
 - `crosshair_pos` prints where it was drawn (tests).
 
 ## Tests
