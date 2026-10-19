@@ -96,6 +96,7 @@ typedef struct LayerDef {
     u8 blend;
     float weight;
     i16 weight_param;              // optional multiplier param
+    bool yield_arms;               // weight x the hand IK share of the layers below (their clips owning the arms win)
     StateDef states[AC_MAX_STATES];
     int state_count;
     int default_state;
@@ -196,6 +197,12 @@ bool ctrl_hand_ik_weight(const ControllerInst *c, float *w);   // procedural hol
 // The share of the pose a "carry" clip owns (a weapon's own run clip carrying the item in both hands),
 // less whatever an upper layer's clip takes (a reload while running). 0 = none.
 float ctrl_carry_weight(const ControllerInst *c);
+// The share of the base layer's blend whose clips own the arms (a sprint, a weapon's own run clip, a
+// mantle, a hang, death): 1 - its hand IK share.
+float ctrl_base_arms_owned(const ControllerInst *c);
+// A layer's non-empty share: 1 in a state with a pose, eased through transitions from / to an empty one.
+float ctrl_layer_on(const ControllerInst *c, int layer);
+int ctrl_layer_index(const ControllerDef *def, const char *name);   // -1: no such layer
 // Root motion of the base layer for this tick (model space XZ + yaw), only clips flagged root_motion.
 void ctrl_root_delta(const ControllerInst *c, const ClipLookup *clips, float dt, vec3 *dpos, float *dyaw);
 // Height of the root bone (the hips) in the first frame a state plays (its heaviest clip at the

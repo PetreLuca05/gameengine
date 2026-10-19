@@ -256,7 +256,7 @@ static void test_load(void) {
         CHECK(finite, "clip %s has non-finite data", c->name);
     }
     CHECK(anim_lib_find_clip(L, "jog_f") >= 0 && anim_lib_find_clip(L, "hang_idle") >= 0, "expected clips missing");
-    CHECK(L->ctrl.layer_count == 3, "controller layers %d", L->ctrl.layer_count);
+    CHECK(L->ctrl.layer_count == 4, "controller layers %d", L->ctrl.layer_count);   // base, upper, hold, hit
     CHECK(L->set_count >= 2, "anim sets %d", L->set_count);
     CHECK(L->char_count >= 5, "characters %d", L->char_count);
     CHECK(L->ragdoll.body_count == 17, "ragdoll bodies %d", L->ragdoll.body_count);
@@ -792,20 +792,39 @@ static void test_frame_solve(const ItemDB *db) {
         in.weapon_type = proc_hold_style_index(&L->proc, db->weapons[1].hold_style);
         in.weapon_id = 2;
         in.move_local = v2(0, 1);
-        float w_run = 0, w_sprint = 1;
+        float w_run = 0, w_sprint = 1, w_fast = 1;
+        int hold = ctrl_layer_index(a->ctrl.def, "hold");
+        float hold_run = 0, owned_run = 1, owned_sprint = 0, empty_run = 1, run_look = 0;
         for (int t = 0; t < 240; t++) {
             in.sprint = t >= 120;
-            in.speed = in.sprint ? 7.0f : 4.2f;
+            // 60 .. 119: faster than the run without sprinting (the speed spring's overshoot, a slope):
+            // the sprint is a state, never a point on the speed blend, so its clip never takes the arms.
+            in.speed = in.sprint ? 7.0f : (t >= 60 ? 4.6f : 4.2f);
             charrt_set_inputs(a, &in);
             charrt_tick(a, dt);
             float w = 1;
             ctrl_hand_ik_weight(&a->ctrl, &w);
-            if (t == 110) w_run = w;
-            if (t == 230) w_sprint = w;
+            if (t >= 60 && t < 120) w_fast = fminf(w_fast, w);
+            ProcInput pi;
+            charrt_proc_input(a, &pi, xf_identity(), dt);
+            if (t == 110) w_run = w, hold_run = ctrl_layer_on(&a->ctrl, hold), owned_run = ctrl_base_arms_owned(&a->ctrl), empty_run = pi.look_empty;
+            if (t == 230) w_sprint = w, owned_sprint = ctrl_base_arms_owned(&a->ctrl), run_look = pi.look_run;
         }
         CHECK(w_run > 0.99f, "running: hand IK weight %.2f (the hold should own the hands)", w_run);
+        CHECK(w_fast > 0.999f, "faster than the run without sprinting: hand IK weight %.3f (the sprint clip leaked in)", w_fast);
         CHECK(w_sprint < 0.01f, "sprinting: hand IK weight %.2f (the sprint clip should own the arms)", w_sprint);
-        printf("  hand IK: run %.2f, sprint %.2f (the sprint clip carries the arms)\n", w_run, w_sprint);
+        // The gun hold layer: on with a gun, the base arms free while running, owned (it yields) sprinting;
+        // the look: the main weights with a gun, the neck / head only while the sprint owns the arms.
+        CHECK(hold >= 0 && hold_run > 0.99f, "running with a gun: the hold layer is %.2f on", hold_run);
+        CHECK(owned_run < 0.01f && owned_sprint > 0.99f, "base arms owned: run %.2f sprint %.2f", owned_run, owned_sprint);
+        CHECK(empty_run < 0.01f && run_look > 0.99f, "look profile: empty %.2f running with a gun, run %.2f sprinting", empty_run, run_look);
+        const ProcParams *pp = &L->proc;
+        float rs = pp->spine_weights_run[0] + pp->spine_weights_run[1] + pp->spine_weights_run[2];
+        float es = pp->spine_weights_empty[0] + pp->spine_weights_empty[1] + pp->spine_weights_empty[2];
+        float ms = pp->spine_weights[0] + pp->spine_weights[1] + pp->spine_weights[2];
+        CHECK(rs < 1e-6f && es < 0.5f * ms, "look profiles: spine share run %.2f, empty %.2f, gun %.2f", rs, es, ms);
+        printf("  hand IK: run %.2f, faster without sprint %.3f, sprint %.2f (the sprint clip carries the arms); hold layer %.2f running; look spine share gun %.2f empty %.2f run %.2f\n",
+               w_run, w_fast, w_sprint, hold_run, ms, es, rs);
     }
     // A gripping hand's fingers never move (docs/HANDPOSE.md "No finger animation"): standing, walking
     // and sprinting with a rifle (the sprint clip owns the arms, the gun stays in the right hand) while

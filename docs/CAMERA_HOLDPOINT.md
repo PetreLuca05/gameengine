@@ -463,8 +463,12 @@ Only the fields you set apply.
 ## Clips taking control
 
 Controller states with `"hand_ik": false` (reload, equip, melee, mantle, death) set the hand IK
-weight to 0, blended by the controller transition. A blend-tree leaf can say the same (the sprint
-leaf): the weight is then the blend weight of the other leaves. This is `holdpoint_mode: clip`.
+weight to 0, blended by the controller transition (the sprint is such a state, entered by
+`is_sprinting` only: a speed past the run never blends its arms in). A blend-tree leaf can say the
+same (a weapon's own run clip): the weight is then the blend weight of the other leaves. This is
+`holdpoint_mode: clip`. Otherwise, with a gun, the upper body plays the weapon's idle (the
+controller's gun hold layer, docs/ANIMATION.md "Gun hold"): no locomotion clip moves the arms or the
+gun; only the run clips (the sprint, a weapon's run clip) move the hands and the item.
 
 - **During the clip:** the arms follow the animation and the item follows the right hand bone, since
   the item is always finalized from the solved right hand.

@@ -835,6 +835,7 @@ static void npc_inputs(World *w, CharacterInst *c, int i, CharInputs *in, float 
     if (w->item[i]) in->weapon_type = item_hold_style(w, w->item[i], &c->item_weapon, &c->item_def);
     update_item_sockets(w, c, NULL);
     in->weapon_id = w->item[i];
+    in->sprint = in->speed >= 5.5f;   // the sprint is a state (controller "sprint"), not a point on the speed blend
     if (w->type[i] == ET_ZOMBIE) zombie_look(w, c, i, in, dt);
 }
 

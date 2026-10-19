@@ -1,6 +1,6 @@
 {
   "name": "player",
-  "_comment": "Slot -> clip (clips.json names, one FBX per clip in assets/human). Missing clips (docs/ANIMATION.md 'Missing clips') play idle: unbound base-layer states fall back to it, upper-body states stay procedural. idle_{weapon} / run_f_{weapon} / sprint_{weapon}: unlisted weapon types use idle / run_f / sprint. The long guns sprint with Sprint Forward (the rifle sprint): it carries the gun, both hands on it (controller \"carry\"). Jumps: one clip split at its take-off / touchdown (bake_anim --survey, anim_probe) into start (rising), air (held), land. Modifiers: @reverse, @mirror, @a:b (normalized sub-range).",
+  "_comment": "Slot -> clip (clips.json names, one FBX per clip in assets/human). Missing clips (docs/ANIMATION.md 'Missing clips') play idle: unbound base-layer states fall back to it, upper-body states stay procedural. idle_{weapon} / run_f_{weapon} / sprint_{weapon}: unlisted weapon types use idle / run_f / sprint. The right strafe is the left one mirrored (Jog Strafe Right travels 2.12 m/s against the left's 2.76: at the move speed it played ~2x fast). The long guns sprint with Sprint Forward (the rifle sprint): it carries the gun, both hands on it (controller \"carry\"). Jumps: one clip split at its take-off / touchdown (bake_anim --survey, anim_probe) into start (rising), air (held), land. Modifiers: @reverse, @mirror, @a:b (normalized sub-range).",
   "slots": {
     "idle": "idle",
     "idle_pistol": "pistol_idle",
@@ -12,7 +12,7 @@
     "walk_f": "jog_f",
     "walk_b": "jog_b",
     "walk_l": "jog_l",
-    "walk_r": "jog_r",
+    "walk_r": "jog_l@mirror",
     "walk_fl": "jog_fl",
     "walk_fr": "jog_fr",
     "walk_bl": "jog_bl",
@@ -20,7 +20,7 @@
     "run_f": "jog_f",
     "run_b": "jog_b",
     "run_l": "jog_l",
-    "run_r": "jog_r",
+    "run_r": "jog_l@mirror",
     "run_fl": "jog_fl",
     "run_fr": "jog_fr",
     "run_bl": "jog_bl",

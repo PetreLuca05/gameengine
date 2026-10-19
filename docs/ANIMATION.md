@@ -75,8 +75,9 @@ names them; the anim sets bind them to slots:
 | `Jog Forward`, `Jog Backward` | `jog_f`, `jog_b` (`root_speed` 2.5, 2.15) | `walk_f` / `run_f`, `walk_b` / `run_b` |
 | `Jog Forward Diagonal Left / Right` | `jog_fl`, `jog_fr` (2.8) | `walk_fl` / `run_fl`, `walk_fr` / `run_fr` |
 | `Jog Backward Diagonal Left / Right` | `jog_bl`, `jog_br` (their travel: 2.51) | `walk_bl` / `run_bl`, `walk_br` / `run_br` |
-| `Jog Strafe Left`, `Jog Strafe Right` | `jog_l`, `jog_r` (2.76, 2.12; the toes travel at +90.2° / -89.8°) | `walk_l` / `run_l`, `walk_r` / `run_r` |
+| `Jog Strafe Left`, `Jog Strafe Right` | `jog_l`, `jog_r` (2.76, 2.12; the toes travel at +90.2° / -89.8°) | `walk_l` / `run_l`; `walk_r` / `run_r` play `jog_l@mirror` (2026-10-20: the right clip's shorter stride played ~2x fast at the move speed, the left's 1.5x; `jog_r` stays named, unused) |
 | `Sprint`, `Sprint Forward` (the rifle sprint) | `sprint` (5.93), `sprint_forward` (6.4) | `sprint` (players: pistol, empty hands), `sprint_rifle` / `_smg` / `_lmg` / `_shotgun` (players: it carries the gun, both hands on it, controller `"carry"`, docs/CAMERA_HOLDPOINT.md "Clips taking control"), `sprint` (zombies) |
+| `Pistol Idle`, `Rifle Aiming Idle` (again) | | the gun hold layer's `idle_{weapon}` ("Gun hold" below) |
 | `Jump` | `jump` (`air_in_place`) | `jump_start` 0 .. 0.4 (take-off to just before touchdown), `jump_loop` 0.38 .. 0.4 (held), `jump_land` 0.42 .. 0.75, `jump_land_hard` 0.42 .. 1 |
 | `Running Jump` | `jump_run` (`air_in_place`, 0.9 s) | `jump_run` 0.05 .. 0.68 (take-off to the first touchdown), `jump_land_run` 0.68 .. 1 |
 | `Jumping To Hanging` | `jump_to_hang` | `hang_grab` |
@@ -91,8 +92,12 @@ starts at its take-off and lands after 0.63 s, the game's flat-ground jump (`pl_
 take-off (0 .. 0.05) is skipped because the jump press is the take-off (`Jumping.fbx`, the older
 running jump, is no longer named in `clips.json`: it loads under its file name and nothing plays it). `jump_run` plays above 3 m/s.
 
-**Locomotion.** `idle_{weapon}` at 0, the 8-way jog at the slow-walk (1.6) and run (4.2) bands, the
-sprint at 6.8; `speed_match` plays the jog at the move speed (0.7x slow-walking, 1.7x running). The
+**Locomotion.** `idle_{weapon}` at 0, the 8-way jog at the slow-walk (1.6) and run (4.2) bands;
+`speed_match` plays the jog at the move speed (0.7x slow-walking, 1.7x running). **The sprint is its
+own state** (`sprint`), entered by `is_sprinting` only (0.25 s each way; NPCs sprint from 5.5 m/s):
+it was the speed blend's point at 6.8, so the speed spring's overshoot past the run (4.32 m/s turning
+a WASD circle) or a slope blended a few % of its clip in, and that clip owns the arms - the left hand
+came 3 cm off the grip (2026-10-20). The
 blend tree gets the move direction itself (0 forward, 90 right): forward, back and the four diagonals
 have clips. Speed and direction are smoothed per tick (about 0.15 s), so changing direction or speed
 cross-fades the clips instead of popping (`blend_dir`, `character_rt.c`). `test_anim` checks, for
@@ -239,6 +244,15 @@ Unbound slots are allowed:
 Binding logs one summary line per set. `anim_template` writes `anim_sets/player_template.json` and
 `zombie_template.json`, listing every slot, including the expanded `{weapon}` patterns.
 
+**Gun hold.** With a gun in the hands (`weapon_type` pistol .. lmg) the controller's `hold` layer
+plays the weapon's idle (`idle_{weapon}`: Rifle Aiming Idle, Pistol Idle) on the whole upper body
+(mask `upper_hold`: Spine 25 %, Spine1 60 %, the chest up 100 %: the lower spine keeps the gait's
+counter-sway, so the head stays within the camera anchor), the legs play the locomotion: no jog,
+strafe or turn clip moves the arms, the shoulders or the gun, and the hold puts the hands on it.
+It yields (`"yield_arms"`) to the clips that own the arms below it, in proportion: the sprint, a
+weapon's own run clip (`run_f_{weapon}`, `"carry"`), mantle / hang / death, a reload / equip / melee
+clip. It sits after `upper` (layers 0 / 1 are replicated) and before `hit`.
+
 ## Controller (`controller.json`)
 
 A deterministic, data-driven state-machine controller. Time is integer ticks. Phases and weights
@@ -251,8 +265,10 @@ parameter, set from events.
   `is_attacking`. Triggers: `jump`, `land`, `hit`, `fire`, `reload`, `melee`, `die`, `equip`.
   Payloads: `hit_part`, `hit_dir`, `hit_strength`, `seed`. Custom parameters can be declared too.
 * **Layers.** Each layer has a mask (`masks`: bone + weight + recursive), a blend mode (override or
-  `additive`), a weight and an optional `weight_param`. Layers can be **muted or soloed** in the debug
-  panel. A layer whose current state is `"empty": true` contributes nothing.
+  `additive`), a weight and an optional `weight_param`. `"yield_arms": true` multiplies the weight by
+  the hand IK share of the layers below it (their clips owning the arms win: the gun hold). Layers can
+  be **muted or soloed** in the debug panel. A layer whose current state is `"empty": true`
+  contributes nothing.
 * **States.** A state has a `clip` slot or a `tree`, plus:
   * `variants` (alternative clips picked by seed);
   * `loop`;
@@ -285,8 +301,12 @@ The pose from the controller goes through a fixed post-pass (`proc_run`):
 
 1. **Damage additive.** Per-part spring reactions (see DAMAGE.md). They return exactly to zero.
 2. **Pelvis.** Foot-IK pelvis drop and slope/acceleration **lean**.
-3. **Spine.** Aim pitch and yaw distributed over Spine..Head with `procedural.spine.weights`, within
-   `yaw_limit`/`pitch_limit`. Beyond the yaw limit, **turn-in-place** turns the body: procedurally,
+3. **Spine look.** Aim pitch and yaw distributed over Spine..Head, within `yaw_limit`/`pitch_limit`,
+   with one of three profiles (`procedural.spine`, down / up), blended: a gun held (`weights`: the
+   torso turns with the aim); empty hands or a non-gun item (`weights_empty`: 85 % neck and head);
+   a base clip owning the arms - the sprint, a weapon's run clip, a mantle (`weights_run`: the neck
+   and head only). The weights come from the controller (`look_empty` = 1 - the hold layer's share,
+   `look_run` = `ctrl_base_arms_owned`), the same on every machine. Beyond the yaw limit, **turn-in-place** turns the body: procedurally,
    or with turn clips when `turn.mode` is `"clips"`. The body yaw itself is simulated in movement
    (`PlayerMove.body_yaw`, `anim_body_yaw_step`), so it's deterministic and replicated.
 4. **Right arm.** Two-bone IK puts the right palm on the item's `grip_r` socket.

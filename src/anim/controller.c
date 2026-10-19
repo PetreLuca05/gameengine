@@ -247,6 +247,7 @@ bool ctrl_def_load(ControllerDef *def, const char *text, const Skeleton *skel, c
         L->weight = jf(lj, "weight", 1.0f);
         const char *wp = js(lj, "weight_param", NULL);
         L->weight_param = (i16)(wp ? param_ref(&p, wp) : -1);
+        L->yield_arms = jb(lj, "yield_arms", false);
         const cJSON *sj;
         cJSON_ArrayForEach(sj, cJSON_GetObjectItemCaseSensitive(lj, "states")) {
             if (L->state_count >= AC_MAX_STATES) break;
@@ -792,23 +793,48 @@ float ctrl_state_time(const ControllerInst *c, int layer) {
     return (layer >= 0 && layer < c->def->layer_count) ? c->layer[layer].phase : 0;
 }
 
+// A layer's hand IK share this tick (its state's, blended through the transition).
+static float layer_hand_ik(const ControllerInst *c, int li) {
+    const LayerDef *L = &c->def->layers[li];
+    const LayerState *S = &c->layer[li];
+    float cur = state_hand_ik(c, &L->states[S->state]);
+    if (S->blend_total && S->prev_state >= 0) cur = lerpf(state_hand_ik(c, &L->states[S->prev_state]), cur, (float)S->blend_ticks / (float)S->blend_total);
+    return cur;
+}
+
+static bool layer_has_say(const ControllerInst *c, int li) {
+    const LayerState *S = &c->layer[li];
+    return c->def->layers[li].states[S->state].node >= 0 || (S->blend_total && S->prev_state >= 0);   // an empty state has none
+}
+
+static float layer_weight(const ControllerInst *c, const LayerDef *L) { return L->weight * (L->weight_param >= 0 ? c->params[L->weight_param] : 1.0f); }
+
 bool ctrl_hand_ik_weight(const ControllerInst *c, float *w) {
     float out = 1.0f;
-    for (int li = 0; li < c->def->layer_count; li++) {
-        const LayerDef *L = &c->def->layers[li];
-        const LayerState *S = &c->layer[li];
-        float cur = state_hand_ik(c, &L->states[S->state]);
-        if (S->blend_total && S->prev_state >= 0) {
-            float a = (float)S->blend_ticks / (float)S->blend_total;
-            float prev = state_hand_ik(c, &L->states[S->prev_state]);
-            cur = lerpf(prev, cur, a);
-        }
-        float lw = L->weight * (L->weight_param >= 0 ? c->params[L->weight_param] : 1.0f);
-        if (L->states[S->state].node < 0 && (!S->blend_total || S->prev_state < 0)) continue;  // empty state: no say
-        out = fminf(out, lerpf(1.0f, cur, saturate(lw)));
-    }
+    for (int li = 0; li < c->def->layer_count; li++)
+        if (layer_has_say(c, li)) out = fminf(out, lerpf(1.0f, layer_hand_ik(c, li), saturate(layer_weight(c, &c->def->layers[li]))));
     *w = out;
     return out > 0.0f;
+}
+
+float ctrl_base_arms_owned(const ControllerInst *c) { return c->def->layer_count > 0 ? 1.0f - saturate(layer_hand_ik(c, 0)) : 0.0f; }
+
+float ctrl_layer_on(const ControllerInst *c, int li) {
+    if (li < 0 || li >= c->def->layer_count) return 0.0f;
+    const LayerDef *L = &c->def->layers[li];
+    const LayerState *S = &c->layer[li];
+    float cur = L->states[S->state].node >= 0 ? 1.0f : 0.0f;
+    if (S->blend_total && S->prev_state >= 0) {
+        float a = (float)S->blend_ticks / (float)S->blend_total;
+        cur = lerpf(L->states[S->prev_state].node >= 0 ? 1.0f : 0.0f, cur, a * a * (3.0f - 2.0f * a));   // the pose blend's ease
+    }
+    return cur;
+}
+
+int ctrl_layer_index(const ControllerDef *def, const char *name) {
+    for (int i = 0; def && name && i < def->layer_count; i++)
+        if (!strcmp(def->layers[i].name, name)) return i;
+    return -1;
 }
 
 float ctrl_carry_weight(const ControllerInst *c) {
@@ -905,7 +931,11 @@ void ctrl_evaluate(ControllerInst *c, const Skeleton *skel, const ClipLookup *cl
         if (c->mute[li] || (any_solo && !c->solo[li])) continue;
         const LayerDef *L = &d->layers[li];
         const LayerState *S = &c->layer[li];
-        float lw = L->weight * (L->weight_param >= 0 ? c->params[L->weight_param] : 1.0f);
+        float lw = layer_weight(c, L);
+        // A layer that yields to the clips owning the arms below it (the gun hold under a sprint, a
+        // weapon's run clip, a mantle, a reload): its weight x their hand IK share.
+        for (int lj = 0; L->yield_arms && lj < li; lj++)
+            if (layer_has_say(c, lj)) lw *= lerpf(1.0f, layer_hand_ik(c, lj), saturate(layer_weight(c, &d->layers[lj])));
         if (lw <= 0) continue;
         bool has_cur = state_pose(c, skel, cl, L, S->state, S->variant, S->phase, &cur);
         float a = 1.0f;

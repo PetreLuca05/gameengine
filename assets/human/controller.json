@@ -1,5 +1,5 @@
 {
-  "_comment": "Animation controller for the shared human skeleton. Layers evaluate in order: base -> upper -> hit (additive) -> procedural post-pass (spine look, item placement, item-space hand solve, fingers, foot IK) -> ragdoll. Clip names here are SLOTS; anim_sets/*.json map slots to clips. Standard parameters (see src/anim/controller.h): speed, move_x, move_y, is_grounded, is_crouching, is_prone, is_sprinting, is_ads, is_mantling, mantle_t, is_hanging, is_vaulting, vertical_velocity, turn_angle, aim_pitch, aim_yaw, weapon_type, weapon_id, health, limb_status, is_dead, is_attacking; triggers jump, land, hit, fire, reload, melee, die, equip; payloads hit_part, hit_dir, hit_strength, seed.",
+  "_comment": "Animation controller for the shared human skeleton. Layers evaluate in order: base -> upper -> hold (a gun in the hands: the weapon idle on the whole upper body) -> hit (additive) -> procedural post-pass (spine look, item placement, item-space hand solve, fingers, foot IK) -> ragdoll. Clip names here are SLOTS; anim_sets/*.json map slots to clips. Standard parameters (see src/anim/controller.h): speed, move_x, move_y, is_grounded, is_crouching, is_prone, is_sprinting, is_ads, is_mantling, mantle_t, is_hanging, is_vaulting, vertical_velocity, turn_angle, aim_pitch, aim_yaw, weapon_type, weapon_id, health, limb_status, is_dead, is_attacking; triggers jump, land, hit, fire, reload, melee, die, equip; payloads hit_part, hit_dir, hit_strength, seed.",
 
   "params": [
     { "name": "is_downed", "type": "bool", "default": 0 },
@@ -12,6 +12,7 @@
 
   "masks": {
     "upper_body": { "include": [["Spine", 0.25, false], ["Spine1", 0.6, false], ["Spine2", 1.0]] },
+    "upper_hold": { "include": [["Spine", 0.25, false], ["Spine1", 0.6, false], ["Spine2", 1.0]] },
     "arms": { "include": [["LeftShoulder", 1.0], ["RightShoulder", 1.0]] },
     "full": { "include": [["Hips", 1.0]] }
   },
@@ -20,7 +21,7 @@
     {
       "name": "base",
       "default": "locomotion",
-      "_doc": "docs/ANIMATION.md 'Locomotion': idle -> 8-way jog (diagonal clips, no strafe clips yet: the blend space interpolates the diagonals) -> sprint, played at the move speed (speed_match). Jumps: standing (Jump, from its take-off) or running (Jumping, from its take-off), held in the air, landed. Ledges: grab (Jumping To Hanging) -> hang (Hanging Idle) -> climb (Braced Hang To Crouch, the clip carries the height: root_y clip); a mantle / pull-up without a hang is mantle_low (listed sources: an any-state transition would also leave mantle_high). Swim: Treading Water / Swimming. Downed: kneel / crawl. Unbound slots: base-layer states play idle (docs/ANIMATION.md 'Missing clips').",
+      "_doc": "docs/ANIMATION.md 'Locomotion': idle -> 8-way jog (strafe and diagonal clips), played at the move speed (speed_match); sprint is its own state, entered by is_sprinting only (a speed past the run never blends it in: its clip owns the arms). Jumps: standing (Jump, from its take-off) or running (Jumping, from its take-off), held in the air, landed. Ledges: grab (Jumping To Hanging) -> hang (Hanging Idle) -> climb (Braced Hang To Crouch, the clip carries the height: root_y clip); a mantle / pull-up without a hang is mantle_low (listed sources: an any-state transition would also leave mantle_high). Swim: Treading Water / Swimming. Downed: kneel / crawl. Unbound slots: base-layer states play idle (docs/ANIMATION.md 'Missing clips').",
       "states": [
         { "name": "locomotion", "sync": true, "speed_match": true,
           "tree": { "blend1d": "speed", "children": [
@@ -34,8 +35,8 @@
               { "pos": [0, 1], "clip": "run_f_{weapon}", "carry": true }, { "pos": [0, -1], "clip": "run_b" },
               { "pos": [-1, 0], "clip": "run_l" }, { "pos": [1, 0], "clip": "run_r" },
               { "pos": [-0.707, 0.707], "clip": "run_fl" }, { "pos": [0.707, 0.707], "clip": "run_fr" },
-              { "pos": [-0.707, -0.707], "clip": "run_bl" }, { "pos": [0.707, -0.707], "clip": "run_br" } ] } },
-            { "at": 6.8, "clip": "sprint_{weapon}", "hand_ik": false, "carry": true } ] } },
+              { "pos": [-0.707, -0.707], "clip": "run_bl" }, { "pos": [0.707, -0.707], "clip": "run_br" } ] } } ] } },
+        { "name": "sprint", "sync": true, "speed_match": true, "clip": "sprint_{weapon}", "hand_ik": false, "carry": true },
 
         { "name": "crouch", "sync": true, "speed_match": true,
           "tree": { "blend1d": "speed", "children": [
@@ -80,6 +81,7 @@
         { "from": "jump_start", "to": "hang_grab", "when": [["is_hanging", "true"], ["is_dead", "false"]], "duration": 0.12 },
         { "from": "jump_run", "to": "hang_grab", "when": [["is_hanging", "true"], ["is_dead", "false"]], "duration": 0.12 },
         { "from": "locomotion", "to": "hang_grab", "when": [["is_hanging", "true"], ["is_dead", "false"]], "duration": 0.12 },
+        { "from": "sprint", "to": "hang_grab", "when": [["is_hanging", "true"], ["is_dead", "false"]], "duration": 0.12 },
         { "from": "crouch", "to": "hang_grab", "when": [["is_hanging", "true"], ["is_dead", "false"]], "duration": 0.12 },
         { "from": "swim", "to": "hang_grab", "when": [["is_hanging", "true"], ["is_dead", "false"]], "duration": 0.12 },
         { "from": "land", "to": "hang_grab", "when": [["is_hanging", "true"], ["is_dead", "false"]], "duration": 0.12 },
@@ -93,6 +95,7 @@
         { "from": "hang", "to": "locomotion", "when": [["is_hanging", "false"]], "duration": 0.2 },
         { "from": "*", "to": "vault", "when": [["is_vaulting", "true"], ["is_dead", "false"]], "duration": 0.1 },
         { "from": "locomotion", "to": "mantle_low", "when": [["is_mantling", "true"], ["is_vaulting", "false"], ["is_hanging", "false"], ["is_dead", "false"]], "duration": 0.12 },
+        { "from": "sprint", "to": "mantle_low", "when": [["is_mantling", "true"], ["is_vaulting", "false"], ["is_hanging", "false"], ["is_dead", "false"]], "duration": 0.12 },
         { "from": "crouch", "to": "mantle_low", "when": [["is_mantling", "true"], ["is_vaulting", "false"], ["is_hanging", "false"], ["is_dead", "false"]], "duration": 0.12 },
         { "from": "air", "to": "mantle_low", "when": [["is_mantling", "true"], ["is_vaulting", "false"], ["is_hanging", "false"], ["is_dead", "false"]], "duration": 0.12 },
         { "from": "jump_start", "to": "mantle_low", "when": [["is_mantling", "true"], ["is_vaulting", "false"], ["is_hanging", "false"], ["is_dead", "false"]], "duration": 0.12 },
@@ -108,6 +111,12 @@
         { "from": "*", "to": "swim", "when": [["is_swimming", "true"], ["is_dead", "false"], ["is_mantling", "false"], ["is_hanging", "false"]], "duration": 0.35 },
         { "from": "swim", "to": "locomotion", "when": [["is_swimming", "false"]], "duration": 0.35 },
 
+        { "from": "locomotion", "to": "sprint", "when": [["is_sprinting", "true"], ["is_grounded", "true"]], "duration": 0.25 },
+        { "from": "sprint", "to": "jump_run", "when": [["jump", "trigger"]], "duration": 0.08 },
+        { "from": "sprint", "to": "air", "when": [["is_grounded", "false"], ["vertical_velocity", "<", -2.5]], "duration": 0.25 },
+        { "from": "sprint", "to": "crouch", "when": [["is_crouching", "true"]], "duration": 0.25 },
+        { "from": "sprint", "to": "prone", "when": [["is_prone", "true"]], "duration": 0.4 },
+        { "from": "sprint", "to": "locomotion", "when": [["is_sprinting", "false"]], "duration": 0.25 },
         { "from": "locomotion", "to": "jump_run", "when": [["jump", "trigger"], ["speed", ">", 3.0]], "duration": 0.08 },
         { "from": "locomotion", "to": "jump_start", "when": [["jump", "trigger"]], "duration": 0.08 },
         { "from": "crouch", "to": "jump_start", "when": [["jump", "trigger"]], "duration": 0.08 },
@@ -173,6 +182,23 @@
       ]
     },
     {
+      "name": "hold",
+      "_doc": "docs/ANIMATION.md 'Gun hold': a gun in the hands (pistol .. lmg) - the whole upper body plays the weapon's idle (idle_{weapon}), the legs the locomotion; the hands stay on the gun (procedural hold). It yields to the clips that own the arms below it (yield_arms: the sprint, a weapon's own run clip, mantle / hang / death, a reload / equip / melee clip). After 'upper': layers 0 / 1 are replicated.",
+      "mask": "upper_hold",
+      "yield_arms": true,
+      "default": "none",
+      "states": [
+        { "name": "none", "empty": true },
+        { "name": "hold", "clip": "idle_{weapon}" }
+      ],
+      "transitions": [
+        { "from": "none", "to": "hold", "when": [["weapon_type", ">", 0.5], ["weapon_type", "<", 5.5], ["is_dead", "false"]], "duration": 0.2 },
+        { "from": "hold", "to": "none", "when": [["weapon_type", "<", 0.5]], "duration": 0.2 },
+        { "from": "hold", "to": "none", "when": [["weapon_type", ">", 5.5]], "duration": 0.2 },
+        { "from": "hold", "to": "none", "when": [["is_dead", "true"]], "duration": 0.1 }
+      ]
+    },
+    {
       "name": "hit",
       "blend": "additive",
       "weight_param": "hit_clips",
@@ -190,7 +216,11 @@
   ],
 
   "procedural": {
-    "spine": { "weights": [0.18, 0.22, 0.25, 0.15, 0.20], "weights_up": [0.0, 0.02, 0.05, 0.38, 0.55], "yaw_limit": 100, "pitch_limit": 80, "pitch_limit_up": 89 },
+    "spine": { "_doc": "docs/ANIMATION.md 'Spine look': spine, spine1, spine2, neck, head (down / up). A gun held: weights; empty hands: weights_empty (mostly the neck and head); a base clip owning the arms (sprint, a weapon's run clip, mantle): weights_run (the neck and head only).",
+               "weights": [0.18, 0.22, 0.25, 0.15, 0.20], "weights_up": [0.0, 0.02, 0.05, 0.38, 0.55],
+               "weights_empty": [0.03, 0.05, 0.07, 0.38, 0.47], "weights_empty_up": [0.0, 0.0, 0.03, 0.40, 0.57],
+               "weights_run": [0.0, 0.0, 0.0, 0.45, 0.55], "weights_run_up": [0.0, 0.0, 0.0, 0.45, 0.55],
+               "yaw_limit": 100, "pitch_limit": 80, "pitch_limit_up": 89 },
     "turn": { "mode": "procedural", "threshold": 65, "speed": 260, "foot_lock_release": 0.22 },
     "foot_ik": { "ray_up": 0.5, "ray_down": 0.6, "pelvis_max_drop": 0.35, "align": 0.8, "smooth": 18, "foot_height": 0.08 },
     "lean": { "slope": 0.35 }

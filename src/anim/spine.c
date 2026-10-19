@@ -5,6 +5,16 @@
 
 float proc_spine_pitch_weight(const ProcParams *p, int i, float pitch) { return pitch <= 0 ? p->spine_weights[i] : p->spine_weights_up[i]; }
 
+// The look's profile (docs/ANIMATION.md "Spine look"): holding a gun the spine turns with the aim (the
+// main weights); empty hands mostly the neck and head; while a base clip owns the arms (a sprint, a
+// weapon's run clip, a mantle) only the neck and head.
+static float look_weight(const ProcParams *p, const ProcInput *in, int i, bool up) {
+    float m = up ? p->spine_weights_up[i] : p->spine_weights[i];
+    float e = up ? p->spine_weights_empty_up[i] : p->spine_weights_empty[i];
+    float r = up ? p->spine_weights_run_up[i] : p->spine_weights_run[i];
+    return lerpf(lerpf(m, e, saturate(in->look_empty)), r, saturate(in->look_run));
+}
+
 // No ADS term: aiming down the sights never changes the model (docs/CAMERA_HOLDPOINT.md "Rule 1").
 void proc_spine(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     const Skeleton *s = in->skel;
@@ -18,8 +28,8 @@ void proc_spine(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     for (int i = 0; i < 5; i++) {
         int b = bones[i];
         if (b < 0) continue;
-        float w = p->spine_weights[i];
-        float y = yaw * w, pt = pitch * proc_spine_pitch_weight(p, i, pitch);
+        float w = look_weight(p, in, i, false);
+        float y = yaw * w, pt = pitch * look_weight(p, in, i, pitch > 0);
         acc_yaw += y;
         // Yaw about model up, pitch about the (already yawed) lateral axis.
         vec3 lateral = quat_rotate(quat_yaw(acc_yaw), v3(1, 0, 0));

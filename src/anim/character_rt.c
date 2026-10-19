@@ -151,6 +151,10 @@ void charrt_proc_input(const CharRuntime *r, ProcInput *in, Xform root, float dt
     in->hold_style = r->in.weapon_type;
     ctrl_hand_ik_weight(&r->ctrl, &in->hand_ik_weight);
     in->carry_w = ctrl_carry_weight(&r->ctrl);
+    // The spine look's profile: the gun hold layer ("hold": a gun in the hands) and a base clip owning the arms.
+    int hold = ctrl_layer_index(r->ctrl.def, "hold");
+    in->look_empty = hold >= 0 ? 1.0f - ctrl_layer_on(&r->ctrl, hold) : 0.0f;
+    in->look_run = ctrl_base_arms_owned(&r->ctrl);
     in->foot_ik = in->spine = in->turn = in->hold = in->lean = in->damage = true;
     in->lod_w = 1.0f;
     // Hold point camera: the character's eye socket on the Head bone; blend key = held item.

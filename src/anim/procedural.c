@@ -68,6 +68,10 @@ bool proc_params_load(ProcParams *p, const cJSON *root) {
     memcpy(p->spine_weights, sw, sizeof(sw));
     float swu[5] = { 0.0f, 0.02f, 0.05f, 0.38f, 0.55f };
     memcpy(p->spine_weights_up, swu, sizeof(swu));
+    memcpy(p->spine_weights_empty, sw, sizeof(sw));
+    memcpy(p->spine_weights_empty_up, swu, sizeof(swu));
+    memcpy(p->spine_weights_run, sw, sizeof(sw));
+    memcpy(p->spine_weights_run_up, swu, sizeof(swu));
     p->yaw_limit = 100;
     p->pitch_limit = 80;
     p->pitch_limit_up = 89;
@@ -97,7 +101,22 @@ bool proc_params_load(ProcParams *p, const cJSON *root) {
         const cJSON *pr = cJSON_GetObjectItemCaseSensitive(root, "procedural");
         if (pr) {
             const cJSON *sp = cJSON_GetObjectItemCaseSensitive(pr, "spine");
-            if (sp) { jarr(sp, "weights", p->spine_weights, 5); jarr(sp, "weights_up", p->spine_weights_up, 5); p->yaw_limit = jf(sp, "yaw_limit", p->yaw_limit); p->pitch_limit = jf(sp, "pitch_limit", p->pitch_limit); p->pitch_limit_up = jf(sp, "pitch_limit_up", p->pitch_limit_up); }
+            if (sp) {
+                jarr(sp, "weights", p->spine_weights, 5);
+                jarr(sp, "weights_up", p->spine_weights_up, 5);
+                // The profiles default to the main weights.
+                memcpy(p->spine_weights_empty, p->spine_weights, sizeof(p->spine_weights));
+                memcpy(p->spine_weights_empty_up, p->spine_weights_up, sizeof(p->spine_weights_up));
+                memcpy(p->spine_weights_run, p->spine_weights, sizeof(p->spine_weights));
+                memcpy(p->spine_weights_run_up, p->spine_weights_up, sizeof(p->spine_weights_up));
+                jarr(sp, "weights_empty", p->spine_weights_empty, 5);
+                jarr(sp, "weights_empty_up", p->spine_weights_empty_up, 5);
+                jarr(sp, "weights_run", p->spine_weights_run, 5);
+                jarr(sp, "weights_run_up", p->spine_weights_run_up, 5);
+                p->yaw_limit = jf(sp, "yaw_limit", p->yaw_limit);
+                p->pitch_limit = jf(sp, "pitch_limit", p->pitch_limit);
+                p->pitch_limit_up = jf(sp, "pitch_limit_up", p->pitch_limit_up);
+            }
             const cJSON *tu = cJSON_GetObjectItemCaseSensitive(pr, "turn");
             if (tu) {
                 p->turn_threshold = jf(tu, "threshold", p->turn_threshold);

@@ -75,6 +75,11 @@ typedef struct ProcParams {
     float spine_weights[5];    // spine, spine1, spine2, neck, head (sum ~1)
     float spine_weights_up[5]; // pitch weights when looking up: mostly neck / head, so the torso
                                // doesn't lean back (the head stays over the body)
+    // The look's other profiles (docs/ANIMATION.md "Spine look"; absent: the weights above): empty
+    // hands (no gun: mostly the neck and head) and a base clip owning the arms (a sprint, a weapon's
+    // run clip, a mantle: the neck and head only). Down / up as above.
+    float spine_weights_empty[5], spine_weights_empty_up[5];
+    float spine_weights_run[5], spine_weights_run_up[5];
     float yaw_limit, pitch_limit;  // degrees (pitch_limit: looking down)
     float pitch_limit_up;          // degrees, looking up (ADS: the body follows the raised gun)
     // turn in place
@@ -236,6 +241,8 @@ typedef struct ProcInput {
     float hand_ik_weight;      // controller: 0 while reload / melee clips own the hands
     float carry_w;             // controller: the share a weapon's own run clip carries the item in both hands (the
                                // left hand stays on its grip, ctrl_carry_weight)
+    float look_empty;          // 0..1 the spine look's empty-hands profile (no gun held; 0 = the main weights)
+    float look_run;            // 0..1 its run profile (a base clip owns the arms: ctrl_base_arms_owned)
     bool foot_ik, spine, turn, hold, lean, damage;  // per-system enables (LOD + cvars)
     float lod_w;               // weight of the LOD0 systems (foot IK, lean, turn), faded over a pixel band (docs/LOD.md); 1 = full
     vec3 item_kick_pos, item_kick_rot;   // recoil kick applied to the item (aim space, m / deg)
