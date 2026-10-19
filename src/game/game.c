@@ -779,6 +779,7 @@ float game_ads_vis(void) {
 
 void game_frame(float dt) {
     handpose_system_poll();
+    blender_open_poll();   // blender_open's output -> the console (game_blender.c)
     if (!G->world) return;
     game_fire_frame();   // fire_compare driver
     bool ui_blocking = G->menu_open || G->inventory_open || G->container_open || G->bench_open || console_is_open();

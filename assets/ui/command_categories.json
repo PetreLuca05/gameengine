@@ -21,6 +21,7 @@
     ],
     "names": {
         "settings_audit": "system",
+        "blender_open": "rendering",
         "consistency_check": "system",
         "visibility_probe": "rendering",
         "sv_rule": "network",

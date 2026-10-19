@@ -220,6 +220,7 @@ void game_render_init(void) {
     terrain_game_register();
     ground_ref_register();
     items_game_register();
+    blender_open_register();
     weather_register();
     water_register();
     ledge_register();

@@ -10,6 +10,7 @@ engine layers at load. There are no textures (by design: colours, roughness and 
 | Item scripts (the source) | `assets/src/items/<id>.py` (shared: `_parts.py`, `_ar.py`, `_optics.py`, `_scope.py`, `_muzzle.py`, `_extmag.py`, `_light.py`, `_keys.py`, `_boxes.py`, `_gear.py` for the grid inventory's wearables and cases) |
 | Modelling kit | `tools/blender/item_lib.py` |
 | Build (script -> .blend -> .dgim -> validate) | `tools/blender/build_items.py` |
+| Open any model in Blender (items, characters, vehicles, trees, kit...) | `tools/blender/open_models.py` (+ `.bat` / `.sh`), `models_scene.py`, console `blender_open` (see "Open models in Blender") |
 | Export conventions / writer | `tools/blender/item_export.py` |
 | Baking (AO, curvature, dirt, grunge, cavity) | `tools/bake_item/bake_item.py` |
 | Validator | `tools/validate_item/validate_item.py` (ctest `validate_items`) |
@@ -214,6 +215,81 @@ validator checks they exist.
    the PNGs.
 8. If its proportions moved a socket, update the JSON and re-run `test_recoil_ads`, `test_handpose`,
    `tools/tests/sight_align.cfg` and `tools/tests/item_nearplane.cfg`.
+
+## Open models in Blender
+
+`tools/blender/open_models.py` (system Python 3, standard library only) opens any model of the game in the
+Blender window. It builds what is stale headless first, then starts Blender detached, so the terminal
+returns at once. From the repository root:
+
+| Where | Command |
+|---|---|
+| PowerShell / cmd | `tools\blender\open_models.bat rifle` |
+| Git Bash | `tools/blender/open_models.sh rifle` |
+| Any shell | `python tools/blender/open_models.py rifle` |
+| Game console | `blender_open rifle` |
+
+Examples (the same arguments everywhere):
+
+- `open_models rifle`: one item opens its own scene, `assets/src/items/rifle.blend`.
+  - It is built first (`build_items.py --blend-only`: the scene only, the tracked `.dgim` is not touched) when
+    it is missing or older than `rifle.py`, a shared `_*.py` it imports, `item_lib.py` or its weapon /
+    attachment JSON.
+  - A scene saved there exports with `build_items.py --blend <file>`. A later change to its script rebuilds
+    over it: the script stays the source.
+- `open_models rifle att_red_dot hazmat oak`: several models in one window (a combined scene).
+- `open_models all`: every model in one scene, `tools/blender/cache/all.blend`.
+- `open_models all --kind weapon,attachment`, or `open_models weapon`: whole kinds.
+- `open_models "att_*" "kit:wall_int_*"`: globs (quote them in bash). `kind:id` picks between kinds that
+  share an id.
+- `open_models --list` (game: `blender_open list`): every id, by kind.
+- Options:
+  - `--no-open`: build / assemble only.
+  - `--rebuild`: rebuild even when up to date.
+  - `--blender <exe>`: this Blender. Otherwise `$BLENDER`, else the newest install under
+    `Program Files\Blender Foundation` (Steam and `/Applications` too), else `blender` on PATH.
+  - `--verbose`: all of Blender's output.
+- An unknown id stops with close matches (`rifel` -> `rifle, knife, ...`) and exit code 2.
+
+**What it knows** (383 models at the time of writing):
+
+| Kind | Source | Count | Imported as |
+|---|---|---|---|
+| `weapon`, `attachment`, `item` | `assets/src/items/<id>.py` (kind from `catalog.json`) | 10, 15, 44 | the built `.blend` |
+| `character` | `assets/human/skins.json` meshes, `assets/skins/*` | 5 | FBX |
+| `vehicle` | `assets/vehicles/*.gltf` | 6 | glTF |
+| `prop`, `foliage`, `pbr_test` | `assets/models/*.gltf`, `models/foliage`, `models/pbr` | 1, 2, 3 | glTF |
+| `tree` | `assets/treefbx` (Tree It: centimetres, Y up; turned / scaled to Blender's metres, Z up) | 13 | FBX / OBJ |
+| `kit` | `assets/kits/<kit>/*.glb`, or the piece's `src/<piece>.blend` when there is one | 280 | glTF / `.blend` |
+| `anim` | the other `assets/human/*.fbx`: animation clips, armatures without a mesh (not in `all`) | 4 | FBX |
+
+Any other model file under `assets/` turns up as a kind named after its folder. The kit validator's
+broken test pieces (`tests/data/kit_bad`) are left out.
+
+**The combined scene** (`tools/blender/models_scene.py`; cached in `tools/blender/cache/`, git-ignored and outside
+`assets/` so that builds do not copy it; rebuilt when a source or the manifest changes):
+
+- Each model is in its own collection named by its id, under a collection per kind ("Weapons",
+  "Building kit"...).
+- Models lie on the ground in Blender's XY plane: a block per kind, under a heading with its count.
+  - Rows run left to right, spaced by each model's bounds. The kit starts a row per category.
+  - A text label lies under each model (collection "Labels", hide it in one click).
+- Each model hangs under an empty `place_<id>`: move the empty to move the model.
+- The kit's `_LOD1..3` and collision (`UCX_` / `UBX_` / `UCL_`) objects are in the file but hidden.
+- On opening, every 3D view frames the models.
+- It is a viewing copy: edit an item in its own scene (`open_models <id>`), or better its script.
+
+**Timings** (Blender 5.1, this machine):
+
+- Building every item scene from scratch: 84 s, once (0.1 s for ammo .. 15 s for the pistol).
+- Assembling `all` (379 models, 2185 objects, about 290 MB): 8 s.
+- An up-to-date `all` opens without any build.
+
+**In game:** `blender_open <args>` runs the same script in the background. No console window opens and the
+game keeps running. The script's output (builds, errors, "ready") comes into the console as it arrives. It
+needs the source tree (it finds `tools/` through `DG_SOURCE_DIR`) and Python 3 (the `py` launcher, else
+`python`). `blender_open dry <args>` only logs the command line. Test: `tools/tests/blender_open.cfg`.
+It runs `dry`, plus `--list` / `--no-open` runs that never open a window.
 
 ## Tests
 
