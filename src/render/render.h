@@ -587,7 +587,7 @@ typedef struct RenderSight {
     float base_fov;               // the world camera's base FOV (sv_fov): the zoom reference
     float sight_fov;              // the base FOV at the sight's magnification (ads_debug)
     float eye_box, eye_box_depth, eye_relief;
-    float pip_scale;              // PiP resolution / render height
+    float pip_scale;              // PiP resolution / render height: r_scope_pip_scale x the sight's pip_resolution (level-bounded)
     // ADS depth of field (complete only): fixed far focus, near-field (weapon) blur.
     bool ads_dof;
     float dof_focus, dof_fstop, dof_near_blur;
@@ -596,6 +596,10 @@ typedef struct RenderSight {
 void render_set_sight(const RenderSight *s);   // every frame (kind NONE = no sight)
 const RenderSight *render_sight(void);         // what was set this frame
 float render_scope_pip_fov(void);              // last PiP camera FOV (deg), 0 = none
+u32 render_scope_pip_px(float pip_scale);      // PiP target size (px) for a RenderSight.pip_scale: x the render height, 128..2048
+// Last PiP target size (px, 0 = none); *screen_frac (optional): the picture's extent on screen, as a
+// fraction of the view height (x render_height() = the output pixels its texels are spread over).
+u32 render_scope_pip_size(float *screen_frac);
 // Time-of-day sky diagnostics (src/render/sky): SH irradiance in use (CPU copy, a frame late), the
 // luminance of its DC term and of the latest refilter, refilter cycles completed.
 vec3 render_sky_irradiance(vec3 dir);

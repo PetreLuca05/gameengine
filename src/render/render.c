@@ -2327,6 +2327,7 @@ bool render_scope_view(vec3 *eye, vec3 *fwd, float *tan_half, float *size_px) {
 static bool setup_scope_pip(FrameData *fd) {
     const RenderSight *s = &R->sight;
     R->pip_fov = 0;
+    R->pip_size = 0;
     g_scope_lod.valid = false;
     if (s->kind != RSIGHT_SCOPE_PIP || s->ads_t < 0.02f) return false;
     vec3 fwd = v3_norm(s->fwd), up = v3_norm(s->up);
@@ -2343,8 +2344,15 @@ static bool setup_scope_pip(FrameData *fd) {
     float k = fmaxf(s->zoom, 1.0f) * tan_main / fmaxf(tan_base, 1e-4f);
     float tan_half = clampf(1.15f * t_lens / fmaxf(k, 1.0f), tanf(0.25f * DG_DEG2RAD), tanf(30.0f * DG_DEG2RAD));
     R->pip_fov = 2.0f * atanf(tan_half) * DG_RAD2DEG;
-    u32 n = (u32)DG_CLAMP((int)lrintf((float)R->hdr.h * clampf(s->pip_scale, 0.2f, 2.0f)), 128, 2048);
+    // The resolution is per sight (game_sights.c: r_scope_pip_scale x the optic's pip_resolution,
+    // bounded by the fidelity level). The picture spans 2 tan_half x k main-view tangents on screen.
+    u32 n = render_scope_pip_px(s->pip_scale);
+    static u32 logged;
+    if (n != logged) log_debug("scope: PiP %ux%u (pip_scale %.3f x render height %u)", n, n, (double)s->pip_scale, R->hdr.h);
+    logged = n;
     F.pip_size = n;
+    R->pip_size = n;
+    R->pip_screen_frac = tan_half * k / tan_main;
     mat4 view = mat4_look_at(s->objective_pos, v3_add(s->objective_pos, fwd), up);
     mat4 proj = mat4_perspective(2.0f * atanf(tan_half), 1.0f, 0.3f, R->cam.zfar);
     mat4 vp = mat4_mul(proj, view);
@@ -3116,6 +3124,11 @@ void render_camera_cut(void) { R->camera_cut = true; }
 void render_set_sight(const RenderSight *s) { R->sight = *s; }
 const RenderSight *render_sight(void) { return &R->sight; }
 float render_scope_pip_fov(void) { return R->pip_fov; }
+u32 render_scope_pip_px(float pip_scale) { return (u32)DG_CLAMP((int)lrintf((float)R->hdr.h * clampf(pip_scale, 0.2f, 2.0f)), 128, 2048); }
+u32 render_scope_pip_size(float *screen_frac) {
+    if (screen_frac) *screen_frac = R->pip_size ? R->pip_screen_frac : 0.0f;
+    return R->pip_size;
+}
 vec3 render_sky_irradiance(vec3 dir) { return sky_irradiance_cpu(dir); }
 float render_sky_luminance(float *latest) { return sky_sh_luminance(latest); }
 u32 render_sky_refilters(void) { return sky_refilter_count(); }
