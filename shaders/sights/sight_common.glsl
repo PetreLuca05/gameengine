@@ -75,8 +75,9 @@ float reticle_mask(vec2 t, float px, float shape, float thick, float outer) {
         float ring = abs(r - outer) - thick * 0.6;
         a = max(a, 1.0 - smoothstep(-px, px, ring));
     } else {
-        // Fine crosshair, heavy posts beyond the outer radius (duplex); mil dots on the fine part.
-        float lw = max(thick, px * 0.8);
+        // Fine crosshair, heavy posts beyond the outer radius (duplex); mil dots on the fine part. The
+        // fine lines are at least 2.5 px wide: thinner, they broke up into a grey dashed line.
+        float lw = max(thick, px * 1.25);
         float fine = min(abs(t.x), abs(t.y));
         a = 1.0 - smoothstep(lw - px, lw + px, fine);
         float post_w = lw * 3.5;

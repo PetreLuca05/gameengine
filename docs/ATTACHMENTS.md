@@ -50,7 +50,7 @@ Attachment space uses the item convention: -Z points forward (along the barrel),
 
 | Key | Meaning |
 |---|---|
-| `shape` | `dot`, `circle_dot`, `duplex` or `mildot` |
+| `shape` | `dot`, `circle_dot`, `duplex` or `mildot` (the fine crosshair lines at least 2.5 px wide, solid; the scopes' ink black) |
 | `moa` | Dot diameter, or scope line thickness, in MOA |
 | `outer_moa` | Circle or duplex post gap |
 | `color`, `brightness` | Reticle colour and brightness |

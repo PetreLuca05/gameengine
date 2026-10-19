@@ -18,7 +18,7 @@
     "shape": "mildot",
     "moa": 0.35,
     "outer_moa": 24,
-    "color": [0.01, 0.01, 0.01],
+    "color": [0.0, 0.0, 0.0],
     "brightness": 1.0,
     "ffp": false,
     "illuminated": true
