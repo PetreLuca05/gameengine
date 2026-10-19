@@ -46,7 +46,7 @@ u16 anim_net_diff(const AnimNetState *a, const AnimNetState *b) {
     if (a->mantle_t != b->mantle_t) m |= ANS_MANTLE;
     if (a->character_id != b->character_id) m |= ANS_CHAR;
     if (a->death_tick != b->death_tick || a->death_seed != b->death_seed) m |= ANS_DEATH;
-    if (memcmp(a->parts, b->parts, sizeof(a->parts))) m |= ANS_PARTS;
+    if (memcmp(a->parts, b->parts, sizeof(a->parts)) || memcmp(a->worn, b->worn, sizeof(a->worn))) m |= ANS_PARTS;
     if (a->phone_flags != b->phone_flags || a->phone_rot != b->phone_rot) m |= ANS_PHONE;
     return m;
 }
@@ -68,13 +68,15 @@ int anim_net_field_bytes(u16 f) {
     if (f & ANS_CHAR) n += 1;
     if (f & ANS_DEATH) n += 5;
     if (f & ANS_PHONE) n += 5;
-    if (f & ANS_PARTS) n += 2 + ANIM_NET_PART_SLOTS;
+    if (f & ANS_PARTS) n += 2 + ANIM_NET_PART_SLOTS + ANIM_NET_WORN_SLOTS;
     return n;
 }
 
+// The parts' bits, then the worn gear's (bits ANIM_NET_PART_SLOTS..).
 static u16 parts_mask(const AnimNetState *s) {
     u16 m = 0;
     for (int i = 0; i < ANIM_NET_PART_SLOTS; i++) if (s->parts[i]) m |= (u16)(1u << i);
+    for (int i = 0; i < ANIM_NET_WORN_SLOTS; i++) if (s->worn[i]) m |= (u16)(1u << (ANIM_NET_PART_SLOTS + i));
     return m;
 }
 
@@ -107,6 +109,7 @@ void anim_net_write(Writer *w, const AnimNetState *s, u16 f) {
         u16 m = parts_mask(s);
         w_u16(w, m);
         for (int i = 0; i < ANIM_NET_PART_SLOTS; i++) if (m & (1u << i)) w_u8(w, s->parts[i]);
+        for (int i = 0; i < ANIM_NET_WORN_SLOTS; i++) if (m & (1u << (ANIM_NET_PART_SLOTS + i))) w_u8(w, s->worn[i]);
     }
     if (f & ANS_PHONE) { w_u8(w, s->phone_flags); w_u32(w, s->phone_rot); }
 }
@@ -131,6 +134,7 @@ void anim_net_read(Reader *r, AnimNetState *s, u16 *fields) {
     if (f & ANS_PARTS) {
         u16 m = r_u16(r);
         for (int i = 0; i < ANIM_NET_PART_SLOTS; i++) s->parts[i] = (m & (1u << i)) ? r_u8(r) : 0;
+        for (int i = 0; i < ANIM_NET_WORN_SLOTS; i++) s->worn[i] = (m & (1u << (ANIM_NET_PART_SLOTS + i))) ? r_u8(r) : 0;
     }
     if (f & ANS_PHONE) { s->phone_flags = r_u8(r); s->phone_rot = r_u32(r); }
 }

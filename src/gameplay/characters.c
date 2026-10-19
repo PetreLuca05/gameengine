@@ -2,6 +2,7 @@
 #include "gameplay/attachments.h"
 #include "gameplay/aim.h"
 #include "characters.h"
+#include "characters_internal.h"
 #include "net/net.h"
 #include "health.h"
 #include "weapons.h"
@@ -20,6 +21,7 @@
 #include "core/platform.h"
 #include "core/jobs.h"
 #include "assets/assets.h"
+#include "assets/item_mesh.h"
 #include "game/game.h"
 #include "gameplay/revive/revive.h"
 #include "game/game_water.h"
@@ -187,6 +189,7 @@ void characters_register_cvars(void) {
 
 void characters_shutdown_globals(void) {
     pose_cache_free();
+    char_preview_shutdown();
     if (!CG) return;
     for (int k = 0; k < CG->part_count; k++) {
         for (int l = 0; l < CHAR_LOD_COUNT; l++) render_mesh_destroy(CG->parts[k].lod[l]);
@@ -766,6 +769,7 @@ static void capture_net(World *w, CharacterInst *c) {
     n->mantle_t = (u8)DG_CLAMP((int)lrintf(in->mantle_t * 255.0f), 0, 255);
     n->character_id = c->def->net_id;
     memcpy(n->parts, c->parts, sizeof(n->parts));
+    for (int k = 0; k < CWORN_COUNT && k < ANIM_NET_WORN_SLOTS; k++) n->worn[k] = (u8)DG_MIN(c->worn[k], 255);
     if (in->dead) { n->death_tick = c->death_tick; n->death_seed = c->death_seed; }
     else { n->death_tick = 0; n->death_seed = 0; }
     n->phone_flags = in->phone_flags;
@@ -1080,6 +1084,8 @@ void chars_client_receive(World *w, EntityId e, const AnimNetState *s, u32 tick)
     // The host's part selection (all zero = an old / partial state: keep the local pick).
     for (int k = 0; k < CSLOT_COUNT; k++)
         if (s->parts[k]) { memcpy(c->parts, s->parts, sizeof(c->parts)); break; }
+    // The worn gear (a remote player's inventory isn't known here: docs/INVENTORY.md).
+    for (int k = 0; k < CWORN_COUNT && k < ANIM_NET_WORN_SLOTS; k++) c->worn[k] = s->worn[k];
 }
 
 static float lerp_angle(float a, float b, float t) { return wrap_angle(a + wrap_angle(b - a) * t); }
@@ -2114,6 +2120,7 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
 
 static mat4 g_palette[SKM_MAX_BONES];
 static u32 g_part_draws;   // diagnostics: part draws submitted (tests / inspector)
+static u8 g_draw_view;     // RENDER_VIEW_* of the draws being issued (chars_preview_draw: the inventory preview)
 // docs/perf/FINDINGS.md PF-0021: while chars_render queues them, the palettes reserved by draw_part are
 // gathered afterwards on the jobs (each into its own reserved slot).
 typedef struct PalFill { mat4 *dst; const SkeletalMesh *sm; const SkeletonInstance *si; } PalFill;
@@ -2383,7 +2390,8 @@ static void draw_part(const CharacterInst *c, const SkeletonInstance *si, const 
     }
     if (c->phantom && c->recon_flags) { d.flags |= c->recon_flags; d.recon = c->recon; }   // reconstruction dissolve
     // Stable id per character + part + LOD (previous palette -> per-bone velocity for TAA / motion blur).
-    d.object_id = shadow || pe ? 0u : (0x20000000u | ((u32)ENT_INDEX(c->ent) << 8) | ((u32)slot << 4) | id_low);   // a shared pose: velocity from prev_root
+    d.object_id = shadow || pe || g_draw_view ? 0u : (0x20000000u | ((u32)ENT_INDEX(c->ent) << 8) | ((u32)slot << 4) | id_low);   // a shared pose: velocity from prev_root
+    d.view = g_draw_view;
     render_draw_skinned(&d);
     g_part_draws++;
 }
@@ -2415,6 +2423,203 @@ static bool draw_char_fp(CharacterInst *c, const SkeletonInstance *si, bool arms
         draw_part(c, si, gp, mesh, sl, 0, flags, false, (flags & MAT_VIEWMODEL) ? 9u : 8u);
     }
     return any;
+}
+
+// ------------------------------------------------------------------ worn gear
+
+// docs/CHARACTERS.md "Worn gear": each worn item is its detailed mesh (ItemDef.model) rigid on a bone of
+// the character, placed in the bind space of the character's body mesh (a per-bone retargeted skin keeps
+// its own file bind: its head may sit higher or tilted against the Skeleton's, the gear follows the skin).
+// Without "pos" / "rot" in the item's "worn" block it is fitted from the mesh's rest bounds (item space:
+// x right, y up; helmets face -Z, packs carry their straps on -Z) against the body's own shape, measured
+// once per body mesh from its LOD0 vertices by the bone each mostly follows:
+//   head   the crown (bounds' top centre)          -> the skull's top + the liner, over its centre (Head)
+//   chest  the top centre (the shoulder straps)    -> the shoulders' top, centred in the chest's depth (Spine2);
+//          scaled up (<= 1.25) when the chest is deeper than the piece (its plates stay outside the body)
+//   back   the top edge on the body side (-Z),     -> below the shoulders' top, on the back's surface (Spine2)
+//          minus the straps' depth (they wrap the body)
+// Model axes: x right, y up, z back (characters face -Z). Without a body mesh: the Skeleton's bind pose.
+static const int k_worn_role[CWORN_COUNT] = { BR_HEAD, BR_SPINE2, BR_SPINE2 };
+#define WORN_HEAD_PAD 0.02f       // crown above the skull: the 8 mm shell + the pads (m)
+#define WORN_CHEST_UP 0.01f       // chest piece straps above the shoulders' top (m)
+#define WORN_CHEST_CLEAR 0.045f   // a chest piece is at least the chest's depth + this (m): its plates outside
+#define WORN_CHEST_FWD 0.008f     // ... centred this much forward (the front plate clears a chest bending under it)
+#define WORN_BACK_DOWN 0.03f      // pack top below the shoulders' top (m)
+#define WORN_BACK_STRAPS 0.045f   // a pack's straps / hip belt in front of its back panel (m)
+
+typedef struct WornFit {
+    vec3 crown;                   // the skull's top, over its centre
+    float shoulder_y;             // the shoulders' top (clavicles, upper spine)
+    vec3 chest;                   // the chest's centre (x, z) at shoulder_y
+    float back_z;                 // the back's surface (largest z of the spine and the clavicles)
+    float front_z;                // the chest's surface (smallest z of the same)
+} WornFit;
+
+// The body mesh's shape in its bind space (LOD0 vertices by the skeleton bone they mostly follow); false
+// when it has too few head / chest vertices (a part-only mesh): the Skeleton's bind pose is used instead.
+static bool worn_measure(const SkeletalMesh *sm, WornFit *f) {
+    const Skeleton *s = &LIB->skel;
+    if (!sm || !sm->data.lod_count) return false;
+    int head = s->role[BR_HEAD], sp = s->role[BR_SPINE], sp1 = s->role[BR_SPINE1], sp2 = s->role[BR_SPINE2], ls = s->role[BR_L_SHOULDER], rs = s->role[BR_R_SHOULDER];
+    if (head < 0 || sp2 < 0) return false;
+    vec3 hmn = v3s(1e9f), hmx = v3s(-1e9f), cmn = v3s(1e9f), cmx = v3s(-1e9f);
+    float top = -1e9f;
+    int nh = 0, nc = 0;
+    const SkinLod *L = &sm->data.lods[0];
+    for (u32 i = 0; i < L->vcount; i++) {
+        const SkinVertex *v = &L->verts[i];
+        int b = skm_vertex_bone(sm, v);
+        if (b < 0) continue;
+        if (b == head || skel_is_descendant(s, b, head)) {
+            hmn = v3_min(hmn, v->pos);
+            hmx = v3_max(hmx, v->pos);
+            nh++;
+        } else if (b == sp2 || b == sp1 || b == sp || b == ls || b == rs) {   // what a chest piece covers
+            cmn = v3_min(cmn, v->pos);
+            cmx = v3_max(cmx, v->pos);
+            nc++;
+        }
+        if (b == sp2 || b == ls || b == rs) top = fmaxf(top, v->pos.y);
+    }
+    if (nh < 16 || nc < 16) return false;
+    f->crown = v3(0.5f * (hmn.x + hmx.x), hmx.y, 0.5f * (hmn.z + hmx.z));
+    f->shoulder_y = top;
+    f->chest = v3(0.5f * (cmn.x + cmx.x), top, 0.5f * (cmn.z + cmx.z));
+    f->back_z = cmx.z;
+    f->front_z = cmn.z;
+    return true;
+}
+
+// The Skeleton's bind pose (no body mesh): the head-top bone, the upper-arm joints, Spine2 + depths.
+static void worn_measure_skel(WornFit *f) {
+    const Skeleton *s = &LIB->skel;
+    int he = s->role[BR_HEAD_END], la = s->role[BR_L_ARM], ra = s->role[BR_R_ARM], sp2 = s->role[BR_SPINE2];
+    vec3 c = sp2 >= 0 ? s->bind_model[sp2].t : v3(0, 1.3f, 0);
+    f->crown = he >= 0 ? v3_add(s->bind_model[he].t, v3(0, 0.02f, 0)) : v3_add(c, v3(0, 0.45f, 0));
+    f->shoulder_y = la >= 0 && ra >= 0 ? 0.5f * (s->bind_model[la].t.y + s->bind_model[ra].t.y) + 0.05f : c.y + 0.15f;
+    f->chest = v3(c.x, f->shoulder_y, c.z - 0.03f);
+    f->back_z = c.z + 0.09f;
+    f->front_z = c.z - 0.15f;
+}
+
+static struct { int mesh; u32 rev; bool ok; WornFit f; } g_worn_fit[16];
+
+static const WornFit *worn_fit_of(int mesh) {
+    static WornFit skel;
+    static u32 skel_rev = ~0u;
+    for (int k = 0; mesh >= 0 && k < 16; k++)
+        if (g_worn_fit[k].mesh == mesh + 1 && g_worn_fit[k].rev == LIB->revision) return g_worn_fit[k].ok ? &g_worn_fit[k].f : NULL;
+    if (mesh >= 0 && mesh < LIB->mesh_count) {
+        static int next;
+        int k = next++ % 16;
+        g_worn_fit[k].mesh = mesh + 1;
+        g_worn_fit[k].rev = LIB->revision;
+        g_worn_fit[k].ok = worn_measure(&LIB->meshes[mesh], &g_worn_fit[k].f);
+        if (g_worn_fit[k].ok) return &g_worn_fit[k].f;
+    }
+    if (skel_rev != LIB->revision) { worn_measure_skel(&skel); skel_rev = LIB->revision; }
+    return &skel;
+}
+
+// The library mesh the gear fits on: the body part's, else any worn part's (-1: none resolved).
+static int worn_body_mesh(const CharacterInst *c) {
+    if (!c || !CG || c->part_gpu_gen != CG->part_gen) return -1;
+    if (c->part_gpu[CSLOT_BODY]) return CG->parts[c->part_gpu[CSLOT_BODY] - 1].mesh;
+    for (int sl = 0; sl < CSLOT_COUNT; sl++) if (c->part_gpu[sl]) return CG->parts[c->part_gpu[sl] - 1].mesh;
+    return -1;
+}
+
+void chars_set_worn(World *w, int slot, const u16 worn[CWORN_COUNT]) {
+    if (!w || !w->chars || slot < 0 || slot >= MAX_PLAYERS || !w->players[slot].active) return;
+    CharacterInst *c = char_get(w, w->players[slot].ent);
+    if (!c) return;
+    if (worn) memcpy(c->worn, worn, sizeof(c->worn));
+    else memset(c->worn, 0, sizeof(c->worn));
+}
+
+// Worn item `it` in slot `slot` on body mesh `mesh` (-1: the Skeleton): its bone and its transform in
+// that bone's frame (it follows the bone like a socket; the character scale is applied at the draw), its
+// own scale, and (out_model) where its origin sits in the body's bind space.
+static bool worn_rel(const ItemDef *it, int slot, int mesh, int *bone_out, Xform *rel, float *scale, vec3 *out_model) {
+    const Skeleton *s = &LIB->skel;
+    int bone = it->worn.bone[0] ? skel_find_suffix(s, it->worn.bone) : -1;
+    if (bone < 0) bone = s->role[k_worn_role[slot]];
+    if (bone < 0) return false;
+    // The bone's bind in the body's own bind space (the vertices' space): the file bind of a per-bone
+    // retargeted skin, else the Skeleton's.
+    const SkeletalMesh *sm = mesh >= 0 && mesh < LIB->mesh_count ? &LIB->meshes[mesh] : NULL;
+    int mb = sm ? skm_bone_of_skel(sm, bone) : -1;
+    Xform B = mb >= 0 && sm->bones[mb].has_fix ? xf_mul(sm->bones[mb].bind_delta, sm->bones[mb].bind_model) : s->bind_model[bone];
+    B.s = v3(1, 1, 1);
+    float k = it->worn.scale > 0.0f ? it->worn.scale : 1.0f;
+    vec3 rd = v3_scale(it->worn.rot, DG_DEG2RAD);
+    quat r = quat_mul(quat_axis_angle(v3(0, 1, 0), rd.y), quat_mul(quat_axis_angle(v3(1, 0, 0), rd.x), quat_axis_angle(v3(0, 0, 1), rd.z)));
+    vec3 pos;   // the item's origin, body bind space
+    if (it->worn.has_pos) {
+        pos = v3_add(B.t, it->worn.pos);
+    } else {
+        const WornFit *f = worn_fit_of(sm ? mesh : -1);
+        vec3 mn = it->model.has_bounds ? it->model.bmin : v3(0, 0, 0), mx = it->model.has_bounds ? it->model.bmax : v3(0, 0, 0);
+        vec3 c = v3_scale(v3_add(mn, mx), 0.5f), anchor, target;
+        if (slot == CWORN_HEAD) {
+            anchor = v3(c.x, mx.y, c.z);
+            target = v3_add(f->crown, v3(0, WORN_HEAD_PAD, 0));
+        } else if (slot == CWORN_CHEST) {
+            anchor = v3(c.x, mx.y, c.z);
+            target = v3(f->chest.x, f->shoulder_y + WORN_CHEST_UP, f->chest.z - WORN_CHEST_FWD);
+            float depth = mx.z - mn.z;
+            if (!it->worn.has_scale && depth > 0.05f) k = clampf((f->back_z - f->front_z + WORN_CHEST_CLEAR) / depth, 1.0f, 1.25f);
+        } else {
+            anchor = v3(c.x, mx.y, fminf(mn.z + WORN_BACK_STRAPS, c.z));
+            target = v3(f->chest.x, f->shoulder_y - WORN_BACK_DOWN, f->back_z);
+        }
+        pos = v3_sub(target, quat_rotate(r, v3_scale(anchor, k)));
+    }
+    quat bi = quat_conj(B.r);
+    rel->t = quat_rotate(bi, v3_sub(pos, B.t));
+    rel->r = quat_norm(quat_mul(bi, r));
+    rel->s = v3(1, 1, 1);
+    *bone_out = bone;
+    *scale = k;
+    if (out_model) *out_model = v3_sub(pos, B.t);
+    return true;
+}
+
+// The worn gear on a pose (bone world transforms, the character scale included) fitted to body mesh
+// `mesh`; skip: slot bits left out.
+static void draw_worn(const World *w, const u16 *worn, int mesh, const Xform *pose, u32 flags, u32 skip) {
+    if (!w || !w->items || !pose) return;
+    for (int sl = 0; sl < CWORN_COUNT; sl++) {
+        if (!worn[sl] || ((skip >> sl) & 1u)) continue;
+        const ItemDef *it = item_def(w->items, worn[sl]);
+        ItemMesh *m = it && it->model.mesh[0] ? item_mesh_get(it->model.mesh) : NULL;
+        int bone;
+        Xform rel;
+        float k;
+        if (!m || !worn_rel(it, sl, mesh, &bone, &rel, &k, NULL)) continue;
+        Xform b = pose[bone];
+        float sc = b.s.x;
+        vec3 p = v3_add(b.t, quat_rotate(b.r, v3_scale(rel.t, sc)));
+        item_mesh_draw(m, item_mesh_condition(it->model.condition), p, quat_norm(quat_mul(b.r, rel.r)), k * sc, NULL, flags, false);
+    }
+}
+
+// char_worn (tests): the fit of an item in a slot on a character's body mesh (NULL: the Skeleton) as text.
+bool chars_worn_fit(const World *w, const CharacterInst *c, u16 item, int slot, char *out, size_t n) {
+    if (!LIB || !w || !w->items || !item || slot < 0 || slot >= CWORN_COUNT) return false;
+    const ItemDef *it = item_def(w->items, item);
+    int mesh = worn_body_mesh(c), bone;
+    Xform rel;
+    float k;
+    vec3 off;
+    if (!worn_rel(it, slot, mesh, &bone, &rel, &k, &off)) return false;
+    const char *src = mesh >= 0 ? LIB->meshes[mesh].data.source : "the Skeleton", *b = strrchr(src, '/');
+    if (b || (b = strrchr(src, '\\')) != NULL) src = b + 1;
+    const WornFit *f = worn_fit_of(mesh);
+    snprintf(out, n, "%s on %s: origin %+.3f %+.3f %+.3f m from the bone (model axes, bind of %s)%s, rot %.0f %.0f %.0f deg, scale %.2f; body: crown %.3f, shoulders %.3f, chest z %+.3f .. %+.3f",
+             it->id, LIB->skel.names[bone], off.x, off.y, off.z, src, it->worn.has_pos ? "" : ", fitted from the bounds", it->worn.rot.x, it->worn.rot.y, it->worn.rot.z, k,
+             f->crown.y, f->shoulder_y, f->front_z, f->back_z);
+    return true;
 }
 
 // Camera / eye offset produced by the aim pitch bending the spine (Spine, Spine1, Spine2, Neck,
@@ -2882,6 +3087,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
     skel_inst_init(&fp_si, &LIB->skeleton);
     skel_inst_set_pose(&fp_si, world);
     draw_char_fp(c, &fp_si, false, 0);
+    draw_worn(w, c->worn, worn_body_mesh(c), world, MAT_NO_SHADOW, 1u << CWORN_HEAD);   // chest / back gear (the shadow is the body copy's)
     bool arm = false;
     for (int sl = 0; sl < CSLOT_COUNT; sl++) if (c->part_gpu[sl] && CG->parts[c->part_gpu[sl] - 1].arm) arm = true;
     // Driving (docs/VEHICLES.md): the hands on the controls are world geometry (the wheel is drawn
@@ -3138,6 +3344,13 @@ static void draw_char_all(World *w, CharacterInst *c, float alpha, int local_slo
         // Shadows: one LOD coarser than the main draw.
         if (shadow) draw_char(w, c, DG_MIN(lod + 1, CHAR_LOD_COUNT - 1), 0, MAT_SHADOW_ONLY, true);
     }
+    // Worn gear on the drawn pose: the owner's (first person) only casts shadows and shows in phone
+    // cameras (its body's MAT_SELF), the first-person copy is chars_render_local_fp's.
+    if ((c->worn[CWORN_HEAD] | c->worn[CWORN_CHEST] | c->worn[CWORN_BACK]) && !c->shared) {
+        render_mark_self(local);
+        draw_worn(w, c->worn, worn_body_mesh(c), c->pose_draw, local ? MAT_SHADOW_ONLY : 0, 0);
+        render_mark_self(false);
+    }
     // Held item (glued to the right hand).
     if (c->item_valid && !c->dead && (c->item_weapon || c->item_def)) {
         float span = (float)DG_MAX(1, c->interval);
@@ -3379,6 +3592,28 @@ CharacterInst *chars_attach_phantom(World *w, EntityId local_ent, int player_slo
     if (pc) memcpy(c->parts, pc->parts, sizeof(c->parts));
     return c;
 }
+
+// ------------------------------------------------------------------ inventory character preview
+
+// The preview instance (char_preview.c, docs/CHARACTERS.md "Character preview") is a CharacterInst
+// outside w->chars: these give it a player's starting parts and draw it (its own skeleton instance,
+// every part at LOD0) into the preview view only.
+void chars_preview_pick_parts(CharacterInst *c) {
+    ensure_globals();
+    pick_parts(c, 0);
+}
+
+void chars_preview_draw(CharacterInst *c) {
+    ensure_gpu_meshes();
+    u8 sel[CSLOT_COUNT];
+    drawn_selection(c, c->slot, sel);   // the own player: its cl_skin / cl_parts choice at once
+    resolve_parts(c, sel);
+    g_draw_view = RENDER_VIEW_CHAR_PREVIEW;
+    draw_char(NULL, c, 0, 0.0f, 0, false);
+    g_draw_view = RENDER_VIEW_WORLD;
+}
+
+void chars_preview_draw_worn(const World *w, const CharacterInst *c) { draw_worn(w, c->worn, worn_body_mesh(c), c->si->world, 0, 0); }
 
 static const Xform *current_pose(World *w, CharacterInst *c) {
     static Xform pose[ANIM_MAX_BONES];

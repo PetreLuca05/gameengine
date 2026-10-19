@@ -721,6 +721,23 @@ static void update_focus(void) {
 
 // ------------------------------------------------------------------ frame
 
+// The helmet, plate carrier and backpack drawn on the characters (docs/CHARACTERS.md "Worn gear"):
+// the host from every inventory (replicated in the anim state), a client its own.
+static void sync_worn_gear(World *w) {
+    if (!w) return;
+    static const int eq[CWORN_COUNT] = { EQ_HEADWEAR, EQ_BODY_ARMOR, EQ_BACKPACK };
+    for (int s = 0; s < MAX_PLAYERS; s++) {
+        const Player *p = &w->players[s];
+        if (!p->active || (!w->authority && !p->local)) continue;
+        u16 worn[CWORN_COUNT];
+        for (int k = 0; k < CWORN_COUNT; k++) {
+            const InvItem *it = inv_equipped_c(&p->inv.t, eq[k]);
+            worn[k] = it ? it->s.item : 0;
+        }
+        chars_set_worn(w, s, worn);
+    }
+}
+
 // Selection (docs/INVENTORY.md "Selection"): keys 1-3 draw the primary / secondary / holster weapon;
 // the wheel cycles through the ones that hold a weapon. The wheels put a grid item into the hands
 // (INV_SEL_HANDS); when it is used up or leaves the grid, the last weapon comes back.
@@ -797,6 +814,7 @@ void game_frame(float dt) {
         if (lp && lp->sim.move.mode == MOVE_HANG) G->view.yaw = player_hang_clamp_yaw(&lp->sim.move, G->view.yaw);
     }
     if (!ui_blocking && !spectator_controls_input()) handle_selection();
+    sync_worn_gear(G->world);
     spectator_frame(dt);   // spectator controls, death camera -> spectate, free camera
     G->use_pressed_frame = !ui_blocking && input_peek_press(ACT_USE);
     // The interaction may finish inside this frame's tick (pickups vanish): remember its target

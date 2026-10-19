@@ -128,6 +128,7 @@ typedef struct DrawItem {
     u32 object_id;          // stable id of a moving object (0 = static): previous transform -> velocity
     u32 prev_slot;          // renderer internal
     u8 layer;               // 0 .. 7: Unity-style layer (light culling masks, docs/SHADOWS_UNITY_MODEL.md)
+    bool self;              // with MAT_SHADOW_ONLY: the local player's own gear, also drawn by phone cameras (render_mark_self)
 } DrawItem;
 
 #define LIGHT_NO_SHADOW 1u   // PointLight / SpotLight flags: never shadowed (muzzle flashes)
@@ -292,6 +293,9 @@ void render_set_ui_hidden(bool hidden);                           // drop the 2D
 u32 render_frame_index(void);                                     // rendered frames (TAA jitter phase = index % 8)
 void render_set_environment(const RenderEnvironment *env);
 void render_draw(const DrawItem *item);
+// render_draw calls between on / off are the local player's own (DrawItem.self): with MAT_SHADOW_ONLY
+// they cast shadows and show in phone cameras (selfies), like the body's MAT_SELF (worn gear).
+void render_mark_self(bool on);
 
 // Skinned characters: GPU skinning with per-frame bone palettes (SSBO), instanced draws batched
 // by mesh. palette[i] = bone_world[i] * inverse_bind[i] (vertices are in bind model space).
@@ -320,7 +324,11 @@ typedef struct SkinnedDraw {
     // characters) and `root` places it (last frame's `prev_root` for velocity; object_id 0).
     bool rooted;
     mat4 root, prev_root;
+    u8 view;                // RENDER_VIEW_*: the world's passes, or only the inventory character preview
 } SkinnedDraw;
+// SkinnedDraw.view: which passes draw it. The character preview (src/render/char_preview_view.h)
+// is client-only and drawn nowhere else (no world pass, shadow, phone camera or scope).
+enum { RENDER_VIEW_WORLD = 0, RENDER_VIEW_CHAR_PREVIEW = 1 };
 MeshId render_skinned_mesh_create(const SkinVertex *verts, u32 vcount, const u32 *indices, u32 icount);
 void render_draw_skinned(const SkinnedDraw *d);
 // A palette written in place (docs/perf/FINDINGS.md PF-0020): (src, version, variant) name its

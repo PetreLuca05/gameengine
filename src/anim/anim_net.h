@@ -26,12 +26,13 @@ enum AnimNetFields {
     ANS_STATE = 1 << 0, ANS_PHASE = 1 << 1, ANS_START = 1 << 2, ANS_SPEED = 1 << 3, ANS_MOVE = 1 << 4,
     ANS_PITCH = 1 << 5, ANS_YAW = 1 << 6, ANS_BODY = 1 << 7, ANS_FLAGS = 1 << 8, ANS_LIMB = 1 << 9,
     ANS_WEAPON = 1 << 10, ANS_MANTLE = 1 << 11, ANS_CHAR = 1 << 12, ANS_DEATH = 1 << 13,
-    ANS_PARTS = 1 << 14,   // modular part selection: u16 mask of non-empty slots + one u8 per such slot
+    ANS_PARTS = 1 << 14,   // modular part selection + worn gear: u16 mask of non-empty slots (parts, then the worn gear) + one u8 per such slot
     ANS_PHONE = 1 << 15,   // phone flags u8 + rotation u32 (docs/PHONE.md), only while in camera mode
     ANS_ALL = 0xFFFF,
 };
 
 #define ANIM_NET_PART_SLOTS 10      // == CSLOT_COUNT (assets/character.h)
+#define ANIM_NET_WORN_SLOTS 3       // == CWORN_COUNT (gameplay/characters.h): head, chest, back
 
 typedef struct AnimNetState {
     u8 state[2];
@@ -48,6 +49,7 @@ typedef struct AnimNetState {
     u8 mantle_t;
     u8 character_id;
     u8 parts[ANIM_NET_PART_SLOTS];   // part option per slot (CharSlot order; 0 = empty, k = option k - 1)
+    u8 worn[ANIM_NET_WORN_SLOTS];    // worn gear item defs (helmet, plate carrier, backpack; 0 = none; docs/CHARACTERS.md "Worn gear")
     u8 death_seed;
     u32 death_tick;
     u8 phone_flags;   // CHAR_PHONE_* (character_rt.h)

@@ -37,6 +37,9 @@ typedef struct ZombieAI {
 
 typedef struct NetSample { u32 tick; AnimNetState s; } NetSample;
 
+// Worn gear slots (chars_set_worn, docs/CHARACTERS.md "Worn gear").
+typedef enum CharWornSlot { CWORN_HEAD, CWORN_CHEST, CWORN_BACK, CWORN_COUNT } CharWornSlot;
+
 typedef struct CharacterInst {
     EntityId ent;
     const CharacterDef *def;
@@ -169,6 +172,7 @@ typedef struct CharacterInst {
     u8 part_gpu_sel[CSLOT_COUNT];     // selection the cache was built for
     u32 part_gpu_gen;
     SkeletonInstance *si;
+    u16 worn[CWORN_COUNT];            // worn gear item defs drawn on the body (chars_set_worn; cosmetic, every machine)
 } CharacterInst;
 
 typedef struct CharacterSystem {
@@ -217,6 +221,21 @@ CharacterInst *chars_attach_corpse(World *w, EntityId corpse, int owner_slot);
 // Reconstruction display body: the given player's character (definition + modular parts) on a
 // client-local entity, evaluated in an idle pose and drawn with the dissolve (docs/REVIVE.md).
 CharacterInst *chars_attach_phantom(World *w, EntityId local_ent, int player_slot);
+// Worn gear drawn on a player's character (docs/CHARACTERS.md "Worn gear"): item defs (0 = none).
+void chars_set_worn(World *w, int player_slot, const u16 worn[CWORN_COUNT]);   // called by the game every frame (host: from the inventory, clients: replicated)
+// Inventory character preview (docs/CHARACTERS.md "Character preview"; the screen: docs/INVENTORY.md): a second, client-only instance
+// of a player's character (same model and cosmetics, its own pose: the idle clip, empty hands unless
+// held_item), drawn alone into its own RGBA target: transparent background, a fixed studio light rig,
+// front view framed head to mid-thigh. Call once per frame while it is shown (nothing renders on frames
+// it isn't called); returns the texture to draw this frame (0 until one is ready).
+typedef struct CharPreviewIn {
+    int w, h;                    // target size in pixels (the target follows changes)
+    u16 held_item;               // item def in the hands, 0 = empty hands (the default)
+    u8 held_att[ATT_SLOTS];      // its attachments
+    u16 worn[CWORN_COUNT];       // worn gear item defs (head = helmet, chest = plate carrier, back = backpack; 0 none)
+    float yaw;                   // extra turn about the vertical axis (radians; the UI may drag-rotate)
+} CharPreviewIn;
+TextureId chars_preview(World *w, int player_slot, const CharPreviewIn *in);
 // Pelvis + head of a character's current (ragdoll / settled / animated) pose.
 bool chars_body_axis(World *w, EntityId e, vec3 *pelvis, vec3 *head);
 // extract_blood hand IK: [0] where the free hand steadies the body (chest), [1] the needle point (arm / neck).
@@ -351,16 +370,5 @@ extern VehiclePoseHooks g_vehicle_pose;
 extern bool g_chars_force_phys_step;   // client: step physics this tick (vehicle prediction)
 extern bool g_chars_frozen;            // host: the world is frozen (hand pose editor): zombies / NPCs don't simulate
 
-// TEMPORARY (branch inv-simple): the API of branch char-preview, stubbed until it is merged.
-typedef enum CharWornSlot { CWORN_HEAD, CWORN_CHEST, CWORN_BACK, CWORN_COUNT } CharWornSlot;
-void chars_set_worn(World *w, int player_slot, const u16 worn[CWORN_COUNT]);
-typedef struct CharPreviewIn {
-    int w, h;
-    u16 held_item;
-    u8 held_att[ATT_SLOTS];
-    u16 worn[CWORN_COUNT];
-    float yaw;
-} CharPreviewIn;
-TextureId chars_preview(World *w, int player_slot, const CharPreviewIn *in);
 
 #endif

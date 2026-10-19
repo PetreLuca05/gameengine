@@ -1000,6 +1000,14 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
         dg_strcpy(d->hold_style_alt, sizeof(d->hold_style_alt), jstr(hold, "style_landscape", ""));
         d->builtin = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "builtin"));
         d->hands = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "hands"));
+        const cJSON *wn = cJSON_GetObjectItemCaseSensitive(it, "worn");   // docs/CHARACTERS.md "Worn gear"
+        dg_strcpy(d->worn.bone, sizeof(d->worn.bone), jstr(wn, "bone", ""));
+        d->worn.has_pos = cJSON_GetObjectItemCaseSensitive(wn, "pos") != NULL;
+        d->worn.has_rot = cJSON_GetObjectItemCaseSensitive(wn, "rot") != NULL;
+        d->worn.has_scale = cJSON_GetObjectItemCaseSensitive(wn, "scale") != NULL;
+        d->worn.pos = jvec3(wn, "pos", v3(0, 0, 0));
+        d->worn.rot = jvec3(wn, "rot", v3(0, 0, 0));
+        d->worn.scale = jnum(wn, "scale", 1.0f);
         parse_camera(d, cJSON_GetObjectItemCaseSensitive(it, "camera"));
         const cJSON *sk = cJSON_GetObjectItemCaseSensitive(hold, "sockets");
         apply_sockets(&d->sockets, sk);
