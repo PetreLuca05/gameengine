@@ -2,6 +2,7 @@
 
 C11 first-person zombie co-op. SDL3, Vulkan 1.3, Jolt (joltc), ENet, miniaudio, own UI (src/ui/gui).
 Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
+Source in `E:\Deadground` (HDD), builds on the C: SSD: `build*/`, `openable builds/`, `.claude/worktrees/` are junctions to `C:\C\Game\...` (old worktrees call `C:\C\Game\.toolchain`). Never delete `E:\Deadground` or `.claude` recursively: it follows the junctions.
 
 ## Build / run
 - `.toolchain/b.sh`: build `build/` (prints errors + `build exit=N`).
@@ -10,7 +11,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 - Script test: `cd build/bin && ./deadground.exe --test --nosound --log <path> --script <cfg>`.
   - `--log` avoids clobbering the user's log; `--test` skips config load/save.
   - `wait N` counts frames: set `r_maxfps 60`. `screenshot <png>` needs `wait 2` after it.
-- Validation: `export VK_ADD_LAYER_PATH="C:\C\Game\.toolchain\vvl\install\bin"` + `--validation`.
+- Validation: `export VK_ADD_LAYER_PATH="E:\Deadground\.toolchain\vvl\install\bin"` + `--validation`.
 - Two machines: host run in background, client with `+connect 127.0.0.1` before `--script`. See `tools/tests/*_net.sh`.
 - Assets are copied into `build*/bin` at build time: rebuild after JSON edits.
 
