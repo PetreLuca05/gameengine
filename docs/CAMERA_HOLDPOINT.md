@@ -243,7 +243,8 @@ the gun and arms thicker, Wide thinner with more of the arms. Aimed, the arms us
 view axis, so the reticle stays centred. `cl_hands_fov` (dev, locked) overrides the preset.
 
 **Multipliers.** Sprint widens the current FOV's tangent by `1 + cl_sprint_fov · speed / 6` (0.12 at
-full sprint, locked). The fire camera effects look the same at every Field of View (they are authored
+full sprint, locked), and the arms FOV by the same ratio (`game_arms.c` `sprint_widen`: the gun and
+hands zoom out with the world; before 2026-10-20 the Weapon Field of View held them still against it). The fire camera effects look the same at every Field of View (they are authored
 at a 75° vertical view, `FOV_PUNCH_REF`): the FOV punch is the zoom it gives there
 (`tan(37.5°) / tan((75 − punch) / 2)`) at any FOV, the camera kick's pitch / yaw scale by
 `tan(V / 2) / tan(37.5°)` with the world FOV in use (aiming included) so the view moves as far on

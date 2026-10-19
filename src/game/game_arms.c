@@ -138,11 +138,22 @@ void game_arms_init(void) {
 
 float game_arms_hip_fov(void) { return camera_hands_fov(AL.def.weapon_fov); }
 
+// The sprint's widening of the world FOV (camera.c: the hip FOV's tangent x (1 + cl_sprint_fov),
+// smoothed; cam->vm_fov_deg is that hip FOV) as a tangent ratio against Field of View, 1 otherwise.
+static float sprint_widen(const RenderCamera *cam) {
+    float base = camera_base_fov();
+    if (cam->vm_fov_deg <= 1.0f || base <= 1.0f) return 1.0f;
+    return fmaxf(1.0f, tanf(cam->vm_fov_deg * 0.5f * DG_DEG2RAD) / tanf(base * 0.5f * DG_DEG2RAD));
+}
+
 // The arms FOV of this frame: Weapon Field of View (Hor+ like the world FOV, never the world's) plus
-// the state's fov_add; aimed, the sight's own FOV (render_vm_fov_for), the same for every preset.
+// the state's fov_add, widened like the world while sprinting (the gun and hands zoom out with the
+// world instead of holding still against it); aimed, the sight's own FOV (render_vm_fov_for), the
+// same for every preset.
 static float hands_fov(const RenderCamera *cam, float fov_add) {
     RenderCamera hc = *cam;
-    hc.vm_fov_deg = clampf(game_arms_hip_fov() + fov_add, 20.0f, 120.0f);
+    float v = clampf(game_arms_hip_fov() + fov_add, 20.0f, 120.0f);
+    hc.vm_fov_deg = 2.0f * atanf(tanf(v * 0.5f * DG_DEG2RAD) * sprint_widen(cam)) * DG_RAD2DEG;
     return render_vm_fov_for(&hc, 0.0f);
 }
 
