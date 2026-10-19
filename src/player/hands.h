@@ -97,8 +97,12 @@ void hands_set_fire_mech(bool first_person, float slide, vec3 wobble_rot);
 // draws (hands_draw_held*, reset to 1 after) and this frame's first-person item.
 void hands_set_draw_scale(float s);
 void hands_fp_set_item_scale(float s);
-// World-space barrel tip of the local viewmodel weapon (last hands_update). False if no gun.
+// World-space muzzle socket of the local viewmodel weapon (last hands_update; a mounted muzzle
+// device's front face): the muzzle flash. False if no gun.
 bool hands_muzzle(vec3 *pos, vec3 *fwd);
+// The drawn model's barrel tip (1 cm in front of the front-most part's face; a mounted muzzle
+// device's front face): the casing port is placed behind it.
+bool hands_barrel_tip(vec3 *pos, vec3 *fwd);
 // The first-person weapon this frame (viewmodel world space) and its effective definition
 // (attachments applied). False when no weapon is held.
 bool hands_fp_item(vec3 *pos, quat *rot, const struct WeaponDef **wd);

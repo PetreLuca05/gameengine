@@ -213,9 +213,11 @@ left, fire mode, ADS amount and the per-shot seed. The game uses it for:
 
 Hook muzzle-flash variants, brass sounds or animation events here.
 
-The muzzle point is the barrel tip of the weapon model: the front face of its forward-most part,
-derived at load time. For the local player, flashes, tracers and casings start at the viewmodel's
-real barrel. Hitscan traces still start at the eye, so bullets go where the crosshair says.
+The muzzle point is the weapon's muzzle socket (`hold.sockets.muzzle`, placed in the hand pose
+editor, docs/HANDPOSE.md "Muzzle"; a mounted muzzle device's front face replaces it). Without one it
+is the barrel tip of the weapon model: the front face of its forward-most part, derived at load
+time. Shots leave it along the barrel (docs/AIM.md). For the local player the flash sits on the
+viewmodel's muzzle socket; casings leave the ejection port behind the model's barrel tip.
 
 ## Data reference (`data/weapons/<nn>_<id>.json`)
 

@@ -157,7 +157,7 @@ void game_fire_tick(void) {
         vec3 mp, mf;
         vec3 eye = player_eye_pos(&p->sim.move);
         vec3 r = right_from_yaw(p->sim.move.yaw);
-        vec3 port = hands_muzzle(&mp, &mf) ? v3_madd(mp, mf, -0.5f * fmaxf(0.2f, d->fire.length)) : v3_add(eye, v3_add(v3_scale(r, 0.12f), dir_from_angles(p->sim.move.yaw, p->sim.move.pitch)));
+        vec3 port = hands_barrel_tip(&mp, &mf) ? v3_madd(mp, mf, -0.5f * fmaxf(0.2f, d->fire.length)) : v3_add(eye, v3_add(v3_scale(r, 0.12f), dir_from_angles(p->sim.move.yaw, p->sim.move.pitch)));
         fx_shell_ex(v3_madd(port, r, 0.02f), v3_add(v3_scale(r, 2.2f), v3(0, 1.4f, 0)), d->vfx_caliber);
     }
     chars_set_fp_fire(&FA.out, NULL);
