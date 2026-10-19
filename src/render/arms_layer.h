@@ -35,9 +35,9 @@ struct cJSON;
 
 // A rigid placement of the layer in camera space: offset (right, up, forward) m, rotation (pitch,
 // yaw, roll) deg as the hold point's, uniform scale, and degrees added to the arms FOV (hip). The
-// arms camera's own position against the pose eye: cam_pos (right, up, forward m; it moves, never
-// turns) - it frames the arms + item without moving them.
-typedef struct ArmsPose { vec3 offset, rotation; float scale, fov_add; vec3 cam_pos; } ArmsPose;
+// arms camera's own position against the pose eye: cam_pos (right, up, forward m) and a small turn
+// cam_rot (pitch up, yaw right, roll deg; 2026-10-20) - it frames the arms + item without moving them.
+typedef struct ArmsPose { vec3 offset, rotation; float scale, fov_add; vec3 cam_pos, cam_rot; } ArmsPose;
 
 #define ARMS_MAX_ITEMS 64
 typedef struct ArmsItem {

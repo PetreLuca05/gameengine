@@ -93,13 +93,13 @@ static void cmd_save(int argc, const char **argv) {
     game_arms_save(argc > 1 ? argv[1] : NULL);
 }
 
-// arms_layer_set <state> <offset|rotation|scale|fov_add|camera|blend> <x> [y z] [item]
+// arms_layer_set <state> <offset|rotation|scale|fov_add|camera|camera_rot|blend> <x> [y z] [item]
 static void cmd_set(int argc, const char **argv) {
-    if (argc < 4) { log_info("arms_layer_set <state> <offset|rotation|scale|fov_add|camera|blend> <x> [y z] [item]"); return; }
+    if (argc < 4) { log_info("arms_layer_set <state> <offset|rotation|scale|fov_add|camera|camera_rot|blend> <x> [y z] [item]"); return; }
     if (cvar_release_locks()) { log_info("arms_layer_set: dev builds only"); return; }
     int s = holdpoint_state_from_name(argv[1]);
     if (s < 0) { log_info("arms_layer_set: unknown state '%s'", argv[1]); return; }
-    bool vec = !strcmp(argv[2], "offset") || !strcmp(argv[2], "rotation") || !strcmp(argv[2], "camera");
+    bool vec = !strcmp(argv[2], "offset") || !strcmp(argv[2], "rotation") || !strcmp(argv[2], "camera") || !strcmp(argv[2], "camera_rot");
     if (vec && argc < 6) { log_info("arms_layer_set: %s takes x y z", argv[2]); return; }
     const char *item = argc > (vec ? 6 : 4) ? argv[vec ? 6 : 4] : NULL;
     if (!strcmp(argv[2], "blend")) { AL.def.blend[s] = fmaxf(0.0f, (float)atof(argv[3])); return; }
@@ -109,6 +109,7 @@ static void cmd_set(int argc, const char **argv) {
     else if (!strcmp(argv[2], "scale")) p->scale = clampf((float)atof(argv[3]), 0.9f, 1.1f);
     else if (!strcmp(argv[2], "fov_add")) p->fov_add = clampf((float)atof(argv[3]), -20.0f, 20.0f);
     else if (!strcmp(argv[2], "camera")) p->cam_pos = v3((float)atof(argv[3]), (float)atof(argv[4]), (float)atof(argv[5]));
+    else if (!strcmp(argv[2], "camera_rot")) p->cam_rot = v3(clampf((float)atof(argv[3]), -15.0f, 15.0f), clampf((float)atof(argv[4]), -15.0f, 15.0f), clampf((float)atof(argv[5]), -15.0f, 15.0f));
     else { log_info("arms_layer_set: unknown field '%s'", argv[2]); return; }
     log_info("arms_layer_set: %s%s%s %s", holdpoint_state_name(s), item ? " / " : "", item ? item : "", argv[2]);
 }
@@ -130,7 +131,7 @@ void game_arms_init(void) {
     AL.debug = cvar_reg_int("arms_layer_debug", 0, 0, 1, CVAR_LOCKED, "1: log the arms layer every 30 frames");
     cmd_register("arms_layer_reload", cmd_reload, "reload assets/player/arms_layer.json (the first-person arms layer)");
     cmd_register("arms_layer_save", cmd_save, "write the arms layer definition [path] (the source tree's assets/player/arms_layer.json)");
-    cmd_register("arms_layer_set", cmd_set, "arms_layer_set <state> <offset|rotation|scale|fov_add|camera|blend> <x> [y z] [item]: edit the arms layer live");
+    cmd_register("arms_layer_set", cmd_set, "arms_layer_set <state> <offset|rotation|scale|fov_add|camera|camera_rot|blend> <x> [y z] [item]: edit the arms layer live");
     cmd_register("arms_layer_info", cmd_info, "print this frame's arms layer (state, raise, FOVs, the layer move)");
     arms_tuner_init();
     game_arms_load();

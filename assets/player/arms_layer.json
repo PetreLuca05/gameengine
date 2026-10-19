@@ -1,5 +1,5 @@
 {
-	"_comment":	"First-person arms layer (docs/CAMERA_HOLDPOINT.md \"Rule 3\"): the arms + held item drawn with their own camera. Per hold point state (and per item under \"items\"): offset (right, up, forward m), rotation (pitch, yaw, roll deg) and scale (0.9 .. 1.1) about the hold point, fov_add (deg on the Weapon Field of View); in ADS only offset[2] (push), rotation[2] (roll) and scale (about the sight) apply. camera: the arms camera's own position against the eye (right, up, forward m; it moves, never turns), the hip framing (docs/CAMERA_HOLDPOINT.md \"Framing\"); aimed it is back on the eye. equip: the raise from below the view. seam (on: arm vertices near the shoulder blend from the world camera (r0) to the arms camera (r1); off: the arms camera draws only the arms + item). weapon_fov: the Weapon Field of View presets (hip, horizontal deg at 16:9; the layer moves sideways with them so the sight keeps its place on screen). Edit live with arms_tuner.",
+	"_comment":	"First-person arms layer (docs/CAMERA_HOLDPOINT.md \"Rule 3\"): the arms + held item drawn with their own camera. Per hold point state (and per item under \"items\"): offset (right, up, forward m), rotation (pitch, yaw, roll deg) and scale (0.9 .. 1.1) about the hold point, fov_add (deg on the Weapon Field of View); in ADS only offset[2] (push), rotation[2] (roll) and scale (about the sight) apply. camera: the arms camera's own position against the eye (right, up, forward m) and a small turn (rotation: pitch up, yaw right, roll deg: each gun's sight line through the screen centre), the hip framing (docs/CAMERA_HOLDPOINT.md \"Framing\"); aimed it is back on the eye, unturned. equip: the raise from below the view. seam (on: arm vertices near the shoulder blend from the world camera (r0) to the arms camera (r1); off: the arms camera draws only the arms + item). weapon_fov: the Weapon Field of View presets (hip, horizontal deg at 16:9; the layer moves sideways with them so the sight keeps its place on screen). screen: the arms + item picture's size on screen at the hip (scale 0.25 .. 2; 1 aimed) about anchor (screen fractions: x from the left, y from the top, 1 = the bottom edge): bigger or smaller, the same place. Edit live with arms_tuner.",
 	"states":	{
 		"hip":	{
 			"offset":	[0, 0, 0],
@@ -110,7 +110,8 @@
 				"scale":	1,
 				"fov_add":	0,
 				"camera":	{
-					"position":	[0.02370000071823597, -0.0421999990940094, -0.220100000500679]
+					"position":	[0.02370000071823597, -0.0421999990940094, -0.220100000500679],
+					"rotation":	[-0.28999999165534973, 0, 0]
 				}
 			},
 			"sprint":	{
@@ -142,14 +143,14 @@
 			}
 		},
 		"pistol":	{
-			"screen_scale":	1.5,
 			"hip":	{
 				"offset":	[0, 0, 0],
 				"rotation":	[0, 0, 0],
 				"scale":	1,
 				"fov_add":	0,
 				"camera":	{
-					"position":	[0.013299999758601189, -0.02500000037252903, -0.30550000071525574]
+					"position":	[0.013299999758601189, -0.02500000037252903, -0.30550000071525574],
+					"rotation":	[2.2300000190734863, 0, 0]
 				}
 			},
 			"sprint":	{
@@ -178,7 +179,8 @@
 				"camera":	{
 					"position":	[0.013299999758601189, -0.02500000037252903, -0.30550000071525574]
 				}
-			}
+			},
+			"screen_scale":	1.5
 		},
 		"smg":	{
 			"hip":	{
@@ -187,7 +189,8 @@
 				"scale":	1,
 				"fov_add":	0,
 				"camera":	{
-					"position":	[0.03840000182390213, -0.061000000685453415, -0.288100004196167]
+					"position":	[0.03840000182390213, -0.061000000685453415, -0.288100004196167],
+					"rotation":	[-0.270000010728836, 0, 0]
 				}
 			},
 			"sprint":	{
@@ -225,7 +228,8 @@
 				"scale":	1,
 				"fov_add":	0,
 				"camera":	{
-					"position":	[0.033399999141693115, -0.012900000438094139, -0.3684999942779541]
+					"position":	[0.033399999141693115, -0.012900000438094139, -0.3684999942779541],
+					"rotation":	[-3.2599999904632568, 0, 0]
 				}
 			},
 			"sprint":	{
@@ -263,7 +267,8 @@
 				"scale":	1,
 				"fov_add":	0,
 				"camera":	{
-					"position":	[0.036400001496076584, -0.05130000039935112, -0.22110000252723694]
+					"position":	[0.036400001496076584, -0.05130000039935112, -0.22110000252723694],
+					"rotation":	[-2.690000057220459, 0, 0]
 				}
 			},
 			"sprint":	{
@@ -301,7 +306,8 @@
 				"scale":	1,
 				"fov_add":	0,
 				"camera":	{
-					"position":	[0.0331999994814396, -0.049400001764297485, -0.163100004196167]
+					"position":	[0.0331999994814396, -0.049400001764297485, -0.163100004196167],
+					"rotation":	[-1.1799999475479126, 0, 0]
 				}
 			},
 			"sprint":	{
@@ -339,7 +345,8 @@
 				"scale":	1,
 				"fov_add":	0,
 				"camera":	{
-					"position":	[0.030899999663233757, -0.056600000709295273, -0.10869999974966049]
+					"position":	[0.030899999663233757, -0.056600000709295273, -0.10869999974966049],
+					"rotation":	[-1.2100000381469727, 0, 0]
 				}
 			},
 			"sprint":	{
@@ -419,15 +426,15 @@
 		"r0":	0.0599999986588955,
 		"r1":	0.15999999642372131
 	},
-	"arm_cut":	0.2,
 	"znear":	0.00999999977648258,
+	"arm_cut":	0.20000000298023224,
 	"weapon_fov":	{
 		"narrow":	60,
 		"default":	70,
 		"wide":	85
 	},
 	"screen":	{
-		"scale":	0.85,
+		"scale":	0.850000023841858,
 		"anchor":	[0.75, 1]
 	}
 }

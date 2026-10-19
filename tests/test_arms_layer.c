@@ -238,6 +238,31 @@ int main(void) {
         printf("  camera: the view moves (%.2g off), never turns (%.2g), aimed the sight %.2g NDC off the centre\n", e, rot, off);
         arms_layer_defaults(&d);
     }
+    // 7b) The camera's turn (cam_rot, the hip's sight line through the screen centre): it turns the view at
+    //     the hip, and aimed it is gone - the sight exactly on the screen centre.
+    {
+        arms_layer_defaults(&d);
+        arms_layer_edit(&d, HP_HIP, "rifle")->cam_rot = v3(3.0f, -1.5f, 0.0f);
+        arms_layer_edit(&d, HP_ADS, "rifle")->cam_rot = v3(3.0f, -1.5f, 0.0f);   // even if the data had one
+        arms_layer_reset(&st);
+        ArmsLayerIn in = base_in(eye);
+        arms_layer_eval(&d, &st, &in, &out);
+        mat4 eye_view = mat4_fps_view(eye.t, yaw, pitch, 0);
+        float turned = 0;
+        for (int c = 0; c < 3; c++)
+            for (int r = 0; r < 3; r++) turned = fmaxf(turned, fabsf(out.view.m[c * 4 + r] - eye_view.m[c * 4 + r]));
+        CHECK(turned > 0.01f, "camera turn: the hip view did not turn (%g)", turned);
+        arms_layer_reset(&st);
+        in.hp_state = HP_ADS;
+        in.ads_w = 1.0f;
+        in.present = xf_mul(xf_make(v3_sub(v3(0, 0, -0.12f), in.sight), quat_identity()), xf_inverse(in.item_cam));
+        arms_layer_eval(&d, &st, &in, &out);
+        mat4 proj = mat4_perspective(in.fov_hands * DG_DEG2RAD, 16.0f / 9.0f, 0.01f, 100.0f);
+        float off = v2_len(ndc(proj, out.view, xf_point(eye, xf_point(in.item_cam, in.sight))));
+        CHECK(off < 1e-4f, "camera turn: aimed, the sight is %g NDC off the centre", off);
+        printf("  camera turn: the hip view turns (%.3f), aimed the sight %.2g NDC off the centre\n", turned, off);
+        arms_layer_defaults(&d);
+    }
     // 8) Screen size.
     {
         float s = 0.75f, aspect = 16.0f / 9.0f, fa = 62.0f, fw = 70.0f;

@@ -151,7 +151,7 @@ in that camera's space places the drawn arms + item, in this order (`src/render/
 |---|---|
 | present | the move from the drawn item exactly onto the presented one (the presentation hold point), at the hip as aimed (the sight on the view axis, computed, never tuned). The presentation hold point is screen-locked (no soft pitch limit), so the item and the hands keep their place on screen at any view pitch: the body's reach pull at a steep pitch never shows, and no bone moves for it (the forearms' angle still follows the body's elbows). Faded out while a clip owns the hands (reload, equip, sprint) |
 | tuned | `offset` (right, up, forward m), `rotation` (pitch, yaw, roll °) and `scale` (0.9 … 1.1) about the hold point, per hold point state and per item (`items`), blended over the state's `blend`. In ADS only the push along the view axis, the roll and the scale apply, about the sight |
-| camera | the arms camera's own position against the eye, per state / item (`camera.position`, right / up / forward m): it moves, never turns; the hip framing ("Framing" below). Aimed it is back on the eye, weighted by the item's own ADS progress |
+| camera | the arms camera's own position against the eye, per state / item (`camera.position`, right / up / forward m), and a small turn (`camera.rotation`: pitch up, yaw right, roll deg; 2026-10-20) that puts each gun's sight line through the screen centre (after its screen size: pistol +2.2, smg / rifle -0.3, shotgun -2.7, lmg -3.3, dmr / sniper -1.2 deg pitch); the hip framing ("Framing" below). Aimed it is back on the eye and unturned (exactly 0), weighted by the item's own ADS progress |
 | kick | the player's cosmetic "Weapon kick" (`wpn_visual_scale`: the pose's kick shown smaller) + the first-person screen kick |
 | equip | a newly selected item comes up from below the arms frustum to its hold over `equip.time` (0.3 s: the gun is ready then). It starts `equip.pitch` muzzle down and its item length + `equip.margin` under the bottom edge |
 | aim | a rotation about the eye that puts the barrel where the world camera shows the shot: sway, the ADS counter of the camera kick, the arms FOV ≠ world FOV |
@@ -269,7 +269,8 @@ resulting FOVs, the multipliers, the presets and the lateral scale, the command 
 The hip framing matches a Call of Duty: Modern Warfare II screenshot: world Field of View 80, Weapon
 Field of View Default, an iron-sighted rifle at the hip (`docs/fp_framing/reference_mwii_80fov.jpg`,
 the streamer's webcam inset blanked). Only the **arms camera** does it: per item, its own position
-against the eye (it moves, never turns) and the arms FOV. The item and the hands stay where the body
+against the eye (it moves; since 2026-10-20 it also turns a few degrees so the sight line passes through
+the screen centre, never aimed) and the arms FOV. The item and the hands stay where the body
 holds them, the hold points are untouched, no bone moves.
 
 **The reference, measured** (fractions of the width / height from the top left; `assets/player/fp_framing.json`):
@@ -336,7 +337,8 @@ targets; "Camera" rows per state and item; the Weapon Field of View presets.
 **Tests:** `tools/tests/fp_framing.cfg` + `fp_framing_check.py` (the rifle against the reference;
 the same placement at Field of View 100 / 120 and 60° down / up; the sight's place across Narrow /
 Wide; hip → ADS → hip without overshoot; every other gun's hand, near plane and muzzle);
-`ctest -R arms_layer` (the camera moves, never turns, the input untouched, aimed the sight centred).
+`ctest -R arms_layer` (the camera moves and turns at the hip, the input untouched, aimed unturned with the
+sight centred).
 Comparison snapshots: `docs/fp_framing/rifle_fov80_compare.jpg`, `rifle_fov120_compare.jpg`,
 `rifle_fov80_pitch15_compare.jpg`.
 

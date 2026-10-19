@@ -55,6 +55,7 @@ static ArmsPose parse_pose(const cJSON *o, ArmsPose p) {
     p.fov_add = clampf(jf(o, "fov_add", p.fov_add), -20.0f, 20.0f);
     const cJSON *c = jget(o, "camera");
     p.cam_pos = jv3(c, "position", p.cam_pos);
+    p.cam_rot = jv3(c, "rotation", p.cam_rot);
     return p;
 }
 
@@ -116,6 +117,7 @@ static void put_pose(cJSON *o, ArmsPose p) {
     cJSON_AddNumberToObject(o, "fov_add", r4(p.fov_add));
     cJSON *c = cJSON_AddObjectToObject(o, "camera");
     put_v3(c, "position", p.cam_pos);
+    if (v3_len2(p.cam_rot) > 0.0f) put_v3(c, "rotation", p.cam_rot);
 }
 
 char *arms_layer_to_json(const ArmsLayerDef *d) {
@@ -124,8 +126,9 @@ char *arms_layer_to_json(const ArmsLayerDef *d) {
                             "First-person arms layer (docs/CAMERA_HOLDPOINT.md \"Rule 3\"): the arms + held item drawn with their own camera. Per hold point state "
                             "(and per item under \"items\"): offset (right, up, forward m), rotation (pitch, yaw, roll deg) and scale (0.9 .. 1.1) about the hold "
                             "point, fov_add (deg on the Weapon Field of View); in ADS only offset[2] (push), rotation[2] (roll) and scale (about the sight) apply. "
-                            "camera: the arms camera's own position against the eye (right, up, forward m; it moves, never turns), the "
-                            "hip framing (docs/CAMERA_HOLDPOINT.md \"Framing\"); aimed it is back on the eye. equip: the raise from below the view. seam (on: "
+                            "camera: the arms camera's own position against the eye (right, up, forward m) and a small turn (rotation: pitch "
+                            "up, yaw right, roll deg: each gun's sight line through the screen centre), the hip framing (docs/CAMERA_HOLDPOINT.md "
+                            "\"Framing\"); aimed it is back on the eye, unturned. equip: the raise from below the view. seam (on: "
                             "arm vertices near the shoulder blend from the world camera (r0) to the arms camera (r1); off: the arms camera draws only the "
                             "arms + item). "
                             "weapon_fov: the Weapon Field of View presets (hip, horizontal deg at 16:9; the layer moves sideways with them so the sight keeps "
@@ -206,6 +209,7 @@ static ArmsPose pose_lerp(ArmsPose a, ArmsPose b, float t) {
     r.scale = lerpf(a.scale, b.scale, t);
     r.fov_add = lerpf(a.fov_add, b.fov_add, t);
     r.cam_pos = v3_lerp(a.cam_pos, b.cam_pos, t);
+    r.cam_rot = v3_lerp(a.cam_rot, b.cam_rot, t);
     return r;
 }
 
@@ -332,7 +336,8 @@ void arms_layer_eval(const ArmsLayerDef *d, ArmsLayerState *st, const ArmsLayerI
             if (d2 > 1e-8f) cw = clampf(v3_dot(v3_sub(sc, a), d) / d2, 0.0f, 1.0f);
         }
     }
-    mat4 C = mat4_translate(v3_scale(hp_cam_pos(p.cam_pos), -cw));
+    // Its turn (cam_rot: pitch up, yaw right, roll) eases out with the same weight: aimed it looks along the eye.
+    mat4 C = mat4_mul(mat4_from_quat(quat_conj(hp_euler_deg(v3_scale(p.cam_rot, cw)))), mat4_translate(v3_scale(hp_cam_pos(p.cam_pos), -cw)));
     out->cam_w = cw;
     // The screen size follows the same weight: the picture is its own size aimed (the sight centred).
     const ArmsItem *si = in->has_item ? find_item(d, in->item_id) : NULL;

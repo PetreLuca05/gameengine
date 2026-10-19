@@ -109,11 +109,13 @@ void arms_tuner_draw(void) {
                 changed |= frow(ctx, "camera right (m)", &p->cam_pos.x, -0.8f, 0.8f, 0.001f);
                 changed |= frow(ctx, "camera up (m)", &p->cam_pos.y, -0.8f, 0.8f, 0.001f);
                 changed |= frow(ctx, "camera forward (m)", &p->cam_pos.z, -0.8f, 0.8f, 0.001f);
+                changed |= frow(ctx, "camera pitch up (deg)", &p->cam_rot.x, -15.0f, 15.0f, 0.1f);
+                changed |= frow(ctx, "camera yaw right (deg)", &p->cam_rot.y, -15.0f, 15.0f, 0.1f);
             }
             frow(ctx, "blend into (s)", &d->blend[T.state], 0, 1, 0.01f);
             nk_layout_row_dynamic(ctx, S(24), 1);
             if (nk_button_label(ctx, "Reset this state")) {
-                p->offset = p->rotation = p->cam_pos = v3(0, 0, 0);
+                p->offset = p->rotation = p->cam_pos = p->cam_rot = v3(0, 0, 0);
                 p->scale = 1.0f;
                 p->fov_add = 0.0f;
                 changed = true;
