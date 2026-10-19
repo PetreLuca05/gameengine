@@ -289,7 +289,7 @@ void sights_draw(void) {
 // ------------------------------------------------------------------ tests
 
 static void put_weapon(Player *p, u16 item, u8 optic) {
-    InvSlot *s = &p->inv.slots[0];
+    InvSlot *s = inv_dev_sel(&p->inv, &G->items, 0);
     const WeaponDef *wd = item_weapon(&G->items, item);
     memset(s, 0, sizeof(*s));
     s->item = item;
@@ -297,7 +297,7 @@ static void put_weapon(Player *p, u16 item, u8 optic) {
     s->ammo = wd ? (i16)wd->mag_size : 0;
     s->att[ATT_OPTIC] = optic;
     p->inv.revision++;
-    G->hotbar_slot = 0;
+    game_select(0);
 }
 
 static void align_next(void) {

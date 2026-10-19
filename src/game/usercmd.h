@@ -37,15 +37,17 @@ typedef struct UserCmd {
     u8 phone_flags;    // CHAR_PHONE_* (anim/character_rt.h): landscape / driven / recording
     u8 phone_zoom;     // phone camera zoom x 32 (spectators see the same lens)
     // Aim model (docs/AIM.md): the held weapon's muzzle socket in camera space relative to the eye
-    // (mm, from the pose the shooter sees; validated by the host), and the shooter's predicted aim
-    // point distance of its last shot (cm, 0 = none; host discrepancy log).
+    // (mm) of the shooter's gameplay hold pose aimed at this command's aim point P (the hold aim;
+    // validated by the host against its own pose re-aimed at P), and that P's distance along the
+    // camera ray (cm, saturating at 655 m; written every tick a gun is held, 0 = none).
     i16 muzzle_cam[3];
     u16 aim_dist;
     // The first-person camera (the head's "camera" socket) relative to the simulated eye, in the same
     // camera space and units: the camera ray starts where the player's view does (validated by the host).
     i16 eye_cam[3];
     // The barrel's forward axis of the same pose, camera space, unit x 32767 (all zero = none): the
-    // bullet's direction before spread (no convergence on the aim point; validated by the host).
+    // bullet's direction before spread (the pose points it at P; the bullet is never turned; validated
+    // by the host).
     i16 barrel_cam[3];
 } UserCmd;
 

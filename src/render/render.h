@@ -92,6 +92,11 @@ enum MaterialFlags {
 #define MAT_COVER_ID_SHIFT 29u
 #define MAT_COVER_ID(flags) (((flags) >> MAT_COVER_ID_SHIFT) & 7u)
 #define MAT_PBR_MAPS (MAT_MR_TEX | MAT_NORMAL_TEX | MAT_OCCLUSION_TEX | MAT_EMISSIVE_TEX)
+// Item meshes (docs/ITEM_PIPELINE.md, assets/item_mesh.c): Material.roughness = MAT_ROUGHNESS_VERTEX (any
+// negative value) makes the vertex uv the (roughness, metallic) and the vertex colour sqrt(layered albedo)
+// + baked AO (with ao_vertex), so one draw carries every material. A sentinel, not a flag: every flag bit is
+// taken (bit 27, where this started, is MAT_WINDOWS in draw items), and item meshes never use the scalars.
+#define MAT_ROUGHNESS_VERTEX (-1.0f)
 // Terrain chunk geomorph (docs/LOD.md, chunks.c): uv.x = height delta to the next coarser LOD, uv.y = its
 // normal (12 + 12 bit x / z), tex_scale = chunk LOD + 8 x LOD distance (m); lit.vert / shadow_morph.vert.
 #define MAT_TERRAIN_MORPH (1u << 24)
@@ -123,6 +128,7 @@ typedef struct DrawItem {
     u32 object_id;          // stable id of a moving object (0 = static): previous transform -> velocity
     u32 prev_slot;          // renderer internal
     u8 layer;               // 0 .. 7: Unity-style layer (light culling masks, docs/SHADOWS_UNITY_MODEL.md)
+    bool self;              // with MAT_SHADOW_ONLY: the local player's own gear, also drawn by phone cameras (render_mark_self)
 } DrawItem;
 
 #define LIGHT_NO_SHADOW 1u   // PointLight / SpotLight flags: never shadowed (muzzle flashes)
@@ -198,7 +204,9 @@ typedef struct RenderEnvironment {
     float star_brightness, milky_way, night_floor;
     float cloud_cover, cloud_altitude, cloud_scale;
     float cloud_shadow_tau;             // optical depth of a full cloud shadow texel (0 = no cloud shadows)
-    vec2 cloud_offset;                  // wind drift (m)
+    vec2 cloud_offset;                  // wind drift (m; float copy)
+    double cloud_offset_d[2];           // wind drift (m): the sky splits it per noise octave (exact at any distance)
+    float clock_speed;                  // the world clock's speed / the default day's (time_scale; 0 paused)
     float cloud_density;                // weather: layer opacity 0..1 (0 = default 0.92)
     float cloud_softness;               // weather: edge softness 0..1 (fog-like stratus vs crisp cumulus)
     float cloud_darkness;               // weather: storm clouds darken 0..1
@@ -270,6 +278,7 @@ void render_surface_map(const u8 *ids, int n, float origin_x, float origin_z, fl
 // Frame
 bool render_begin_frame(void);
 void render_set_camera(const RenderCamera *cam);
+void render_camera_info(vec3 *pos, float *fov_deg);   // this frame's camera (after overrides): item mesh LODs
 // Classic renderer, last frame's main view: instances per LOD 0..3 and impostors (n[4]), and
 // those in a cross-fade band (drawn twice, docs/LOD.md).
 void render_classic_lod_counts(u32 n[5], u32 *fading);
@@ -284,6 +293,9 @@ void render_set_ui_hidden(bool hidden);                           // drop the 2D
 u32 render_frame_index(void);                                     // rendered frames (TAA jitter phase = index % 8)
 void render_set_environment(const RenderEnvironment *env);
 void render_draw(const DrawItem *item);
+// render_draw calls between on / off are the local player's own (DrawItem.self): with MAT_SHADOW_ONLY
+// they cast shadows and show in phone cameras (selfies), like the body's MAT_SELF (worn gear).
+void render_mark_self(bool on);
 
 // Skinned characters: GPU skinning with per-frame bone palettes (SSBO), instanced draws batched
 // by mesh. palette[i] = bone_world[i] * inverse_bind[i] (vertices are in bind model space).
@@ -312,7 +324,11 @@ typedef struct SkinnedDraw {
     // characters) and `root` places it (last frame's `prev_root` for velocity; object_id 0).
     bool rooted;
     mat4 root, prev_root;
+    u8 view;                // RENDER_VIEW_*: the world's passes, or only the inventory character preview
 } SkinnedDraw;
+// SkinnedDraw.view: which passes draw it. The character preview (src/render/char_preview_view.h)
+// is client-only and drawn nowhere else (no world pass, shadow, phone camera or scope).
+enum { RENDER_VIEW_WORLD = 0, RENDER_VIEW_CHAR_PREVIEW = 1 };
 MeshId render_skinned_mesh_create(const SkinVertex *verts, u32 vcount, const u32 *indices, u32 icount);
 void render_draw_skinned(const SkinnedDraw *d);
 // A palette written in place (docs/perf/FINDINGS.md PF-0020): (src, version, variant) name its
@@ -492,12 +508,23 @@ void render_ui(const UiVertex *verts, u32 vcount, const u32 *indices, u32 icount
 // UI vertex uv ranges select the fragment mode (shaders/ui.frag): [0, 1] textured, +2 SDF text,
 // +4 soft SDF (shadow / glow), uv.x < -0.5 the blurred scene behind the UI (screen space).
 TextureId render_ui_backdrop(void);   // requests the blurred scene this frame; draw it with this texture
+// Offscreen UI (docs/MENU_GLOBE.md "Rendering"): UI draw commands (clip rects in target pixels)
+// into an item view target (render_ui3d_target_create), cleared to `clear` (RGBA8, display-encoded)
+// first, drawn before the backdrop blur and the final pass. backdrop_source: the target covers the
+// screen, so this frame's blurred backdrop is made from it instead of the scene (panels over a
+// full-screen offscreen layer blur what they cover).
+void render_ui_offscreen(TextureId target, u32 clear, const UiVertex *verts, u32 vcount, const u32 *indices, u32 icount, const UiDrawCmd *cmds,
+                         u32 ccount, bool backdrop_source);
+// A single-channel texture (VK_FORMAT_R8_UNORM levels, tightly packed) sampled as (r, r, r, 1).
+TextureId render_texture_create_gray(int w, int h, int levels, const void *data, const size_t *level_sizes);
 // Offscreen item views (inventory preview, icons): parts are unit meshes scaled by 2 * half.
 typedef struct RenderUi3dPart {
     vec3 center; quat rot; vec3 half;
     vec4 color;               // linear albedo
     u32 shape;                // 0 box, 1 cylinder (Y axis)
     float emissive, metallic, highlight;
+    MeshId mesh;              // item mesh part (docs/ITEM_PIPELINE.md): drawn instead of the shape, scaled by half.x,
+                              // with its per-vertex material (color = tint)
 } RenderUi3dPart;
 typedef struct RenderUi3dView {
     TextureId target;         // render_ui3d_target_create
@@ -600,6 +627,11 @@ float render_scope_pip_fov(void);              // last PiP camera FOV (deg), 0 =
 vec3 render_sky_irradiance(vec3 dir);
 float render_sky_luminance(float *latest);
 u32 render_sky_refilters(void);
+u32 render_sky_lut_builds(void);                              // transmittance / multiple-scattering rebuilds
+// Per sun cascade (last compute_matrices): the angle between the light direction its tile was drawn
+// with and that frame's (deg; > 0 only for a kept tile, PF-0028), the turn a kept tile may lag
+// (csm_hold_max_turn, deg), its texel (m), kept. Returns the cascade count.
+int render_shadow_cascade_lag(float lag_deg[4], float allow_deg[4], float texel_m[4], bool held[4]);
 void render_camera_cut(void);                                 // teleport / respawn: reset temporal history
 bool render_capture_hdr(const char *exr_path);                // next frame: linear HDR EXR
 bool render_load_lut(const char *cube_path);                  // grading LUT (.cube); NULL / "" = neutral
@@ -640,6 +672,8 @@ bool render_world_to_screen(vec3 world, vec2 *out_px); // false if behind camera
 vec3 render_viewmodel_to_world(vec3 viewmodel_point);   // same pixel under the world FOV (muzzle flash / tracers)
 float render_vm_fov(void);   // the viewmodel (arms + held item) projection FOV this frame
 mat4 render_view_proj(void);
+mat4 render_view_matrix(void);     // this frame's world -> view
+#define RENDER_VM_ZNEAR 0.01f      // the viewmodel pass's near plane (m; the world's is the camera's znear)
 int render_width(void);
 int render_height(void);
 // LOD / impostor / character LOD decisions measure projected sizes against this height, not the

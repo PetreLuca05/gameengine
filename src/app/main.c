@@ -36,6 +36,7 @@
 #include "net/net.h"
 #include "net/lobby_net.h"
 #include "ui/mainmenu/mainmenu.h"
+#include "ui/globe/globe.h"
 #include "app/video.h"
 #include "assets/assets.h"
 #include <SDL3/SDL.h>
@@ -342,6 +343,7 @@ int main(int argc, char **argv) {
     render_wait_idle();
     lobby_net_shutdown();   // leaves the lobby (others migrate), saves the profile
     game_shutdown();
+    globe_shutdown();       // the Maps tab globe's textures (before the renderer goes)
     assets_shutdown();
     net_shutdown();         // Steam shut down here
     audio_shutdown();

@@ -111,9 +111,9 @@ bool vkp_create_layouts(void) {
     VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &R->mat_layout));
 
     VkDescriptorPoolSize sizes[3] = {
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 24 },   // 5 frame sets per frame slot (FRAME_SET_COUNT)
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_TEXTURES + 512 + MAX_MAT_SETS * 4 },   // frame sets: 23 samplers each; 256 alpha masks
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 80 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 100 },
     };
     VkDescriptorPoolCreateInfo pi = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
     pi.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
@@ -392,6 +392,8 @@ bool vkp_create_pipelines(void) {
     d[PIPE_PREPASS_MASK].frag = "gbuffer_mask.frag";
     d[PIPE_UI] = (PipeDesc){ "ui.vert", "ui.frag", VL_UI, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
                              VK_CULL_MODE_NONE, false, false, true, R->swap_format, VK_FORMAT_UNDEFINED, false, R->layout_ui };
+    d[PIPE_UI_RGBA8] = d[PIPE_UI];
+    d[PIPE_UI_RGBA8].color_format = VK_FORMAT_R8G8B8A8_UNORM;
     d[PIPE_PRECIP] = (PipeDesc){ "precip.vert", "precip.frag", VL_NONE, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
                                  VK_CULL_MODE_NONE, true, false, true, hdr, depth, false, R->layout_lit };
     d[PIPE_UI3D] = (PipeDesc){ "ui3d.vert", "ui3d.frag", VL_MESH, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,

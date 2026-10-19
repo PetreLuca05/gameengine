@@ -386,16 +386,18 @@ static void spawn_hooked(World *w, const KitInst *in, const cJSON *entry) {
     } else if (!strcmp(type, "container")) {
         if (!cJSON_GetObjectItemCaseSensitive(entry, "loot") && !jb(entry, "container", false)) return;   // only stocked furniture is a container
         e = spawn_container_ex(w, v3_sub(pos, v3(0, 0.05f, 0)), yaw, v3(0.05f, 0.05f, 0.02f), false);   // the furniture is the visual
-        int i = (int)ENT_INDEX(e);
+        const char *grid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, "grid"));
+        container_set_root(w, e, grid ? grid : "cabinet");   // furniture: drawers (docs/INVENTORY.md)
+        const char *who = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, "name"));
+        if (!who) who = "furniture";
         const cJSON *it;
-        int slot = 0;
         cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(entry, "loot")) {
-            if (slot >= CONTAINER_SLOTS || !cJSON_IsArray(it)) break;
-            u16 item = item_find(w->items, cJSON_GetStringValue(cJSON_GetArrayItem(it, 0)));
-            if (!item) continue;
-            InvSlot *sl = &w->cont[i].slots[slot++];
-            sl->item = item;
-            sl->count = (u16)(cJSON_GetArraySize(it) > 1 ? cJSON_GetArrayItem(it, 1)->valueint : 1);
+            if (!cJSON_IsArray(it)) continue;
+            const char *id = cJSON_GetStringValue(cJSON_GetArrayItem(it, 0));
+            u16 item = id ? item_find(w->items, id) : 0;
+            if (!item) { log_warn("kit: %s: unknown loot item '%s'", who, id ? id : "?"); continue; }
+            int left = container_add(w, e, item, cJSON_GetArraySize(it) > 1 ? cJSON_GetArrayItem(it, 1)->valueint : 1);
+            if (left > 0) log_warn("kit: %s: %d x %s doesn't fit its '%s' root", who, left, id, grid ? grid : "cabinet");   // test_inventory checks every stocked piece
         }
     }
     const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, "name"));

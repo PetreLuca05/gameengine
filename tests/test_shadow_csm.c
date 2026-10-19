@@ -242,6 +242,84 @@ static void test_snapping(void) {
     CHECK(worst < 0.02f, "edges swim: %.4f texel", worst);
 }
 
+// ------------------------------------------------------------------ a turning light (the sun moving every frame)
+
+// The light turns a little every frame (docs/DAYNIGHT.md "Continuity": the direction is exact,
+// never held): the sub-texel phase of a fixed point near the camera must drift slowly. About the
+// world origin a camera 2 km out sees it jump (|X| x d theta: many texels per frame); about the
+// camera-near pivot it moves (|X - pivot| x d theta) a small fraction of a texel.
+static float phase_drift(vec3 cam, vec3 X, vec3 pivot, bool use_pivot, float dtheta, int frames, u32 tile, float radius) {
+    float worst = 0, fx0 = 0, fy0 = 0;
+    for (int fr = 0; fr <= frames; fr++) {
+        float az = 2.9f + fr * dtheta, el = 0.6f;
+        vec3 L = v3(cosf(el) * sinf(az), sinf(el), cosf(el) * cosf(az));
+        mat4 lv = use_pivot ? csm_light_view_at(L, pivot) : csm_light_view(L);
+        CsmTile t;
+        csm_fit(&lv, cam, radius, tile, radius + 2.0f, &t);
+        float fy, fx = frac_texel(&t, X, tile, &fy);
+        if (fr > 0) {
+            float dx = fabsf(fx - fx0), dy = fabsf(fy - fy0);
+            dx = fminf(dx, 1.0f - dx);
+            dy = fminf(dy, 1.0f - dy);
+            worst = fmaxf(worst, fmaxf(dx, dy));
+        }
+        fx0 = fx, fy0 = fy;
+    }
+    return worst;
+}
+
+static void test_turning_light(void) {
+    printf("shadow_csm: a turning light (camera-near pivot, the far-tile hold rule)\n");
+    const u32 tile = 2048;
+    const float radius = 6.5f, texel = 2.0f * radius / (float)tile;   // ~ cascade 0 at High
+    const float day = 6.6e-5f;   // rad per frame: the sun of the default day (24 min) at 60 fps
+    vec3 cams[2] = { v3(80.0f, 1.7f, 40.0f), v3(1800.0f, 30.0f, -900.0f) };
+    for (int i = 0; i < 2; i++) {
+        vec3 cam = cams[i], X = v3_add(cam, v3(2.0f, -1.7f, -4.0f));
+        vec3 piv = csm_pivot(v3(0, 0, 0), false, cam, CSM_PIVOT_CELL);
+        float origin = phase_drift(cam, X, piv, false, day, 30, tile, radius);
+        float pivot = phase_drift(cam, X, piv, true, day, 30, tile, radius);
+        printf("  camera %.0f m from the origin: per-frame phase drift of a point 4.8 m away: origin pivot %.3f texel, camera pivot %.4f texel (texel %.1f mm)\n",
+               v3_len(cam), origin, pivot, texel * 1000.0f);
+        // 2 km out the float world coordinates themselves carry ~0.1 texel of noise (the shaders' too).
+        CHECK(pivot < (i == 0 ? 0.1f : 0.2f) && pivot < 0.5f * origin, "camera pivot: %.4f texel per frame at the default day (origin %.3f)", pivot, origin);
+        // The pivot's worst case: the camera a whole cell away from it on every axis (|X - P| ~ 25 m:
+        // a smooth 0.25 texel per frame at this texel).
+        vec3 far_piv = v3_sub(cam, v3(CSM_PIVOT_CELL, CSM_PIVOT_CELL * 0.5f, CSM_PIVOT_CELL));
+        float edge = phase_drift(cam, X, far_piv, true, day, 30, tile, radius);
+        CHECK(edge < 0.4f, "camera at the pivot cell's edge: %.4f texel per frame", edge);
+    }
+    {
+        vec3 cam = cams[1], X = v3_add(cam, v3(2.0f, -1.7f, -4.0f));
+        float origin = phase_drift(cam, X, v3(0, 0, 0), false, day, 30, tile, radius);
+        CHECK(origin > 0.25f, "2 km out the origin pivot re-phases the edges every frame (%.3f texel): the reason for the pivot", origin);
+    }
+    // The pivot holds while the camera stays within the cell, then jumps onto it (rounded to 1 m).
+    vec3 pv = csm_pivot(v3(0, 0, 0), false, v3(10.4f, 2.0f, -3.6f), CSM_PIVOT_CELL);
+    CHECK(pv.x == 10.0f && pv.y == 2.0f && pv.z == -4.0f, "pivot placed at (%.1f %.1f %.1f)", pv.x, pv.y, pv.z);
+    vec3 pv2 = csm_pivot(pv, true, v3(10.4f + CSM_PIVOT_CELL - 0.5f, 2.0f, -3.6f), CSM_PIVOT_CELL);
+    CHECK(pv2.x == pv.x, "pivot kept inside the cell (%.1f)", pv2.x);
+    vec3 pv3 = csm_pivot(pv, true, v3(10.4f + CSM_PIVOT_CELL + 0.5f, 2.0f, -3.6f), CSM_PIVOT_CELL);
+    CHECK(pv3.x == roundf(10.4f + CSM_PIVOT_CELL + 0.5f), "pivot moved past the cell (%.1f)", pv3.x);
+    // The far-tile hold rule (PF-0028): the default day keeps a far tile for a frame above ~8 deg,
+    // a time-lapse (time_scale 60: 4e-3 rad per frame) never, and it never allows over 0.02 deg.
+    float c2 = 0.062f;   // Modern cascade 2 texel (m)
+    float hi = csm_hold_max_turn(c2, 30.0f * DG_DEG2RAD), lo = csm_hold_max_turn(c2, 5.0f * DG_DEG2RAD);
+    printf("  hold: cascade 2 (%.1f cm) may lag %.4f deg at 30 deg, %.4f deg at 5 deg; the default day turns %.4f deg per frame, time_scale 60 %.3f\n", c2 * 100.0f,
+           hi * DG_RAD2DEG, lo * DG_RAD2DEG, day * DG_RAD2DEG, 4e-3f * DG_RAD2DEG);
+    CHECK(hi > day && lo < day, "the default day holds at 30 deg, not at 5 deg");
+    CHECK(hi < 4e-3f, "time_scale 60 redraws");
+    CHECK(csm_hold_max_turn(10.0f, 1.2f) <= CSM_HOLD_MAX_TURN_DEG * DG_DEG2RAD * 1.0001f, "capped at %.2f deg", CSM_HOLD_MAX_TURN_DEG);
+    float prev = 0;
+    bool mono = true;
+    for (float e = 0.0f; e < 1.5f; e += 0.01f) {
+        float m = csm_hold_max_turn(c2, e);
+        if (m < prev - 1e-9f) mono = false;
+        prev = m;
+    }
+    CHECK(mono, "the hold allowance grows with the elevation");
+}
+
 // ------------------------------------------------------------------ receiver volume (PF-0006)
 
 static bool rcv_inside(const vec4 *pl, int n, vec3 c, float r) {
@@ -469,6 +547,7 @@ int main(void) {
     test_tables();
     test_fit();
     test_snapping();
+    test_turning_light();
     test_casters();
     test_receivers();
     test_selection();

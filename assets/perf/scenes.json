@@ -9,28 +9,28 @@
       "id": "devroom",
       "desc": "dev room hall, post corner, firing line (the bench_fidelity route)",
       "map": "devroom",
-      "setup": ["time_set 12:00", "time_pause 1", "weather_lock 1", "weather_set clear 0"],
+      "setup": ["time_set 12:00 instant", "time_pause 1", "weather_lock 1", "weather_set clear 0"],
       "camera": [[0, 1.8, 20, 0, -3], [0, 2.0, 2, -30, -4], [-12, 1.8, -14, -57, -5], [-22, 1.8, -24, -90, -3], [-18, 3.0, -5, -180, -6], [-10, 4, 30, -200, -10], [0, 1.8, 20, -360, -3]]
     },
     {
       "id": "horde500",
       "desc": "500 horde zombies converging on a point in the horde yard",
       "map": "devroom",
-      "setup": ["time_set 12:00", "time_pause 1", "weather_lock 1", "weather_set clear 0", "setpos 0 0 62", "spawn_horde 500 30 ring", "horde_target point 0 0 50"],
+      "setup": ["time_set 12:00 instant", "time_pause 1", "weather_lock 1", "weather_set clear 0", "setpos 0 0 62", "spawn_horde 500 30 ring", "horde_target point 0 0 50"],
       "camera": [[0, 8, 85, 0, -18], [25, 10, 70, 40, -22], [30, 12, 45, 90, -25], [0, 14, 20, 180, -28], [-28, 10, 50, 270, -20], [0, 8, 85, 360, -18]]
     },
     {
       "id": "foliage",
       "desc": "vegetation map: trees, grass, ground cover, wind",
       "map": "vegetation",
-      "setup": ["time_set 15:00", "time_pause 1", "weather_lock 1", "weather_set little_cloudy 0"],
+      "setup": ["time_set 15:00 instant", "time_pause 1", "weather_lock 1", "weather_set little_cloudy 0"],
       "orbit": { "radius": 18, "height": 3.5, "pitch": -8 }
     },
     {
       "id": "horde_foliage",
       "desc": "vegetation map: 500 zombies converging on the player through trees, grass and ground cover (the target game: big hordes in dense vegetation)",
       "map": "vegetation",
-      "setup": ["time_set 15:00", "time_pause 1", "weather_lock 1", "weather_set little_cloudy 0", "spawn_horde 500 30 ring", "horde_target players"],
+      "setup": ["time_set 15:00 instant", "time_pause 1", "weather_lock 1", "weather_set little_cloudy 0", "spawn_horde 500 30 ring", "horde_target players"],
       "orbit": { "radius": 22, "height": 6, "pitch": -14 }
     },
     {
@@ -38,7 +38,7 @@
       "desc": "vegetation map, pine forest interior (density 3.6, the densest zone): eye height, looking across the trunks",
       "map": "vegetation",
       "setup": [
-        "time_set 15:00",
+        "time_set 15:00 instant",
         "time_pause 1",
         "weather_lock 1",
         "weather_set little_cloudy 0",
@@ -55,7 +55,7 @@
       "desc": "vegetation map, broadleaf forest interior (density 3.0): eye height",
       "map": "vegetation",
       "setup": [
-        "time_set 15:00",
+        "time_set 15:00 instant",
         "time_pause 1",
         "weather_lock 1",
         "weather_set little_cloudy 0",
@@ -72,7 +72,7 @@
       "desc": "vegetation map, the pine forest's east edge (forest on one side, meadow / trail on the other)",
       "map": "vegetation",
       "setup": [
-        "time_set 15:00",
+        "time_set 15:00 instant",
         "time_pause 1",
         "weather_lock 1",
         "weather_set little_cloudy 0",
@@ -89,7 +89,7 @@
       "desc": "vegetation map, the bush + tall grass meadow in the middle of the valley",
       "map": "vegetation",
       "setup": [
-        "time_set 15:00",
+        "time_set 15:00 instant",
         "time_pause 1",
         "weather_lock 1",
         "weather_set little_cloudy 0",
@@ -106,7 +106,7 @@
       "desc": "vegetation map, the wheat field (south)",
       "map": "vegetation",
       "setup": [
-        "time_set 15:00",
+        "time_set 15:00 instant",
         "time_pause 1",
         "weather_lock 1",
         "weather_set little_cloudy 0",
@@ -123,7 +123,7 @@
       "desc": "vegetation map, the dead forest (west, dead 0.85)",
       "map": "vegetation",
       "setup": [
-        "time_set 15:00",
+        "time_set 15:00 instant",
         "time_pause 1",
         "weather_lock 1",
         "weather_set little_cloudy 0",
@@ -140,7 +140,7 @@
       "desc": "vegetation map, the pond shore (north): the sparse / light area",
       "map": "vegetation",
       "setup": [
-        "time_set 15:00",
+        "time_set 15:00 instant",
         "time_pause 1",
         "weather_lock 1",
         "weather_set little_cloudy 0",
@@ -157,7 +157,7 @@
       "desc": "vegetation map, from the south rim over the whole valley (the most foliage in view)",
       "map": "vegetation",
       "setup": [
-        "time_set 15:00",
+        "time_set 15:00 instant",
         "time_pause 1",
         "weather_lock 1",
         "weather_set little_cloudy 0",
@@ -199,7 +199,7 @@
       "desc": "vegetation map: 500 zombies converging through the pine forest interior",
       "map": "vegetation",
       "setup": [
-        "time_set 15:00",
+        "time_set 15:00 instant",
         "time_pause 1",
         "weather_lock 1",
         "weather_set little_cloudy 0",
@@ -218,7 +218,7 @@
       "desc": "vegetation map: 500 zombies converging across the meadow",
       "map": "vegetation",
       "setup": [
-        "time_set 15:00",
+        "time_set 15:00 instant",
         "time_pause 1",
         "weather_lock 1",
         "weather_set little_cloudy 0",
@@ -236,28 +236,28 @@
       "id": "water_weather",
       "desc": "water yard in rain: water surfaces, wet shading, precipitation, rain occlusion",
       "map": "wateryard",
-      "setup": ["time_set 17:00", "time_pause 1", "weather_lock 1", "weather_set rain 0"],
+      "setup": ["time_set 17:00 instant", "time_pause 1", "weather_lock 1", "weather_set rain 0"],
       "orbit": { "radius": 14, "height": 4, "pitch": -12 }
     },
     {
       "id": "night_lights",
       "desc": "dev room at night: every local light, point / spot shadows, moon, no sun cascades",
       "map": "devroom",
-      "setup": ["time_set 23:30", "time_pause 1", "weather_lock 1", "weather_set clear 0"],
+      "setup": ["time_set 23:30 instant", "time_pause 1", "weather_lock 1", "weather_set clear 0"],
       "camera": [[0, 1.8, 20, 0, -3], [0, 2.0, 2, -30, -4], [-12, 1.8, -14, -57, -5], [-50, 2.0, -5, -150, -5], [-50, 2.0, 18, -200, -6], [0, 1.8, 20, -360, -3]]
     },
     {
       "id": "vehicle_yard",
       "desc": "vehicle yard with a car and a motorbike",
       "map": "devroom",
-      "setup": ["time_set 10:00", "time_pause 1", "weather_lock 1", "weather_set clear 0", "setpos -140 0 10", "spawn_vehicle car 6", "spawn_vehicle moto 10"],
+      "setup": ["time_set 10:00 instant", "time_pause 1", "weather_lock 1", "weather_set clear 0", "setpos -140 0 10", "spawn_vehicle car 6", "spawn_vehicle moto 10"],
       "camera": [[-140, 3, 22, 0, -10], [-128, 3, 8, 90, -12], [-140, 4, -6, 180, -14], [-152, 3, 8, 270, -12], [-140, 3, 22, 360, -10]]
     },
     {
       "id": "sky_static",
       "desc": "dev room yard, a still camera (integer keys), no cloud layer: passes with unchanged inputs (R02)",
       "map": "devroom",
-      "setup": ["time_set 15:00", "time_pause 1", "weather_lock 1", "weather_set clear 0", "weather_clouds 0"],
+      "setup": ["time_set 15:00 instant", "time_pause 1", "weather_lock 1", "weather_set clear 0", "weather_clouds 0"],
       "camera": [[0, 2, 30, 0, 4], [0, 2, 30, 0, 4]]
     }
   ],

@@ -10,5 +10,6 @@
   "weather": "clear",
   "dev": true,
   "order": 91,
-  "description": "The whole dev room (hall, yards, lanes, ranges, pool, vehicles, fabricator) at its own coordinates on flat ground in the vegetation valley: forests, a pond, a meadow and a wheat field around it."
+  "description": "The whole dev room (hall, yards, lanes, ranges, pool, vehicles, fabricator) at its own coordinates on flat ground in the vegetation valley: forests, a pond, a meadow and a wheat field around it.",
+  "globe": { "place": "Medgidia", "lon": 28.272, "lat": 44.25, "region": "ro_ct" }
 }

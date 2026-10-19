@@ -64,6 +64,23 @@ These are host-authoritative and replicated in `AnimNetState.limb_status`:
 | `LIMB_LEGS` | a leg / foot hit on a zombie | moves at 45 % speed for 4 s |
 | `LIMB_ARMS` | an arm / hand hit on a player | +1.2° weapon spread for 3 s (`chars_limb_spread`) |
 
+## Armor
+
+Armor points sit in the `Health` component (`armor`, `max_armor`; `ARMOR_ABSORB` 0.6 of every hit
+until it runs out, falls and drowning excepted).
+- **Plates:** an Armor Plate (`"armor": 50`) is one plate (`ARMOR_PER_PLATE`).
+  - Without a plate carrier a player holds `ARMOR_BASE_PLATES` (1): `max_armor` 50.
+  - With one in the body armor slot, its `"plates"` (4): `max_armor` 200.
+  - The HUD draws one bar segment per plate.
+  - Using a plate with the armor full is refused ("Armor full: a plate carrier holds 4 plates").
+- **The carrier holds its plates:** `health_sync_armor`, on the host every tick, keeps the armor
+  above the base plate in the worn carrier's `InvSlot.ammo`.
+  - Taken off, dropped or looted from a corpse, the carrier keeps them; armor drops to at most 1 plate.
+  - Put on, they come back on top of the base plate.
+- **Helmet:** a head hit loses `HELMET_ABSORB` (half) of its damage to a worn helmet while its
+  durability lasts. The helmet loses the absorbed points.
+- `max_armor` is replicated with `NF_HP` (protocol 34).
+
 ## Hit reactions
 
 Every hit applies a **procedural additive reaction** at the start of the post-pass, before the hold

@@ -1,10 +1,9 @@
-// Game UI (docs/UI.md): the layout engine at 16:9 / 21:9 / 4:3 (+ 720p, 4K), the inventory drag
-// and drop state machine, stack merge math, attachment compatibility and mount / unmount,
-// client prediction + reconcile of intents, and an icon for every item. Run from the build
+// Game UI (docs/UI.md): the layout engine at 16:9 / 21:9 / 4:3 (+ 720p, 4K) and an icon for every
+// item. The inventory (rules, intents, drag and drop, reconcile) has its own tests:
+// test_inventory.c, test_inventory_ui.c (docs/INVENTORY.md). Run from the build
 // output directory (data/, assets/).
 #include "ui/gui/gui_layout.h"
-#include "ui/inv_dragdrop.h"
-#include "gameplay/inv_ops.h"
+#include "gameplay/items.h"
 #include "gameplay/attachments.h"
 #include "core/engine.h"
 #include "core/platform.h"
@@ -120,350 +119,7 @@ static void test_layout_pause(void) {
     CHECK(!gui_layout_parse("{\"nodes\":[{\"id\":\"a\",\"parent\":\"nope\"}]}", n, 8, &c2, err, sizeof(err)) && strstr(err, "nope"), "unknown parent reported");
 }
 
-// ------------------------------------------------------------------ inventory
-
 static ItemDB g_db;
-
-static u16 item(const char *id) {
-    u16 i = item_find(&g_db, id);
-    CHECK(i != ITEM_NONE, "item %s exists", id);
-    return i;
-}
-
-static void put(Inventory *inv, int slot, const char *id, int count) {
-    memset(&inv->slots[slot], 0, sizeof(InvSlot));
-    inv->slots[slot].item = item(id);
-    inv->slots[slot].count = (u16)count;
-    const WeaponDef *wd = item_weapon(&g_db, inv->slots[slot].item);
-    if (wd) inv->slots[slot].ammo = (i16)wd->mag_size;
-}
-
-static InvOp mk(int type, int a, int b, int c, int count) {
-    InvOp o;
-    memset(&o, 0, sizeof(o));
-    o.type = (u8)type; o.a = (u8)a; o.b = (u8)b; o.c = (u8)c; o.count = (u16)count;
-    return o;
-}
-
-static void test_merge(void) {
-    // ammo_rifle stacks to 90.
-    u16 ammo = item("ammo_rifle");
-    int ms = item_def(&g_db, ammo)->max_stack;
-    InvSlot a = { ammo, 60, 0, { 0 }, 0 }, b = { ammo, 50, 0, { 0 }, 0 };
-    int moved = inv_merge(&a, &b, &g_db, 0);
-    CHECK(moved == ms - 60 && a.count == ms && b.count == 50 - (ms - 60), "merge fills the stack, the remainder stays (%d moved, %d left)", moved, b.count);
-    InvSlot e = { 0 }, c = { ammo, 40, 0, { 0 }, 0 };
-    moved = inv_merge(&e, &c, &g_db, 15);
-    CHECK(moved == 15 && e.count == 15 && c.count == 25 && e.item == ammo, "partial move into an empty slot");
-    InvSlot d = { ammo, 10, 0, { 0 }, 0 }, f = { item("scrap"), 5, 0, { 0 }, 0 };
-    CHECK(inv_merge(&f, &d, &g_db, 0) == 0 && d.count == 10, "different items never merge");
-    InvSlot g = { ammo, 7, 0, { 0 }, 0 }, h = { ammo, 3, 0, { 0 }, 0 };
-    inv_merge(&g, &h, &g_db, 0);
-    CHECK(g.count == 10 && h.item == ITEM_NONE && h.count == 0, "an emptied source slot is cleared");
-    // Totals are conserved for any pair of counts.
-    int bad = 0;
-    for (int x = 1; x <= ms; x += 7)
-        for (int y = 1; y <= ms; y += 5)
-            for (int n = 0; n <= 3; n++) {
-                InvSlot p = { ammo, (u16)x, 0, { 0 }, 0 }, q = { ammo, (u16)y, 0, { 0 }, 0 };
-                inv_merge(&p, &q, &g_db, n * 13);
-                if (p.count + q.count != x + y || p.count > ms) bad++;
-            }
-    CHECK(bad == 0, "merge conserves the total and respects the stack size (%d bad)", bad);
-
-    Inventory inv;
-    memset(&inv, 0, sizeof(inv));
-    put(&inv, 9, "ammo_rifle", 80);
-    put(&inv, 10, "ammo_rifle", 30);
-    CHECK(inv_op_apply(&inv, &g_db, &(InvOp){ IOP_MOVE, 10, 9, 0, 0, 0 }, NULL) == IOR_OK && inv.slots[9].count == 90 && inv.slots[10].count == 20, "move merges, remainder stays");
-    CHECK(inv_op_apply(&inv, &g_db, &(InvOp){ IOP_MOVE, 10, 9, 0, 0, 0 }, NULL) == IOR_OK && inv.slots[9].count == 20 && inv.slots[10].count == 90, "full target: swap");
-    put(&inv, 11, "scrap", 9);
-    CHECK(inv_op_apply(&inv, &g_db, &(InvOp){ IOP_SPLIT, 11, 255, 0, 0, 0 }, NULL) == IOR_OK && inv.slots[11].count == 5, "split leaves the bigger half");
-    int split_to = -1;
-    for (int i = 0; i < INV_SLOTS; i++) if (i != 11 && inv.slots[i].item == item("scrap")) split_to = i;
-    CHECK(split_to >= 0 && inv.slots[split_to].count == 4, "split half in a free slot");
-    CHECK(inv_op_apply(&inv, &g_db, &(InvOp){ IOP_MOVE, 11, 9, 0, 2, 0 }, NULL) == IOR_INVALID, "a partial stack can't swap with another item");
-    InvOpEffect fx;
-    CHECK(inv_op_apply(&inv, &g_db, &(InvOp){ IOP_DROP, 11, 0, 0, 2, 0 }, &fx) == IOR_OK && fx.dropped.count == 2 && inv.slots[11].count == 3, "drop part of a stack");
-    put(&inv, 2, "medkit", 2);
-    CHECK(inv_op_apply(&inv, &g_db, &(InvOp){ IOP_USE, 2, 0, 0, 0, 0 }, &fx) == IOR_OK && fx.used_item == item("medkit") && inv.slots[2].count == 1, "use a consumable");
-    CHECK(inv_op_apply(&inv, &g_db, &(InvOp){ IOP_USE, 9, 0, 0, 0, 0 }, &fx) == IOR_NOT_USABLE, "ammo can't be used");
-    // Quick move: hotbar -> backpack merges into an existing stack first.
-    memset(&inv, 0, sizeof(inv));
-    put(&inv, 3, "scrap", 6);
-    put(&inv, 15, "scrap", 18);
-    CHECK(inv_op_apply(&inv, &g_db, &(InvOp){ IOP_QUICK_MOVE, 3, 0, 0, 0, 0 }, NULL) == IOR_OK && inv.slots[15].count == 20 && inv.slots[3].item == 0,
-          "quick move merges into the backpack stack, the remainder goes to a free slot");
-    int scrap_total = 0;
-    for (int i = 0; i < INV_SLOTS; i++) if (inv.slots[i].item == item("scrap")) scrap_total += inv.slots[i].count;
-    CHECK(scrap_total == 24, "quick move conserves the count (%d)", scrap_total);
-    // Equip from the backpack: the first empty hotbar slot.
-    memset(&inv, 0, sizeof(inv));
-    put(&inv, 0, "rifle", 1);
-    put(&inv, 20, "pistol", 1);
-    CHECK(inv_op_apply(&inv, &g_db, &(InvOp){ IOP_EQUIP, 20, 0, 0, 0, 0 }, NULL) == IOR_OK && inv.slots[1].item == item("pistol"), "equip into the first free hotbar slot");
-}
-
-static void test_attachments(void) {
-    int combos = 0, mismatch = 0;
-    for (int w = 1; w < g_db.item_count; w++) {
-        const WeaponDef *wd = item_weapon(&g_db, (u16)w);
-        if (!wd) continue;
-        for (int a = 1; a <= g_db.attachment_count; a++) {
-            const AttachmentDef *ad = attach_def(&g_db, (u8)a);
-            u16 ai = item_for_attachment(&g_db, (u8)a);
-            CHECK(ai != ITEM_NONE && item_def(&g_db, ai)->kind == ITEM_ATTACHMENT, "attachment %s has an item", ad->id);
-            InvSlot ws;
-            memset(&ws, 0, sizeof(ws));
-            ws.item = (u16)w;
-            int aslot = -1;
-            int r = inv_attach_check(&g_db, &ws, ai, &aslot);
-            bool expect = wd->kind != WPN_MELEE && wd->att_slots[ad->slot].present && attach_allowed(wd, ad);
-            if ((r == IOR_OK) != expect) mismatch++;
-            if (r == IOR_OK && aslot != ad->slot) mismatch++;
-            combos++;
-            // Mount / unmount round trip in a real inventory.
-            if (r == IOR_OK) {
-                Inventory inv;
-                memset(&inv, 0, sizeof(inv));
-                inv.slots[0] = ws;
-                inv.slots[12].item = ai;
-                inv.slots[12].count = 1;
-                int m = inv_op_apply(&inv, &g_db, &(InvOp){ IOP_MOUNT, 0, 12, 0, 0, 0 }, NULL);
-                if (m != IOR_OK || inv.slots[0].att[ad->slot] != a || inv.slots[12].item) mismatch++;
-                int u = inv_op_apply(&inv, &g_db, &(InvOp){ IOP_UNMOUNT, 0, (u8)ad->slot, 255, 0, 0 }, NULL);
-                int back = -1;
-                for (int i = 0; i < INV_SLOTS; i++) if (inv.slots[i].item == ai) back = i;
-                if (u != IOR_OK || inv.slots[0].att[ad->slot] || back < 0) mismatch++;
-            }
-        }
-    }
-    CHECK(combos > 50 && mismatch == 0, "attachment compatibility + mount / unmount for every weapon x attachment (%d combos, %d mismatches)", combos, mismatch);
-    // Replacing an attachment returns the old one in the dragged item's place.
-    Inventory inv;
-    memset(&inv, 0, sizeof(inv));
-    put(&inv, 0, "rifle", 1);
-    memset(inv.slots[0].att, 0, ATT_SLOTS);
-    u8 rd = attach_find(&g_db, "red_dot"), s4 = attach_find(&g_db, "scope_4x");
-    inv.slots[0].att[ATT_OPTIC] = rd;
-    inv.slots[9].item = item_for_attachment(&g_db, s4);
-    inv.slots[9].count = 1;
-    CHECK(inv_op_apply(&inv, &g_db, &(InvOp){ IOP_MOUNT, 0, 9, 0, 0, 0 }, NULL) == IOR_OK && inv.slots[0].att[ATT_OPTIC] == s4 &&
-              inv.slots[9].item == item_for_attachment(&g_db, rd), "swap optics: the red dot comes back where the scope was");
-    // Not a weapon / no slot.
-    memset(&inv, 0, sizeof(inv));
-    put(&inv, 0, "medkit", 1);
-    inv.slots[9].item = item_for_attachment(&g_db, rd);
-    inv.slots[9].count = 1;
-    CHECK(inv_op_apply(&inv, &g_db, &(InvOp){ IOP_MOUNT, 0, 9, 0, 0, 0 }, NULL) == IOR_NOT_WEAPON, "mount onto a medkit: not a weapon");
-    put(&inv, 1, "knife", 1);
-    CHECK(inv_op_apply(&inv, &g_db, &(InvOp){ IOP_MOUNT, 1, 9, 0, 0, 0 }, NULL) == IOR_NOT_WEAPON, "melee weapons take no attachments");
-    // Extended magazine removed: the extra rounds go back to the reserve.
-    u8 em = attach_find(&g_db, "extended_mag");
-    if (em) {
-        memset(&inv, 0, sizeof(inv));
-        put(&inv, 0, "rifle", 1);
-        memset(inv.slots[0].att, 0, ATT_SLOTS);
-        inv.slots[0].att[ATT_MAGAZINE] = em;
-        WeaponDef eff;
-        attach_weapon_effective(&g_db, item_weapon(&g_db, inv.slots[0].item), inv.slots[0].att, &eff);
-        inv.slots[0].ammo = (i16)eff.mag_size;
-        int before = inv.slots[0].ammo;
-        CHECK(inv_op_apply(&inv, &g_db, &(InvOp){ IOP_UNMOUNT, 0, ATT_MAGAZINE, 255, 0, 0 }, NULL) == IOR_OK, "unmount the extended magazine");
-        int reserve = inv_count(&inv, item_weapon(&g_db, inv.slots[0].item)->ammo_item);
-        CHECK(inv.slots[0].ammo + reserve == before && inv.slots[0].ammo == item_weapon(&g_db, inv.slots[0].item)->mag_size, "extra rounds to the reserve (%d + %d)",
-              inv.slots[0].ammo, reserve);
-    }
-}
-
-// ------------------------------------------------------------------ drag and drop
-
-static DDInput frame(float x, float y) {
-    DDInput in;
-    memset(&in, 0, sizeof(in));
-    in.mouse = v2(x, y);
-    in.threshold = 6;
-    in.weapon_slot = -1;
-    return in;
-}
-
-static void test_dragdrop(void) {
-    Inventory inv;
-    memset(&inv, 0, sizeof(inv));
-    put(&inv, 0, "rifle", 1);
-    memset(inv.slots[0].att, 0, ATT_SLOTS);
-    put(&inv, 1, "knife", 1);
-    put(&inv, 9, "ammo_rifle", 60);
-    put(&inv, 10, "scrap", 10);
-    inv.slots[11].item = item_for_attachment(&g_db, attach_find(&g_db, "red_dot"));
-    inv.slots[11].count = 1;
-    DragDrop d;
-    dd_reset(&d);
-    DDTarget s9 = { DT_SLOT, 9 }, s20 = { DT_SLOT, 20 }, s0 = { DT_SLOT, 0 }, s1 = { DT_SLOT, 1 }, s11 = { DT_SLOT, 11 }, s10 = { DT_SLOT, 10 };
-    // Click (press + release without moving) selects.
-    DDInput in = frame(10, 10);
-    in.pressed = true;
-    in.hover = s9;
-    DDResult r = dd_update(&d, &in, &inv, &g_db);
-    CHECK(d.state == DD_PRESSED && r.action == DDA_NONE, "press: pressed");
-    in = frame(12, 11);
-    in.released = true;
-    in.hover = s9;
-    r = dd_update(&d, &in, &inv, &g_db);
-    CHECK(r.action == DDA_SELECT && r.slot == 9 && d.state == DD_IDLE, "click selects");
-    // Drag past the threshold, release on an empty slot: move.
-    in = frame(10, 10); in.pressed = true; in.hover = s9;
-    dd_update(&d, &in, &inv, &g_db);
-    in = frame(30, 10); in.hover = s9;
-    r = dd_update(&d, &in, &inv, &g_db);
-    CHECK(d.state == DD_DRAGGING && r.action == DDA_PICKED, "moving past the threshold starts the drag");
-    in = frame(200, 10); in.released = true; in.hover = s20;
-    r = dd_update(&d, &in, &inv, &g_db);
-    CHECK(r.action == DDA_OP && r.op.type == IOP_MOVE && r.op.a == 9 && r.op.b == 20 && r.op.count == 0, "release on a slot: move");
-    // Under the threshold no drag starts.
-    in = frame(10, 10); in.pressed = true; in.hover = s9;
-    dd_update(&d, &in, &inv, &g_db);
-    in = frame(13, 12); in.hover = s9;
-    dd_update(&d, &in, &inv, &g_db);
-    CHECK(d.state == DD_PRESSED, "a 3 px wobble is still a click");
-    in = frame(13, 12); in.released = true; in.hover = s9; in.shift = true;
-    r = dd_update(&d, &in, &inv, &g_db);
-    CHECK(r.action == DDA_OP && r.op.type == IOP_QUICK_MOVE && r.op.a == 9, "shift+click: quick move");
-    // Ctrl-drag: split half the stack into an empty slot.
-    in = frame(10, 10); in.pressed = true; in.ctrl = true; in.hover = s10;
-    dd_update(&d, &in, &inv, &g_db);
-    in = frame(40, 10); in.hover = s10;
-    dd_update(&d, &in, &inv, &g_db);
-    in = frame(90, 10); in.released = true; in.hover = s20;
-    r = dd_update(&d, &in, &inv, &g_db);
-    CHECK(r.action == DDA_OP && r.op.type == IOP_SPLIT && r.op.a == 10 && r.op.b == 20 && r.op.count == 5, "ctrl-drag: split half");
-    // Attachment onto a weapon: mount; onto the knife: reject with a reason.
-    in = frame(10, 10); in.pressed = true; in.hover = s11;
-    dd_update(&d, &in, &inv, &g_db);
-    in = frame(40, 10); in.hover = s11;
-    dd_update(&d, &in, &inv, &g_db);
-    in = frame(90, 10); in.released = true; in.hover = s0;
-    r = dd_update(&d, &in, &inv, &g_db);
-    CHECK(r.action == DDA_OP && r.op.type == IOP_MOUNT && r.op.a == 0 && r.op.b == 11, "attachment onto the rifle: mount");
-    in = frame(10, 10); in.pressed = true; in.hover = s11;
-    dd_update(&d, &in, &inv, &g_db);
-    in = frame(40, 10); in.hover = s11;
-    dd_update(&d, &in, &inv, &g_db);
-    in = frame(90, 10); in.released = true; in.hover = s1;
-    r = dd_update(&d, &in, &inv, &g_db);
-    CHECK(r.action == DDA_REJECT && r.reject_reason == IOR_NOT_WEAPON && r.slot == 1, "attachment onto a melee weapon: rejected with a reason");
-    // Attachment onto the preview's slot of another type: rejected.
-    DragDrop d2;
-    dd_reset(&d2);
-    d2.state = DD_DRAGGING;
-    d2.src = s11;
-    DDTarget muzzle = { DT_ATTACH, ATT_MUZZLE }, optic = { DT_ATTACH, ATT_OPTIC };
-    r = dd_drop_on(&d2, muzzle, &inv, &g_db, 0);
-    CHECK(r.action == DDA_REJECT && r.reject_reason == IOR_NO_SLOT && r.reject_target.kind == DT_ATTACH, "red dot onto the muzzle slot: rejected");
-    r = dd_drop_on(&d2, optic, &inv, &g_db, 0);
-    CHECK(r.action == DDA_OP && r.op.type == IOP_MOUNT, "red dot onto the optic slot: mount");
-    DDTarget pv = { DT_PREVIEW, 0 };
-    r = dd_drop_on(&d2, pv, &inv, &g_db, 0);
-    CHECK(r.action == DDA_OP && r.op.type == IOP_MOUNT, "red dot onto the preview: mount into its slot");
-    // Outside the panel: stackables drop, non-stackables ask first.
-    DDTarget out = { DT_OUTSIDE, -1 };
-    d2.src = s9;
-    r = dd_drop_on(&d2, out, &inv, &g_db, 0);
-    CHECK(r.action == DDA_OP && r.op.type == IOP_DROP, "stack dragged outside: drop");
-    d2.src = s0;
-    r = dd_drop_on(&d2, out, &inv, &g_db, -1);
-    CHECK(r.action == DDA_CONFIRM_DROP && r.op.type == IOP_DROP && r.op.a == 0, "weapon dragged outside: confirm first");
-    // Mounted attachment dragged out of the preview: unmount.
-    inv.slots[0].att[ATT_OPTIC] = attach_find(&g_db, "red_dot");
-    d2.src = optic;
-    r = dd_drop_on(&d2, s20, &inv, &g_db, 0);
-    CHECK(r.action == DDA_OP && r.op.type == IOP_UNMOUNT && r.op.a == 0 && r.op.b == ATT_OPTIC && r.op.c == 20, "optic out of the preview onto a slot: unmount there");
-    r = dd_drop_on(&d2, s9, &inv, &g_db, 0);
-    CHECK(r.action == DDA_OP && r.op.type == IOP_UNMOUNT && r.op.c == 255, "onto an occupied slot: unmount into the first free one");
-    // Esc / B cancels a drag; right click opens the context menu; double click equips.
-    in = frame(10, 10); in.pressed = true; in.hover = s9;
-    dd_update(&d, &in, &inv, &g_db);
-    in = frame(40, 10); in.hover = s9;
-    dd_update(&d, &in, &inv, &g_db);
-    in = frame(40, 10); in.cancel = true;
-    r = dd_update(&d, &in, &inv, &g_db);
-    CHECK(r.action == DDA_CANCEL && d.state == DD_IDLE, "back cancels a drag");
-    in = frame(10, 10); in.right_pressed = true; in.hover = s9;
-    r = dd_update(&d, &in, &inv, &g_db);
-    CHECK(r.action == DDA_CONTEXT && r.slot == 9, "right click: context menu");
-    in = frame(10, 10); in.double_clicked = true; in.pressed = true; in.hover = s20;
-    inv.slots[20] = inv.slots[1];
-    r = dd_update(&d, &in, &inv, &g_db);
-    CHECK(r.action == DDA_OP && r.op.type == IOP_EQUIP && r.op.a == 20, "double click: equip");
-    // Gamepad / keyboard carry: pick up with A, place with A.
-    dd_reset(&d);
-    r = dd_carry_accept(&d, s9, &inv, &g_db, 0, false);
-    CHECK(r.action == DDA_PICKED && d.carry, "A on an item: carry");
-    r = dd_carry_accept(&d, s20, &inv, &g_db, 0, false);
-    CHECK(r.action == DDA_OP && r.op.type == IOP_MOVE && r.op.a == 9 && r.op.b == 20 && !d.carry, "A on the target: place");
-    r = dd_carry_accept(&d, (DDTarget){ DT_SLOT, 30 }, &inv, &g_db, 0, false);
-    CHECK(r.action == DDA_NONE && !d.carry, "A on an empty slot carries nothing");
-    // Dropping on itself / on the panel cancels.
-    d2.src = s9;
-    r = dd_drop_on(&d2, s9, &inv, &g_db, 0);
-    CHECK(r.action == DDA_CANCEL, "drop on itself: cancel");
-    r = dd_drop_on(&d2, (DDTarget){ DT_PANEL, -1 }, &inv, &g_db, 0);
-    CHECK(r.action == DDA_CANCEL, "drop on the panel background: cancel");
-    // Crate: put / take.
-    r = dd_drop_on(&d2, (DDTarget){ DT_CONTAINER, 3 }, &inv, &g_db, 0);
-    CHECK(r.action == DDA_CONTAINER_PUT && r.slot == 9, "into a crate slot: put");
-    d2.src = (DDTarget){ DT_CONTAINER, 4 };
-    r = dd_drop_on(&d2, s20, &inv, &g_db, 0);
-    CHECK(r.action == DDA_CONTAINER_TAKE && r.slot == 4, "crate item into the inventory: take");
-}
-
-// ------------------------------------------------------------------ prediction / reconcile
-
-// The client applies its intents at once; the host applies them in order (possibly with its own
-// changes in between) and acknowledges a prefix. Rebuilding host state + unacknowledged intents
-// must equal what the host ends with once everything is acknowledged.
-static void test_reconcile(void) {
-    Inventory host;
-    memset(&host, 0, sizeof(host));
-    put(&host, 0, "rifle", 1);
-    memset(host.slots[0].att, 0, ATT_SLOTS);
-    put(&host, 1, "pistol", 1);
-    put(&host, 9, "ammo_rifle", 70);
-    put(&host, 10, "scrap", 13);
-    host.slots[11].item = item_for_attachment(&g_db, attach_find(&g_db, "red_dot"));
-    host.slots[11].count = 1;
-    InvOp ops[] = { mk(IOP_MOUNT, 0, 11, 0, 0), mk(IOP_SPLIT, 10, 255, 0, 0), mk(IOP_MOVE, 9, 20, 0, 30), mk(IOP_QUICK_MOVE, 1, 0, 0, 0), mk(IOP_DROP, 10, 0, 0, 2),
-                    mk(IOP_UNMOUNT, 0, ATT_OPTIC, 255, 0), mk(IOP_MOVE, 20, 9, 0, 0) };
-    int n = (int)ARRAY_COUNT(ops);
-    Inventory client = host;
-    for (int i = 0; i < n; i++) { ops[i].seq = (u32)(i + 1); inv_op_apply(&client, &g_db, &ops[i], NULL); }
-    int bad = 0;
-    for (int acked = 0; acked <= n; acked++) {
-        // Host has applied the first `acked` intents (and picked up 10 rounds meanwhile).
-        Inventory h = host;
-        for (int i = 0; i < acked; i++) inv_op_apply(&h, &g_db, &ops[i], NULL);
-        // Client reconcile: host state + the rest.
-        Inventory c = h;
-        for (int i = acked; i < n; i++) inv_op_apply(&c, &g_db, &ops[i], NULL);
-        if (memcmp(c.slots, client.slots, sizeof(c.slots))) bad++;
-    }
-    CHECK(bad == 0, "reconcile: host prefix + unacknowledged intents == the prediction, for every acknowledgement point (%d bad)", bad);
-    // A host-side change in between (a pickup): the rebuilt state keeps it and the intents still apply.
-    Inventory h = host;
-    inv_op_apply(&h, &g_db, &ops[0], NULL);
-    inv_add(&h, &g_db, item("ammo_rifle"), 10, 0);
-    Inventory c = h;
-    for (int i = 1; i < n; i++) inv_op_apply(&c, &g_db, &ops[i], NULL);
-    CHECK(inv_count(&c, item("ammo_rifle")) == 80, "the host's pickup survives the reconcile (%d rounds)", inv_count(&c, item("ammo_rifle")));
-    // Wire encoding round trip.
-    InvOp o = mk(IOP_UNMOUNT, 7, 3, 255, 1234), o2;
-    o.seq = 987654;
-    int a, b, cc;
-    inv_op_pack(&o, &a, &b, &cc);
-    inv_op_unpack(a, b, cc, &o2);
-    // Field by field: InvOp has padding (uninitialized in o2), a memcmp depends on stack contents.
-    CHECK(o.type == o2.type && o.a == o2.a && o.b == o2.b && o.c == o2.c && o.count == o2.count && o.seq == o2.seq, "intent pack / unpack");
-}
 
 // ------------------------------------------------------------------ icons
 
@@ -479,6 +135,16 @@ static void test_icons(void) {
         }
     }
     CHECK(missing == 0, "every item has a 128 and a 256 px icon (%d missing; tools/bake_icons/bake_icons.sh)", missing);
+    // Inventory cell images at the grid aspect (docs/INVENTORY.md; tools/bake_icons/bake_cells.sh).
+    missing = 0;
+    for (int i = 1; i < g_db.item_count; i++) {
+        const ItemDef *d = &g_db.items[i];
+        char path[256];
+        if (d->cell_image[0]) snprintf(path, sizeof(path), "%s", d->cell_image);
+        else snprintf(path, sizeof(path), "assets/ui/cells/%s.png", d->id);
+        if (!platform_file_exists(path)) { missing++; printf("  no cell image: %s\n", path); }
+    }
+    CHECK(missing == 0, "every item has a cell image (%d missing; tools/bake_icons/bake_cells.sh)", missing);
 }
 
 int main(void) {
@@ -486,10 +152,6 @@ int main(void) {
     test_layout_basics();
     test_layout_pause();
     CHECK(items_load(&g_db, "data/items.json", "data/weapons"), "items load");
-    test_merge();
-    test_attachments();
-    test_dragdrop();
-    test_reconcile();
     test_icons();
     printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

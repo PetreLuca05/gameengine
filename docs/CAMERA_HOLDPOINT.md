@@ -29,9 +29,14 @@ Each simulation tick, for every character, local or remote, through the same cod
 4. **Bladed stance:** the chest yaws so the support shoulder comes forward. The neck counter-rotates,
    so the head (and the camera on it) still faces the view. The clavicles protract (style `body`).
 5. **Camera** = Head bone × eye socket, with the view rotation.
-6. **Hold point** (`holdpoint_eval`): item = camera × hold point × anchor⁻¹.
-7. **Right-arm IK** onto `grip_r`. The item is finalized from the solved hand, so it's glued by
-   construction.
+6. **Hold point** (`holdpoint_eval`), two poses:
+   - **gameplay:** state target + blend → item = base × anchor⁻¹ → soft pitch limit → wall collision
+     (cast from this pose) → **hold aim** (turned about its pivot so the barrel line passes through
+     the camera ray's aim point P, docs/AIM.md "Hold aim"). This is what the bullet follows.
+   - **drawn:** the gameplay pose + presentation (sway, look lag, bob, landing, the fire kick, the ADS
+     sight anchoring, the phone's driven rotation). This is what is rendered.
+7. **Right-arm IK** onto `grip_r` of the drawn pose. The item is finalized from the solved hand, so
+   it's glued by construction; the same reach shift moves the gameplay pose.
 8. **Left-arm IK** onto `grip_l`. If out of reach, the hold point is pulled toward the shoulders first.
 9. **Finger curl.**
 10. **Foot IK.**
@@ -53,7 +58,8 @@ Input never depends on output: angles → spine → head → camera → hold poi
 | Cvar | Default | Meaning |
 |---|---|---|
 | `cam_bob_scale` | 0 | how much of the old capsule stabilizer offset (and the landing dip) is added to the head eye; 0 = the camera is exactly on the head |
-| `cam_kick_scale` | 0 | visual camera kick on shots (aim recoil is separate and unchanged) |
+| `cam_kick_scale` | 1 | visual camera kick on shots (aim recoil is separate and unchanged) |
+| `cam_kick_rot` | 0 | the fire camera layer's pitch / yaw (roll twitch, FOV punch and push-back stay): 0 keeps the camera on the aim line, so the centred crosshair stays on the bullets' line (docs/AIM.md) |
 | `cam_head_follow`, `cam_head_follow_lateral`, `cam_head_stiffness`, `cam_head_damping`, `cam_head_clamp` | 0.8, 0.35, 260, 30, 0.07 | the stabilizer that `cam_bob_scale` blends in |
 | `cam_collision_radius` | 0.11 | sphere cast from the capsule to the eye; pulls in instantly, releases smoothly |
 | `cam_recon_smooth_time` | 0.1 | prediction-correction smoothing |
@@ -106,11 +112,25 @@ Pitch + is muzzle up, yaw + is muzzle left, roll + is cant left.
 
 **ADS isn't authored, it's computed:** the item is placed so its `sight` socket lands on the view
 axis at the style's `eye_relief`, barrel along the view (`holdpoint_ads_item`). Any weapon with a
-correct `sight` socket aligns automatically: less than 0.02 mm and 0.001° in the tests.
+correct `sight` socket aligns automatically: less than 0.02 mm and 0.001° in the tests. The hold aim
+then turns it about the sight (at most 3°) so the bore, a few cm under the sight, passes through P:
+the sight stays on the axis (< 0.02 mm with the aim on).
 
-### Procedural layer
+### Hold aim
 
-It is scaled down to `ads_scale` in ADS, and every rotation is around the **pivot**:
+Guns only (docs/AIM.md "Hold aim"): the gameplay pose turned about its pivot (hip: the pivot socket,
+ADS: the sight) so its bore line (muzzle socket along −Z) passes through the camera ray's aim point
+`aim_p` (camera space), at most `wpn_hold_aim_max` (12°; ADS 3°). Weight 1 in hip / ADS / crouch / prone
+/ one-handed, 0 in sprint / empty / inspect / phone, blended with the state blend, times
+`1 − pull^curve` (pushed against a wall the gun points where the pull turned it). Outputs: `gp_item`
+(before), `aim_item` (after), `aim_raw` (what `aim_hold_solve` ran on), `aim_hold`, `aim_pivot`,
+`aim_w`, `aim_max`, `aim_angle_deg`, `aim_miss`, `aim_clamped`. `weapon_hold.c` maps them to model space
+through the arm solve's reach shift (`gp_item_model`, `aim_item_model`, `aim_pivot_model`).
+
+### Procedural layer (presentation)
+
+It moves the drawn item only, on top of the gameplay pose (it never moves a bullet). It is scaled
+down to `ads_scale` in ADS, and every rotation is around the **pivot**:
 
 | Layer | Driven by |
 |---|---|
@@ -120,9 +140,10 @@ It is scaled down to `ads_scale` in ADS, and every rotation is around the **pivo
 | kick | the recoil system's item spring (`recoil_visual_kick` → `vm_pos` / `vm_rot`) — × `wpn_kick_scale`; aim recoil still drives the view angles |
 | soft pitch limit | past `pitch_soft` (65°; none in ADS) the item follows the view pitch only by `pitch_follow`, so arms stay in reach at near-vertical views |
 
-`wpn_sway_scale` (0, replicated: it also scales the aim sway of `weapon_sway_deg`, so bullets and
-the crosshair agree) and `wpn_kick_scale` (0) default to zero: **the item is fixed to the camera**
-except for the state poses (sprint, ADS, crouch …) and vault / mantle hand placement.
+`wpn_sway_scale` (1, replicated: it also scales the ADS aim sway of `weapon_sway_deg`, which only
+moves the reticle with `wpn_ads_sway` above 0) and `wpn_kick_scale` (1) scale the drawn gun's sway and
+kick; `cl_weapon_sway` is the player's cosmetic share of the sway. None of them reaches the gameplay
+pose (`holdpoint_static 1` turns the layer off: the drawn gun is then the gameplay one).
 
 ### Pivot
 
@@ -132,9 +153,11 @@ at the wrist. Override it with `"pivot"` in the item's sockets or `holdpoint` bl
 
 ### Weapon collision
 
-A cast runs from the hold point along the item's length. When it hits, the pull (0..1, `curve`
-exponent, fast in and slow out) moves the item back by `back`, up by `up`, and pitches it by `pitch`
-around the pivot. It's cosmetic: shots always use the camera ray.
+A cast runs from the gameplay pose's hold point along the item's length. When it hits, the pull
+(0..1, `curve` exponent, fast in and slow out) moves the item back by `back`, up by `up`, and pitches
+it by `pitch` around the pivot. It moves the gameplay pose: the bullet follows the pulled barrel, the
+hold aim fades out with the pull, and the crosshair moves to where the pulled barrel line ends
+(docs/AIM.md "Obstruction").
 
 ### Reach
 
@@ -191,13 +214,14 @@ weight to 0, blended by the controller transition. This is `holdpoint_mode: clip
 
 ## Networking
 
-Nothing new goes on the wire. Remote players already replicate aim yaw and pitch, body yaw, weapon,
-and ADS / sprint / crouch flags. Each client runs the same hold point and IK code for them, with the
-camera at their head bone plus eye socket. `test_holdpoint` checks that an owner pose and a remote
-pose solved from the same inputs are **bit-identical**; `first_person` changes nothing. The host's
-shots leave the muzzle socket of that pose and converge on the camera ray's aim point (docs/AIM.md):
-the shooter claims its muzzle in camera space in the `UserCmd` (`muzzle_cam`), the host checks it
-against its own solve of the same pose.
+Remote players already replicate aim yaw and pitch, body yaw, weapon, and ADS / sprint / crouch
+flags. Each client runs the same hold point and IK code for them, with the camera at their head bone
+plus eye socket. `test_holdpoint` / `test_hold_aim` check that an owner pose and a remote pose solved
+from the same inputs are **bit-identical** (the hold aim included); `first_person` changes nothing.
+The shots leave the muzzle socket of the gameplay pose along its barrel (docs/AIM.md): the shooter
+claims its pose aimed at the command's aim point in the `UserCmd` (`muzzle_cam`, `barrel_cam`,
+`aim_dist`), the host re-aims its own copy of the pose (`chars_aim_raw`) at its aim point and checks
+the claims against it.
 
 ## Tuning and debug
 
@@ -207,10 +231,10 @@ against its own solve of the same pose.
 - **`holdpoint_reload` / `holdpoint_save`:** reload or write the JSON.
 - **`holdpoint_force_state <n>`:** -1 auto, 0 hip, 1 ADS, 2 sprint, 3 crouch, 4 prone, 5 empty,
   6 inspect.
-- **`holdpoint_static 1`:** disables sway, lag, bob and kick.
+- **`holdpoint_static 1`:** disables sway, lag, bob and kick (the presentation; the hold aim stays).
 - **`holdpoint_test`:** equips every weapon through every state. It records the hand ↔ socket error
-  every frame, blends included, and the ADS sight error. The report ends with PASS / FAIL: hands under
-  2 mm / 1°, sight under 0.5 mm / 0.1°. Currently PASS: hands ≤ 0.03 mm, sight ≤ 0.009 mm.
+  every frame, blends included, and the ADS sight error against the exact ADS item turned by the hold
+  aim. The report ends with PASS / FAIL: hands under 2 mm / 1°, sight under 0.5 mm / 0.1°.
 
 ## Tests
 
@@ -227,11 +251,11 @@ camera penetration sweep.
 
 `tools/tests/fp_cam_test.cfg` (generated by `gen_fp_cam_test.py`) drives ~1770 frames of walking,
 strafing, sprinting, a 360° turn, crouching, steep looks, jumps, a mantle and every weapon hip + ADS
-(in hotbar-sized batches: `inv_clear` and the next weapons after the sixth),
+(in batches of six: `inv_clear` and the next weapons, each drawn with `wield`),
 and `fp_cam_test report` checks every frame:
 - |camera − head bone| < 0.15 m (it is the 0.141 m eye offset);
 - the camera is never behind the head along the view yaw, nor behind the pelvis looking level or down;
 - both hands on their sockets < 2 mm / 1° while the hold owns them;
 - the item on its hold point (camera space) within 10 mm outside sprint / ADS / vault (0.5 mm in
   > 98 % of frames; jump landings reach ~7 mm for a few frames);
-- ADS: the sight on the view axis < 0.5 mm / 0.2° for every weapon.
+- ADS: the sight on the view axis < 0.5 mm, the item within 0.2° of the exact ADS item turned by the hold aim, for every weapon.

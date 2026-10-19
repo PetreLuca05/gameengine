@@ -1,9 +1,10 @@
 // Dynamic crosshair. The gap is the exact screen projection of the bullet cone:
 //     gap_px = tan(spread / 2) * (screen_h / 2) / tan(fov_v / 2)
 // so every bullet lands inside the drawn lines (cone = full angle, see gameplay/recoil.h).
-// The crosshair sits on the projection of the true aim point: the camera kick spring moves the
-// view but not the aim, so the crosshair drifts against the kick (crosshair_follow_kick 1 pins
-// it to the screen center instead). Style from assets/ui/crosshair.json + crosshair_* cvars.
+// In first person it is exactly the screen centre: the gun's hold points the barrel at what the
+// centre is on and the camera never turns off the aim line (docs/AIM.md). It moves only to where the
+// barrel line ends when that line is obstructed (or with the deliberate reticle movers wpn_ads_sway /
+// wpn_ads_bob / cam_kick_rot). Style from assets/ui/crosshair.json + crosshair_* cvars.
 #ifndef DG_CROSSHAIR_H
 #define DG_CROSSHAIR_H
 

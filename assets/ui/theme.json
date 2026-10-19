@@ -58,6 +58,8 @@
   "layout": {
     "_doc": "Named design-px sizes: screen JSON uses them as \"@name\" (the main menu screens use nothing else), the screens' code through gui_tok().",
     "zero": 0,
+    "hud_wlist_w": 330, "hud_wlist_row_h": 46, "hud_wlist_gap": 5, "hud_wlist_img_w": 84, "hud_wlist_lift": 6,
+    "hud_vitals_w": 300, "hud_vitals_hp_h": 8, "hud_vitals_armor_h": 6, "hud_vitals_label_w": 64, "hud_vitals_num_w": 46, "hud_vitals_row_h": 18, "hud_vitals_plate_gap": 4,
     "tab_text": 17, "tab_gap": 34, "tab_pad": 8, "tab_underline": 2, "tab_hint_y": 4, "power_stroke": 2,
     "mm_tabbar_h": 60, "mm_power": 34, "mm_footer_h": 66, "mm_status_w": 440, "mm_news_w": 380,
     "mm_content_gap": 20, "mm_gap_sm": 2, "mm_gap": 8, "mm_gap_lg": 20,

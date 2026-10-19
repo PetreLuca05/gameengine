@@ -358,7 +358,7 @@ While hanging (`MOVE_HANG`) the hands are the ledge's, never the camera's:
   weapon usable while hanging. It is held out in the right hand on the one-handed hip hold
   (`HP_VEHICLE_ONEHAND`, aimed along the view; the hang clip's hand IK weight is forced to 1),
   the left hand keeps its grip. It fires with the air accuracy and recoil (`air` spread and aim
-  multipliers); no ADS, no reload. Switching to it from the hotbar / wheel works as usual.
+  multipliers); no ADS, no reload. Switching to it with a weapon key / the wheel works as usual.
 * **Long guns and items** are slung: not drawn, no crosshair, firing shows a hint.
 * **Climb up / drop**: the mantle takes both hands; the held weapon is unchanged afterwards.
 

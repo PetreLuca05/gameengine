@@ -10,6 +10,7 @@
 #include "core/cvar.h"
 #include <stdio.h>
 #include <math.h>
+#include <string.h>
 
 static u32 col(float r, float g, float b) { return rgba8(r, g, b, 1); }
 
@@ -382,25 +383,70 @@ EntityId spawn_light(World *w, vec3 pos, vec3 color, float radius, float intensi
 
 // ------------------------------------------------------------------ container
 
+InvTree *container_tree(World *w, EntityId e, bool create) {
+    if (!ent_valid(w, e)) return NULL;
+    Container *c = &w->cont[ENT_INDEX(e)];
+    if (c->tree && c->tree <= MAX_LOOT_TREES && w->loot_tree_used[c->tree - 1]) return &w->loot_trees[c->tree - 1];
+    c->tree = 0;
+    if (!create) return NULL;
+    for (int k = 0; k < MAX_LOOT_TREES; k++) {
+        if (w->loot_tree_used[k]) continue;
+        w->loot_tree_used[k] = 1;
+        c->tree = (u16)(k + 1);
+        int root = c->root >= 0 ? c->root : container_find(w->items, "crate");
+        inv_tree_init(&w->loot_trees[k], root >= 0 ? root : 0);
+        return &w->loot_trees[k];
+    }
+    log_warn("containers: no free world inventory (%d in use)", MAX_LOOT_TREES);
+    return NULL;
+}
+
+void container_set_root(World *w, EntityId e, const char *root_id) {
+    if (!ent_valid(w, e)) return;
+    int r = container_find(w->items, root_id);
+    if (r < 0) { log_warn("containers: unknown container '%s'", root_id); return; }
+    w->cont[ENT_INDEX(e)].root = (i16)r;
+    InvTree *t = container_tree(w, e, false);
+    if (t && !inv_live_count(t)) t->root = (i16)r;
+}
+
+int container_add(World *w, EntityId e, u16 item, int count) {
+    InvTree *t = container_tree(w, e, true);
+    if (!t || !item || count <= 0) return count;
+    const WeaponDef *wd = item_weapon(w->items, item);
+    InvSlot s;
+    memset(&s, 0, sizeof(s));
+    s.item = item;
+    s.count = (u16)DG_MIN(count, 65535);
+    s.ammo = wd ? (i16)wd->mag_size : 0;
+    attach_defaults(wd, s.att);
+    int left = inv_give_root(t, w->items, &s);
+    w->cont[ENT_INDEX(e)].revision++;
+    return left;
+}
+
 static void container_focus(World *w, EntityId self, int player, char *prompt, int size) {
     int i = (int)ENT_INDEX(self);
-    int items = 0;
-    for (int s = 0; s < CONTAINER_SLOTS; s++) if (w->cont[i].slots[s].item) items++;
+    InvTree *t = container_tree(w, self, false);
+    int items = t ? inv_live_count(t) : 0;
     if (w->cont[i].opened) snprintf(prompt, (size_t)size, "Search Crate (%d items)", items);
     else snprintf(prompt, (size_t)size, "Hold to Open Crate");
 }
 
-static void container_send(World *w, EntityId self, int player) {
-    int i = (int)ENT_INDEX(self);
+// Opens the inventory screen with this container on the loot side; its tree follows by MSG_LOOT
+// (docs/INVENTORY.md "Networking").
+void container_send(World *w, EntityId self, int player) {
+    if (!w->authority) return;
+    container_tree(w, self, true);
     GameEvent ev;
     memset(&ev, 0, sizeof(ev));
     ev.type = EV_CONTAINER;
     ev.target = (u8)player;
     ev.except = EVENT_ALL;
     ev.ent = self;
-    memcpy(ev.data, w->cont[i].slots, sizeof(w->cont[i].slots));
     ev_push(w, &ev);
     w->players[player].open_container = self;
+    w->players[player].loot_sent_ent = ENT_NONE;   // resend the tree
 }
 
 static void container_use(World *w, EntityId self, int player) {
@@ -550,6 +596,22 @@ EntityId spawn_pickup(World *w, vec3 pos, u16 item, int count, i16 ammo, float r
     entity_setup(w, e);
     w->inter[i].focus_offset = v3_scale(v3_add(mn, mx), 0.5f);   // the model's centre (item space)
     return e;
+}
+
+EntityId spawn_pickup_tree(World *w, vec3 pos, const InvTree *t, u16 uid) {
+    const InvItem *top = inv_get_c(t, uid);
+    if (!top) return ENT_NONE;
+    EntityId pe = spawn_pickup(w, pos, top->s.item, top->s.count, top->s.ammo, 0);
+    if (!ent_valid(w, pe)) return pe;
+    int i = (int)ENT_INDEX(pe);
+    memcpy(w->pickup[i].att, top->s.att, sizeof(top->s.att));   // the dropped weapon keeps its attachments
+    memcpy(w->attach[i], top->s.att, sizeof(top->s.att));
+    // Nothing nests (a backpack only leaves a back empty); anything under it drops beside it.
+    int idx[INV_MAX_ITEMS];
+    int n = inv_subtree(t, uid, idx, INV_MAX_ITEMS);
+    for (int k = 1; k < n; k++)
+        if (t->items[idx[k]].parent == uid) spawn_pickup_tree(w, v3_add(pos, v3(0, 0.05f * (float)k, 0)), t, t->items[idx[k]].uid);
+    return pe;
 }
 
 // ------------------------------------------------------------------ props, dummies, markers

@@ -395,7 +395,7 @@ set(DG_ANIMCORE_SOURCES
   src/anim/anim.c src/anim/skeleton.c src/anim/retarget.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
   src/anim/weapon_hold.c src/anim/handpose.c src/editor/handpose/hp_discover.c src/editor/handpose/hp_edit.c src/editor/handpose/hp_rig.c src/editor/handpose/hp_xform.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/swim.c src/anim/anim_net.c src/anim/ragdoll_def.c
   src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c src/core/detmath.c
-  src/world/time_of_day.c src/world/weather.c src/world/wind.c src/world/water/water.c src/world/water/water_waves.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/sway.c src/anim/fire_anim.c src/player/camera_fp_math.c src/gameplay/phone/phone_orient.c
+  src/world/time_of_day.c src/world/weather.c src/world/wind.c src/world/water/water.c src/world/water/water_waves.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/sway.c src/anim/fire_anim.c src/player/camera_fp_math.c src/gameplay/phone/phone_orient.c src/gameplay/aim.c
   src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c src/render/skeletal_mesh.c
   src/core/log.c src/core/platform.c)
 add_library(dg_animcore STATIC ${DG_ANIMCORE_SOURCES})
@@ -655,6 +655,16 @@ if(MSVC)
 endif()
 add_test(NAME recoil_ads COMMAND test_recoil_ads WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
+# Detailed item meshes (docs/ITEM_PIPELINE.md): the .dgim loader on every shipped mesh, layering per
+# condition, posing, and the mesh sockets against the gameplay data (ADS alignment, hand glue).
+add_executable(test_item_mesh tests/test_item_mesh.c src/assets/item_mesh.c)
+set_target_properties(test_item_mesh PROPERTIES C_STANDARD 11)
+target_link_libraries(test_item_mesh PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_item_mesh PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME item_mesh COMMAND test_item_mesh WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
 add_executable(test_characters tests/test_characters.c)
 set_target_properties(test_characters PROPERTIES C_STANDARD 11)
 target_link_libraries(test_characters PRIVATE dg_animcore)
@@ -702,14 +712,37 @@ if(MSVC)
 endif()
 add_test(NAME ragdoll COMMAND test_ragdoll WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
-# Game UI: layout engine, inventory drag and drop / intents / reconcile, attachments, icons.
-add_executable(test_ui tests/test_ui.c src/ui/gui/gui_layout.c src/ui/inv_dragdrop.c src/gameplay/inv_ops.c src/gameplay/inventory.c)
+# Game UI: layout engine, icons and cell images.
+add_executable(test_ui tests/test_ui.c src/ui/gui/gui_layout.c)
 set_target_properties(test_ui PROPERTIES C_STANDARD 11)
 target_link_libraries(test_ui PRIVATE dg_animcore)
 if(MSVC)
   target_compile_options(test_ui PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 add_test(NAME ui COMMAND test_ui WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Grid inventory (docs/INVENTORY.md): rules matrix, intents, attachments, death / corpse, wire,
+# random-intent fuzz, two clients looting one crate through a 150 ms round trip.
+set(DG_INVENTORY_SOURCES src/gameplay/inventory.c src/gameplay/inventory/inv_tree.c src/gameplay/inventory/inv_rules.c
+  src/gameplay/inventory/inv_intent.c src/gameplay/inventory/inv_wire.c src/gameplay/inventory/inv_migrate.c)
+add_executable(test_inventory tests/test_inventory.c ${DG_INVENTORY_SOURCES})
+set_target_properties(test_inventory PROPERTIES C_STANDARD 11)
+target_link_libraries(test_inventory PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_inventory PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+# Stocked world containers: every level's and building-kit prefab's loot fits its root (test_world_loot).
+file(GLOB DG_LOOT_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/data/levels/*.json ${CMAKE_SOURCE_DIR}/assets/kits/building/prefabs/*.json)
+add_test(NAME inventory COMMAND test_inventory ${DG_LOOT_FILES} WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Inventory screen, pure parts: layout at 16:9 / 21:9 / 4:3, drag and drop for every source -> target, pad navigation.
+add_executable(test_inventory_ui tests/test_inventory_ui.c src/ui/inventory/inv_layout.c src/ui/inventory/inv_dd.c ${DG_INVENTORY_SOURCES})
+set_target_properties(test_inventory_ui PROPERTIES C_STANDARD 11)
+target_link_libraries(test_inventory_ui PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_inventory_ui PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME inventory_ui COMMAND test_inventory_ui WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # Main menu + lobby (docs/MENU_LOBBY.md): lobby state machine, membership / kick / ready / start,
 # chat, version check, wire, maps, cosmetics round trip, profile, seasons + weather bias, screen lint.
@@ -721,6 +754,18 @@ if(MSVC)
 endif()
 add_dependencies(test_lobby dg_copy_data)
 add_test(NAME lobby COMMAND test_lobby WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# Maps tab globe (docs/MENU_GLOBE.md): projection, flights, tile levels, visible box; the shipped tile
+# pack, vectors and regions.
+add_executable(test_globe tests/test_globe.c src/ui/globe/globe_math.c)
+set_target_properties(test_globe PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_globe PRIVATE src)
+if(MSVC)
+  target_compile_options(test_globe PRIVATE /W3 /utf-8)
+else()
+  target_link_libraries(test_globe PRIVATE m)
+endif()
+add_dependencies(test_globe dg_copy_data)
+add_test(NAME globe COMMAND test_globe WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 # HUD (docs/UI_WHEELS_HUD.md): radial wheel math + JSON, timed ring, pings, kill stats, compass, the
 # console registry categories; the registry lint (descriptions + categories of every registration).
 add_executable(test_hud tests/test_hud.c src/ui/widgets/radial_math.c src/ui/widgets/wheel_def.c src/gameplay/ping.c src/core/cmd_registry.c)
@@ -811,10 +856,12 @@ endif()
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(NAME lint_commands COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_commands.py)
+  add_test(NAME lint_inventory COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_inventory.py)
   add_test(NAME lint_settings COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_settings.py)
   # Recorded CC0 takes (docs/AUDIO_PROCEDURAL.md "Recorded samples"): every set on disk and credited.
   add_test(NAME audio_takes COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/audio_import/import_samples.py --check)
   add_test(NAME aim_sockets COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/aim_sockets.py)
+  add_test(NAME validate_items COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/validate_item/validate_item.py)
   add_test(NAME lint_looks COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_looks.py)
   # Ground textures (docs/GROUND_REFERENCE.md): the recipes validate, the generated / placeholder sets
   # meet their colour, coverage, gradient, silhouette and seam checks (needs numpy + Pillow).
@@ -889,6 +936,15 @@ if(MSVC)
   target_compile_options(test_lod PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 add_test(NAME lod COMMAND test_lod WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# Inventory character preview look + framing (docs/CHARACTERS.md "Character preview"): head top / image
+# bottom for any character scale, chest-height camera, JSON over the defaults, the shipped look parses.
+add_executable(test_char_preview tests/test_char_preview.c src/gameplay/char_preview_rig.c)
+set_target_properties(test_char_preview PROPERTIES C_STANDARD 11)
+target_link_libraries(test_char_preview PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_char_preview PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME char_preview COMMAND test_char_preview WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 # Classic instance cull arithmetic (src/render/classic_cull_math.h): bit for bit against the cull_instance
 # it was factored out of on 1M random instances and views; empty dither intervals emit no part.
 add_executable(test_classic_cull tests/test_classic_cull.c src/render/lod_fade.c src/render/shadow_casters.c src/render/fidelity/fidelity.c src/core/cvar.c)

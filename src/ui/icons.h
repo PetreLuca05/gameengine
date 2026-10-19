@@ -11,6 +11,7 @@
 
 void icons_init(void);
 void icons_reload(void);
+void icons_rerender(void);   // re-render every icon live from the current item models (item_reload)
 void icons_tick(void);                                     // lazy setup + progressive live bakes
 bool icons_get(u16 item, TextureId *tex, vec4 *uv);        // false: not ready (draw the fallback)
 int icons_missing(void);                                   // items whose icon is still a live bake / missing

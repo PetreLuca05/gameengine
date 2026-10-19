@@ -8,6 +8,8 @@
 // Must match SkyParams in shaders/sky/sky_common.glsl (std430).
 typedef struct SkyGpu {
     vec4 sun_dir, moon_dir, sun_disc, moon_disc, cel_x, cel_y, cel_z, clouds, clouds2, cam, ground, ap, cshadow, env, key, clouds3;
+    u32 cloud_cell[16];          // per noise octave: the lattice offset (x, z), mod 2^32 (cloud_octaves)
+    float cloud_frac[16];        // ... and the fractional offset
 } SkyGpu;
 
 typedef struct SkyImage {
@@ -21,7 +23,11 @@ typedef struct SkyImage {
 
 #define ENV_SIZE 128
 #define ENV_MIPS 6
-#define SH_VEC4 20
+#define SH_VEC4 30               // [0..8] in use, [9..17] the latest refilter, [18] luminances, [20..28] the previous
+// The multiple scattering LUT follows the aerosols: rebuilt once they moved this much (0.5 % of a
+// clear sky's density: the multiple-scattered light moves well under that, invisible; the
+// transmittance is exact for any density, sky_common.glsl trans_eval).
+#define MS_MIE_STEP 0.005f
 
 // Cached passes (PF-0026, docs/perf/FINDINGS.md): a pass whose inputs did not change since its last
 // run is skipped and its image keeps that run's texels. The key holds the exact bits of every
@@ -46,13 +52,19 @@ static bool cache_stale(const SkyCache *c, const SkyKey *k) {
 
 static struct {
     bool ok, images_init, luts_valid, env_valid;
-    SkyImage trans, ms, view, ap, env_next, env_cur, cshadow, clouds, milky;
+    SkyImage trans, ms, view, ap, env_img[3], env_cur, cshadow, clouds, milky;
     bool milky_baked, clouds_valid;
+    // The environment (docs/DAYNIGHT.md "IBL"): env_img[env_n] is being refilled a quarter per frame;
+    // env_img[env_b] is the latest complete refilter, env_img[env_a] the one before. env_cur = a
+    // blended into b by the phase env_since / 4 (frames since b completed).
+    int env_a, env_b, env_n, env_since;
+    bool env_steady;             // env_cur already holds env_b (phase 1, nothing new): the blend can rest
     // PF-0026: per cached pass its last key, the image versions, this frame's decisions (sky_build)
-    SkyCache c_view, c_aerial, c_clouds, c_cshadow, c_env[4];
+    SkyCache c_view, c_aerial, c_clouds, c_cshadow, c_env[3][4];
     SkyKey env_key;              // this frame's environment rows key (exec_env)
-    u32 lut_ver, view_ver, clouds_ver, cshadow_ver, env_next_ver, env_finish_ver;
-    bool run_view, run_aerial, run_clouds, run_cshadow;
+    u32 lut_ver, view_ver, clouds_ver, cshadow_ver;
+    bool run_view, run_aerial, run_clouds, run_cshadow, run_trans;
+    u32 trans_gen;               // the pipeline generation the transmittance LUT was built with
     int last_pass;               // this frame's last sky pass (sky_last_pass)
     GpuBuffer params[FRAMES_IN_FLIGHT];
     GpuBuffer sh;                // host visible: readback for tests
@@ -118,7 +130,7 @@ bool sky_init(void) {
     SK.ms = image_create(VK_IMAGE_TYPE_2D, 32, 32, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT);
     SK.view = image_create(VK_IMAGE_TYPE_2D, 192, 108, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT);
     SK.ap = image_create(VK_IMAGE_TYPE_3D, 32, 32, 32, 1, VK_FORMAT_R16G16B16A16_SFLOAT);
-    SK.env_next = image_create(VK_IMAGE_TYPE_2D, ENV_SIZE, ENV_SIZE, 1, ENV_MIPS, VK_FORMAT_R16G16B16A16_SFLOAT);
+    for (int i = 0; i < 3; i++) SK.env_img[i] = image_create(VK_IMAGE_TYPE_2D, ENV_SIZE, ENV_SIZE, 1, ENV_MIPS, VK_FORMAT_R16G16B16A16_SFLOAT);
     SK.env_cur = image_create(VK_IMAGE_TYPE_2D, ENV_SIZE, ENV_SIZE, 1, ENV_MIPS, VK_FORMAT_R16G16B16A16_SFLOAT);
     SK.cshadow = image_create(VK_IMAGE_TYPE_2D, 256, 256, 1, 1, VK_FORMAT_R32_SFLOAT);
     SK.clouds = image_create(VK_IMAGE_TYPE_2D, 512, 512, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT);
@@ -140,7 +152,7 @@ void sky_shutdown(void) {
     image_destroy(&SK.ms);
     image_destroy(&SK.view);
     image_destroy(&SK.ap);
-    image_destroy(&SK.env_next);
+    for (int i = 0; i < 3; i++) image_destroy(&SK.env_img[i]);
     image_destroy(&SK.env_cur);
     image_destroy(&SK.cshadow);
     image_destroy(&SK.clouds);
@@ -158,6 +170,7 @@ VkBuffer sky_sh_buffer(void) { return SK.sh.buffer; }
 VkDeviceSize sky_sh_size(void) { return sizeof(vec4) * SH_VEC4; }
 int sky_env_mips(void) { return ENV_MIPS; }
 u32 sky_refilter_count(void) { return SK.refilters; }
+u32 sky_lut_builds(void) { return SK.lut_ver; }
 void sky_cloud_shadow_region(vec2 *origin, float *size) { *origin = SK.cs_origin; *size = SK.cs_size; }
 
 float sky_sh_luminance(float *latest) {
@@ -185,7 +198,7 @@ static void barrier(VkCommandBuffer cmd) {
 
 static void init_images(VkCommandBuffer cmd) {
     if (SK.images_init) return;
-    SkyImage *all[] = { &SK.trans, &SK.ms, &SK.view, &SK.ap, &SK.env_next, &SK.env_cur, &SK.cshadow, &SK.clouds, &SK.milky };
+    SkyImage *all[] = { &SK.trans, &SK.ms, &SK.view, &SK.ap, &SK.env_img[0], &SK.env_img[1], &SK.env_img[2], &SK.env_cur, &SK.cshadow, &SK.clouds, &SK.milky };
     for (int i = 0; i < (int)ARRAY_COUNT(all); i++) {
         vkr_image_barrier(cmd, all[i]->image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_NONE, 0,
                           VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, all[i]->mips_n);
@@ -216,16 +229,18 @@ static void push_u(VkCommandBuffer cmd, u32 a, u32 c) {
 static void exec_luts(VkCommandBuffer cmd, void *u) {
     (void)u;
     init_images(cmd);
-    PostBind b = { 0 };
-    pb_img(&b, 8, SK.trans.view);
-    bind(cmd, &b);
-    post_dispatch(cmd, "sky/transmittance", 256, 64, 1, 8);
-    barrier(cmd);
+    if (SK.run_trans) {
+        PostBind b = { 0 };
+        pb_img(&b, 8, SK.trans.view);
+        bind(cmd, &b);
+        post_dispatch(cmd, "sky/transmittance", 256, 64, 1, 8);
+        barrier(cmd);
+    }
     PostBind b2 = { 0 };
     pb_tex_general(&b2, 0, SK.trans.view, P.linear);
     pb_img(&b2, 8, SK.ms.view);
     bind(cmd, &b2);
-    post_dispatch(cmd, "sky/multiscatter", 32, 32, 1, 8);
+    post_dispatch(cmd, "sky/multiscatter", 32, 32, 1, 1);   // a workgroup (64 directions) per texel
     if (!SK.milky_baked) {
         PostBind b3 = { 0 };
         pb_img(&b3, 8, SK.milky.view);
@@ -282,15 +297,16 @@ static void exec_cshadow(VkCommandBuffer cmd, void *u) {
     barrier(cmd);
 }
 
-// Refill rows [32 rows x the slice] of the next map (SkyParams env.y = slice, or the full
-// height in one go with rows = 128 on the first frame).
+// Refill rows [32 rows x the slice] of the map being refilled (SkyParams env.y = slice, or the
+// full height in one go with rows = 128 on the first frame).
 static void env_render(VkCommandBuffer cmd, u32 rows) {
+    SkyImage *next = &SK.env_img[SK.env_n];
     PostBind b = { 0 };
     pb_tex_general(&b, 0, SK.trans.view, P.linear);
     pb_tex_general(&b, 2, SK.view.view, P.linear_repeat);
     pb_tex_general(&b, 5, SK.clouds.view, P.linear);
     pb_tex_general(&b, 7, SK.cshadow.view, P.linear);
-    pb_img(&b, 8, SK.env_next.mips[0]);
+    pb_img(&b, 8, next->mips[0]);
     bind(cmd, &b);
     push_u(cmd, 0, 0);
     VkPipeline p = post_compute_pipe("sky/env_render");
@@ -300,12 +316,13 @@ static void env_render(VkCommandBuffer cmd, u32 rows) {
 }
 
 static void env_finish_cycle(VkCommandBuffer cmd) {
-    // Mips of the fresh map, then its SH.
+    // Mips of the fresh map, then its SH (env_sh moves the latest projection to the previous first).
+    SkyImage *next = &SK.env_img[SK.env_n];
     for (int m = 1; m < ENV_MIPS; m++) {
         barrier(cmd);
         PostBind b = { 0 };
-        pb_tex_general(&b, 4, SK.env_next.view, P.linear);
-        pb_img(&b, 8, SK.env_next.mips[m]);
+        pb_tex_general(&b, 4, next->view, P.linear);
+        pb_img(&b, 8, next->mips[m]);
         bind(cmd, &b);
         push_u(cmd, (u32)(m - 1), 0);
         u32 s = ENV_SIZE >> m;
@@ -313,7 +330,7 @@ static void env_finish_cycle(VkCommandBuffer cmd) {
     }
     barrier(cmd);
     PostBind b = { 0 };
-    pb_tex_general(&b, 4, SK.env_next.view, P.linear);
+    pb_tex_general(&b, 4, next->view, P.linear);
     pb_buf(&b, 14, SK.sh.buffer, sky_sh_size(), false);
     bind(cmd, &b);
     push_u(cmd, 0, 0);
@@ -325,19 +342,22 @@ static void env_finish_cycle(VkCommandBuffer cmd) {
     SK.refilters++;
 }
 
+// env_cur = the previous refilter blended into the latest by the cycle phase (SkyParams env.x), and
+// the SH the same way.
 static void env_blend(VkCommandBuffer cmd, bool snap) {
     barrier(cmd);
     for (int m = 0; m < ENV_MIPS; m++) {
         PostBind b = { 0 };
-        pb_img(&b, 8, SK.env_next.mips[m]);
+        pb_img(&b, 8, SK.env_img[SK.env_b].mips[m]);
         pb_img(&b, 9, SK.env_cur.mips[m]);
+        pb_img(&b, 10, SK.env_img[SK.env_a].mips[m]);
         bind(cmd, &b);
         push_u(cmd, (u32)m, snap ? 1u : 0u);
         u32 s = ENV_SIZE >> m;
         post_dispatch(cmd, "sky/env_blend", s, s, 1, 8);
     }
     PostBind b = { 0 };
-    pb_tex_general(&b, 4, SK.env_next.view, P.linear);
+    pb_tex_general(&b, 4, SK.env_img[SK.env_b].view, P.linear);
     pb_buf(&b, 14, SK.sh.buffer, sky_sh_size(), false);
     bind(cmd, &b);
     push_u(cmd, 1, snap ? 1u : 0u);
@@ -349,41 +369,84 @@ static void env_blend(VkCommandBuffer cmd, bool snap) {
     barrier(cmd);
 }
 
+static bool cache_same(const SkyCache *a, const SkyCache *b) {
+    return a->valid && b->valid && a->key.n == b->key.n && a->key.n < SKY_KEY_MAX && !memcmp(a->key.v, b->key.v, sizeof(u32) * a->key.n);
+}
+
 static void exec_env(VkCommandBuffer cmd, void *u) {
     (void)u;
     init_images(cmd);
     SkyGpu *g = (SkyGpu *)SK.params[R->frame_slot].mapped;
     if (!SK.env_valid) {
-        // First frame: the whole map at once, snapped (nothing to ease from).
+        // First frame: the whole map at once into image 0, snapped (nothing to blend from).
+        SK.env_n = 0;
         g->env.y = 0.0f;
         env_render(cmd, ENV_SIZE);
         env_finish_cycle(cmd);
+        SK.env_a = SK.env_b = 0;
+        SK.env_n = 1;
         env_blend(cmd, true);
         SK.env_valid = true;
+        SK.env_steady = true;
+        SK.env_since = 4;
         SK.slice = 0;
-        for (int s = 0; s < 4; s++) SK.c_env[s] = (SkyCache){ true, SK.env_key };
-        SK.env_finish_ver = ++SK.env_next_ver;
+        for (int i = 0; i < 3; i++)
+            for (int s = 0; s < 4; s++) SK.c_env[i][s] = (SkyCache){ i == 0, SK.env_key };
         return;
     }
-    // PF-0026: a quarter's rows are re-rendered only when their inputs changed since they were last
-    // written; a cycle whose rows all stayed keeps the mips and the SH projection it already has. The
-    // easing runs every frame (it converges on the GPU: no host-side test of its fixed point).
-    SkyCache *c = &SK.c_env[SK.slice];
+    // PF-0026: a quarter's rows are re-rendered only when their inputs changed since that image's rows
+    // were last written (every image keeps its own keys: the three rotate).
+    SkyCache *c = &SK.c_env[SK.env_n][SK.slice];
     if (cache_stale(c, &SK.env_key)) {
         env_render(cmd, 32);
         *c = (SkyCache){ true, SK.env_key };
-        SK.env_next_ver++;
     }
     if (SK.slice == 3) {
-        if (!prof_fix_enabled(PFX_SKY_CACHE) || SK.env_finish_ver != SK.env_next_ver) {
+        // The refilled map is complete. Unless it equals the latest (every quarter's key the same: the
+        // same texels, PF-0026), its mips and SH are built and it becomes the latest, the latest the
+        // previous; the blend starts over from the previous (the image the last frame converged to).
+        bool same = prof_fix_enabled(PFX_SKY_CACHE);
+        for (int s = 0; s < 4 && same; s++) same = cache_same(&SK.c_env[SK.env_n][s], &SK.c_env[SK.env_b][s]);
+        if (!same) {
             env_finish_cycle(cmd);
-            SK.env_finish_ver = SK.env_next_ver;
+            int old_a = SK.env_a;
+            SK.env_a = SK.env_b;
+            SK.env_b = SK.env_n;
+            SK.env_n = old_a != SK.env_a && old_a != SK.env_b ? old_a : 3 - SK.env_a - SK.env_b;
+            SK.env_since = 0;
+            SK.env_steady = false;
         } else {
             SK.refilters++;   // the same cycle again (sky_refilter_count counts cycles)
         }
     }
-    env_blend(cmd, false);
+    // The blend phase: 0 on the frame the latest completed (the output = the previous, where the last
+    // frame's blend had arrived), 1 four frames later. Resting once it holds the latest.
+    float phase = fminf((float)SK.env_since / 4.0f, 1.0f);
+    g->env.x = phase;
+    if (!SK.env_steady || !prof_fix_enabled(PFX_SKY_CACHE)) env_blend(cmd, false);
+    if (phase >= 1.0f) SK.env_steady = true;
+    SK.env_since = DG_MIN(SK.env_since + 1, 1000);
     SK.slice = (SK.slice + 1) & 3;
+}
+
+// The drift per noise octave (sky_common.glsl sk_fbm_drift): octave i of the first fbm reads
+// q x 2.03^i + T_i with T_0 = drift / scale, T_(i+1) = 2.03 T_i + (17.1, 9.7) (sk_fbm's recurrence);
+// the second fbm starts at 2.6 T_0 + (3.1, 1.7). Each T in double, split into an exact lattice cell
+// (mod 2^32: the hash wraps there) and a fraction: the noise stays exact at any drift.
+static void cloud_octaves(SkyGpu *g, const double off[2], float scale) {
+    double s = scale > 1.0f ? (double)scale : 3000.0;
+    double t1[2] = { off[0] / s, off[1] / s };
+    double t2[2] = { t1[0] * 2.6 + 3.1, t1[1] * 2.6 + 1.7 };
+    for (int i = 0; i < 8; i++) {
+        double *t = i < 5 ? t1 : t2;
+        for (int a = 0; a < 2; a++) {
+            double fl = floor(t[a]);
+            g->cloud_cell[i * 2 + a] = (u32)(i64)fl;
+            g->cloud_frac[i * 2 + a] = (float)(t[a] - fl);
+        }
+        t[0] = t[0] * 2.03 + 17.1;
+        t[1] = t[1] * 2.03 + 9.7;
+    }
 }
 
 // ------------------------------------------------------------------ frame
@@ -419,22 +482,25 @@ void sky_build(void) {
     g->cam = v4(cam.x, cam.y, cam.z, fmaxf(cam.y * 0.001f, 0.0f) + 0.002f);
     vec3 ga = v3_len2(e->ground_albedo) > 0 ? e->ground_albedo : v3(0.25f, 0.24f, 0.22f);   // snow / wet ground (shadow_sky.c)
     g->ground = v4(ga.x, ga.y, ga.z, e->ambient_scale);
-    // Aerosols in steps of 0.1: the transmittance / multiple scattering LUTs are rebuilt only when
-    // the step changes (every pass reads the same quantized value).
-    float mie_q = roundf(fmaxf(e->mie_scale, 0.0f) * 10.0f) / 10.0f;
-    g->ap = v4(e->aerial_max > 10.0f ? e->aerial_max : 3000.0f, 0.001f * fmaxf(e->aerial_scale, 0.01f), mie_q, (float)SK.frame);
+    // Aerosols: continuous (every pass reads this frame's; the transmittance is exact for any density).
+    float mie = fmaxf(e->mie_scale, 0.0f);
+    g->ap = v4(e->aerial_max > 10.0f ? e->aerial_max : 3000.0f, 0.001f * fmaxf(e->aerial_scale, 0.01f), mie, (float)SK.frame);
+    cloud_octaves(g, e->cloud_offset_d, g->clouds2.z);
     // Cloud shadow region: around the camera, snapped to its texels (stable under motion).
     float texel = SK.cs_size / 256.0f;
     SK.cs_origin = v2(floorf(cam.x / texel) * texel - SK.cs_size * 0.5f, floorf(cam.z / texel) * texel - SK.cs_size * 0.5f);
     g->cshadow = v4(SK.cs_origin.x, SK.cs_origin.y, SK.cs_size, 1.0f / SK.cs_size);
-    float k = 1.0f - expf(-fmaxf(P.in.dt, 0.0f) / 0.35f);   // environment ease (s)
-    g->env = v4(k, (float)SK.slice, (float)ENV_MIPS, (float)e->sky_debug);
+    g->env = v4(fminf((float)SK.env_since / 4.0f, 1.0f), (float)SK.slice, (float)ENV_MIPS, (float)e->sky_debug);   // x: exec_env sets the phase
     g->key = v4f(v3_norm(e->sun_dir), e->moon_key ? 1.0f : 0.0f);
     SK.cpu = *g;
     SK.frame++;
-    if (!SK.luts_valid || fabsf(SK.last_mie - mie_q) > 1e-4f) {
+    // The transmittance LUT (optical depths) once and after a shader reload; the multiple scattering
+    // whenever the aerosols moved MS_MIE_STEP (~0.2 ms on the async queue, 64 directions per texel in
+    // parallel: the serial build of both LUTs measured ~1.4 ms).
+    SK.run_trans = !SK.luts_valid || SK.trans_gen != P.pipe_gen;
+    if (SK.run_trans || fabsf(SK.last_mie - mie) > MS_MIE_STEP) {
         int p = fg_pass("sky_luts", exec_luts, NULL);
-        if (p >= 0) { SK.luts_valid = true; SK.last_mie = mie_q; SK.lut_ver++; }
+        if (p >= 0) { SK.luts_valid = true; SK.last_mie = mie; SK.lut_ver++; SK.trans_gen = P.pipe_gen; }
         sky_pass_async(p);
     }
     // PF-0026: each pass runs when its key (SkyKey: the fields its shader reads, the versions of what
@@ -465,15 +531,18 @@ void sky_build(void) {
     // light, whatever the drift (it never stops: cloud_wind_min), the camera or the layer. A NaN cover
     // fails the test and keeps the full keys.
     bool no_cover = g->clouds.x <= 0.001f;
-    // The cloud map changes slowly: every other frame (clouds.comp: the lights, the layer, the camera
-    // position (where the view rays meet the layer) and altitude, the LUTs, the sky view).
-    if (!SK.clouds_valid || (SK.frame & 1u) == 0u) {
+    // The cloud map changes slowly: every other frame, every frame in a time-lapse (the clock over 4x
+    // the default day: its light changes visibly per frame then). clouds.comp: the lights, the layer
+    // (its drift: the exact double offset), the camera position (where the view rays meet the layer)
+    // and altitude, the LUTs, the sky view.
+    if (!SK.clouds_valid || (SK.frame & 1u) == 0u || e->clock_speed > 4.0f) {
         SkyKey kc = { 0 };
         key_u(&kc, no_cover ? 1u : 0u);
         if (!no_cover) {
             key_v4(&kc, g->sun_dir);
             key_v4(&kc, g->moon_dir);
             key_v4(&kc, g->clouds);
+            key_f(&kc, (const float *)(const void *)e->cloud_offset_d, 4);
             key_f(&kc, &g->clouds2.x, 1);
             key_f(&kc, &g->clouds2.z, 1);
             key_f(&kc, &g->clouds3.x, 2);
@@ -495,6 +564,7 @@ void sky_build(void) {
     if (!no_cover) {
         key_f(&ks, &g->cshadow.x, 3);
         key_v4(&ks, g->clouds);
+        key_f(&ks, (const float *)(const void *)e->cloud_offset_d, 4);
         key_f(&ks, &g->clouds2.z, 1);
         key_f(&ks, &g->clouds3.x, 1);
     }

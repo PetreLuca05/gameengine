@@ -83,6 +83,21 @@ Shipped attachments:
 | `vertical_grip` | underbarrel | Left hand moves onto the grip; 0.85 recoil, 0.9 sway |
 | `extended_mag` | magazine | 1.5x capacity, slower reload |
 | `heavy_stock` | stock | 0.88 recoil, 0.8 camera kick, 0.8 sway, slower ADS |
+| `weapon_light` | underbarrel | `"emitter": "light"`: the flashlight (F) shines from it along the barrel; slightly slower ADS |
+| `laser` | underbarrel | `"emitter": "laser"`: the flashlight toggle shows a beam and a dot; 0.85 hip spread |
+
+**Detailed models** (docs/ITEM_PIPELINE.md):
+
+- `"mesh"` names the attachment's `.dgim`, drawn instead of the `"model"` boxes.
+- `"mesh_for": { "<weapon id>": "<mesh>" }` gives a variant that fits a particular weapon:
+  - the extended magazine per magazine well (`smg`, `dmr`);
+  - the compact weapon light on the `pistol`.
+
+  `attach_model_for` picks the variant.
+- Weapon meshes tag their parts with the slots that hide or fold them:
+  - the magazine and the stock under their replacements;
+  - the integral muzzle device under a muzzle attachment;
+  - the iron sights under an optic. The front sight flips down.
 
 ### Weapon slots: `data/weapons/*.json`, `"attachment_slots"`
 
@@ -125,6 +140,11 @@ Generates the sight parts and the sight socket from one line of sight (item spac
   sets how far the rear sight is from the eye. Red dots and auto-rail scopes keep the same weld.
 - The parts are flagged in `WeaponDef.iron_parts` and fold away (hidden) while an optic is mounted.
 - Weapons have up to `WPN_MAX_PARTS` (16) model parts, counting the generated ones.
+- A weapon with a detailed mesh (`"mesh"`, docs/ITEM_PIPELINE.md) models its sights on the same line:
+  the rear notch / aperture centre and the front post top sit at `line` (`rear_sight` / `front_sight`
+  parts, folding or hiding under an optic). `iron_sights` then only places the sight socket; no box
+  parts are generated. `test_item_mesh` checks the mesh's `sight` socket and the front post top
+  against `line`.
 
 ## Placement and exact ADS
 
@@ -199,8 +219,9 @@ per-frame re-solve. The barrel pull is used only if the slide isn't enough.
 - **ADS puts the hands and the weapon at one fixed FOV.** Aimed, their projection is the sight's own
   FOV, `2·atan(tan(75°/2) / attach_ads_vm_zoom)` (`RENDER_ADS_REF_FOV`), whatever `cl_fov` and the
   hip hands FOV are: the same sight picture for every player. It blends from the hip hands FOV along
-  `smoothstep(ads_t)`, exactly the aimed value the moment `ads_t` reaches 1. Iron sights use the weapon's `ads_fov`, a red dot its own `ads_fov` / `zoom` on top,
-  a scope `main_zoom`; each as a FOV against a 75° view, so the gun and sight look as they did
+  `smoothstep(ads_t)`, exactly the aimed value the moment `ads_t` reaches 1. Iron sights use the weapon's `ads_fov`, a red dot its own `ads_fov` / `zoom` on top
+  (at most 2.35x aimed, `REDDOT_MAX_VM_ZOOM`, the rifle's: a 1x optic on the sniper / DMR, whose irons
+  are narrow, doesn't fill the screen), a scope `main_zoom`; each as a FOV against a 75° view, so the gun and sight look as they did
   when this zoomed the whole view. The default irons are `75 · 0.8` = 60° against 75°, the
   1.25x ADS hands zoom. The hip value is `RenderCamera.vm_fov_deg` (the hip FOV) or
   `cam_weapon_fov`: the Settings → Graphics → View "Hands / weapon FOV" slider (40..120; the

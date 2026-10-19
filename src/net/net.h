@@ -55,9 +55,14 @@ void net_client_send_cmds(const UserCmd *history, int history_size, u32 latest_s
 void net_client_interpolate(struct World *w, float dt);
 u32 net_client_view_tick256(void);
 double net_client_render_tick(void);    // fractional server tick being rendered
+// The same estimate at a local time (platform_time base): the time-of-day clock samples it at the
+// frame start, the time base of the frame's dt (0 before the first snapshot).
+double net_client_render_tick_at(double local_time);
 int net_host_client_count(void);
 void net_host_send_anim_events(struct World *w);
 void net_send_rpc(int type, int a, int b, int c);
+struct InvIntent;
+void net_send_inv_intent(const struct InvIntent *in);   // client -> host: MSG_INV_INTENT (docs/INVENTORY.md)
 u16 net_player_owd_ms(int slot);         // host: one-way delay estimate of a remote player (RTT / 2), 0 = local / none
 NetStats net_stats(void);
 

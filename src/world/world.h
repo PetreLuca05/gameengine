@@ -17,6 +17,7 @@
 
 #define MAX_ENTITIES 4096
 #define MAX_PLAYERS 8
+#define MAX_LOOT_TREES 384      // world inventories (crates, corpses, trunks) alive at once
 #define CLIENT_ENTITY_BASE 3584     // indices >= this are client-local (never replicated)
 #define LAGCOMP_TICKS 64
 
@@ -162,8 +163,11 @@ typedef struct LightComp {
     bool shadow_given;
 } LightComp;
 
+// A world inventory (docs/INVENTORY.md): crates, cabinets, corpses, vehicle storage. The grid
+// tree lives in World.loot_trees (created on first use, freed with the entity).
 typedef struct Container {
-    InvSlot slots[CONTAINER_SLOTS];
+    u16 tree;             // loot_trees index + 1 (0 = none yet)
+    i16 root;             // root container def ("crate" when < 0 at creation)
     float lid;            // 0 closed .. 1 open (animation)
     bool opened;
     u32 revision;
@@ -213,7 +217,7 @@ typedef struct Player {
     struct PhysCharacter *character;
     Inventory inv;
     u32 inv_sent_revision;
-    u32 inv_ack_seq;          // host: the last RPC_INV_OP sequence applied (sent with MSG_INVENTORY)
+    u32 inv_ack_seq;          // host: the last MSG_INV_INTENT sequence applied (sent with MSG_INVENTORY)
     UserCmd last_cmd;
     u32 last_processed_seq;
     // command queue (host side)
@@ -228,6 +232,9 @@ typedef struct Player {
     float respawn_timer;
     u32 spawn_index;
     EntityId open_container;
+    u16 armor_carrier;        // host: the plate carrier worn last tick (uid; health_sync_armor)
+    EntityId loot_sent_ent;   // host: the world container last sent (MSG_LOOT) and its revision
+    u32 loot_sent_rev;
 } Player;
 
 // cull_dist > 0: skipped beyond that distance from cull_center (open-world detail tiles).
@@ -302,6 +309,8 @@ struct World {
     Lever lever[MAX_ENTITIES];
     LightComp light[MAX_ENTITIES];
     Container cont[MAX_ENTITIES];
+    InvTree loot_trees[MAX_LOOT_TREES];   // world container inventories (Container.tree)
+    u8 loot_tree_used[MAX_LOOT_TREES];
     Pickup pickup[MAX_ENTITIES];
     Projectile proj[MAX_ENTITIES];
     Hitbox hitbox[MAX_ENTITIES];

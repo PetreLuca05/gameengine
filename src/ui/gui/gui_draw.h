@@ -11,7 +11,8 @@
 #include "gui_layout.h"
 
 typedef enum GuiWeight { GW_REGULAR, GW_MEDIUM, GW_SEMIBOLD, GW_COUNT } GuiWeight;
-typedef enum GuiLayer { GL_BASE, GL_OVERLAY, GL_TOP, GL_COUNT } GuiLayer;
+// GL_OFFSCREEN: drawn into a target texture before the screen's layers (gd_offscreen_begin).
+typedef enum GuiLayer { GL_BASE, GL_OVERLAY, GL_TOP, GL_OFFSCREEN, GL_COUNT } GuiLayer;
 enum { GUI_LEFT = 0, GUI_CENTER = 1, GUI_RIGHT = 2 };
 #ifndef UI_RGBA
 #define UI_RGBA(r, g, b, a) ((u32)(r) | ((u32)(g) << 8) | ((u32)(b) << 16) | ((u32)(a) << 24))
@@ -53,8 +54,19 @@ void gd_circle(float cx, float cy, float radius, u32 c);
 void gd_ring(float cx, float cy, float radius, float t, float frac, u32 c);   // frac 0..1 of a circle, clockwise from the top
 void gd_line(float x0, float y0, float x1, float y1, float t, u32 c);
 void gd_image(GuiRect r, TextureId tex, vec4 uv, u32 tint);
-void gd_image_mask(GuiRect r, TextureId tex, vec4 uv, u32 color);   // the image's silhouette (its alpha) in one colour
+void gd_image_mask(GuiRect r, TextureId tex, vec4 uv, u32 color);
+void gd_image_rot90(GuiRect r, TextureId tex, vec4 uv, u32 tint);    // the image turned 90 deg clockwise into r (inventory cells)   // the image's silhouette (its alpha) in one colour
 void gd_backdrop(GuiRect r, u32 tint);   // the blurred scene behind r (falls back to a dark fill)
+// Textured triangles (uv in [0, 1], the vertex colour multiplies the texture; indices into v).
+// Dropped when they would overflow the layer.
+void gd_tris(TextureId tex, const UiVertex *v, int nv, const u32 *idx, int ni);
+// Anti-aliased polyline (mitred joins, like gd_line's 1 px feather); closed: back to the first point.
+void gd_polyline(const vec2 *p, int n, float t, u32 c, bool closed);
+// Offscreen layer (docs/MENU_GLOBE.md "Rendering"): everything drawn until gd_offscreen_end goes into
+// `target` (render_ui3d_target_create, screen sized; cleared to `clear`) before the screen's layers,
+// and this frame's blurred backdrop is made from it (panels over it blur what they cover).
+void gd_offscreen_begin(TextureId target, u32 clear);
+void gd_offscreen_end(void);
 
 float gd_text(const GuiText *t, float x, float y, const char *s);   // y = top of the line box; returns width
 float gd_text_simple(float x, float y, float size, int weight, u32 c, int align, const char *s);
@@ -64,8 +76,11 @@ float gd_line_height(float size);
 float gd_text_wrap(const GuiText *t, float x, float y, float w, const char *s, bool draw);
 
 TextureId gd_atlas(void);
+vec2 gd_white_uv(void);       // a white texel of the atlas (flat colour with gd_tris)
 void gd_register_commands(void);
 int gd_stats_cmds(void);      // last flush: draw commands (ui_debug)
 int gd_stats_verts(void);
+u32 gd_layer_verts(int layer);     // vertices in a layer so far this frame (budget checks)
+u32 gd_layer_verts_cap(int layer);
 
 #endif

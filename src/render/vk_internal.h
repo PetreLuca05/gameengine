@@ -21,7 +21,7 @@
 #define MAX_VM_DRAWS 512
 #define MAX_DEFERRED 4096
 #define MAX_UPLOADS 4096
-#define DYN_BUFFER_SIZE (16u << 20)
+#define DYN_BUFFER_SIZE (32u << 20)
 #define MAX_SKIN_BONES 196608   // hordes: ~1000 characters x 65 bones + shadow draws
 #define MAX_SKIN_DRAWS 8192   // skinned parts per frame (a zombie draws several): 1000+ zombies
 #define SKIN_RING_REGIONS (FRAMES_IN_FLIGHT + 1)   // PF-0020: the frame being written, the one in flight, its previous
@@ -117,6 +117,8 @@ typedef struct FrameResources {
     VkDescriptorSet frame_set_pip;
     GpuBuffer ubo_phone[2];   // phone camera views (src/render/phone_view.c)
     VkDescriptorSet frame_set_phone[2];
+    GpuBuffer ubo_preview;    // the inventory character preview (src/render/char_preview_view.c)
+    VkDescriptorSet frame_set_preview;
     GpuBuffer dyn;        // host-visible: lines, text, ui
     GpuBuffer bones;      // host-visible SSBO: skinning palettes + last frame's (perf_fix_disable PF-0020 only, made on first use)
     bool bones_ring;      // the frame sets bind R->bone_ring (PF-0020), not `bones`
@@ -127,14 +129,15 @@ typedef struct FrameResources {
     int deferred_count;
 } FrameResources;
 
-// Every frame descriptor set of a frame slot (main, scope PiP, phone views): bindings shared by
-// all of them (shadow map, sky, weather, cookie) are written to each.
-#define FRAME_SET_COUNT 4
+// Every frame descriptor set of a frame slot (main, scope PiP, phone views, character preview):
+// bindings shared by all of them (shadow map, sky, weather, cookie) are written to each.
+#define FRAME_SET_COUNT 5
 DG_INLINE void frame_sets_of(const FrameResources *f, VkDescriptorSet *out) {
     out[0] = f->frame_set;
     out[1] = f->frame_set_pip;
     out[2] = f->frame_set_phone[0];
     out[3] = f->frame_set_phone[1];
+    out[4] = f->frame_set_preview;
 }
 
 // Must match shaders/common.glsl (std140).
@@ -253,6 +256,7 @@ typedef enum PipelineId {
     PIPE_SHADOW_MASK,   // shadow passes: alpha-masked casters (glTF MASK: foliage cards, fences)
     PIPE_SHADOW_2S,     // shadow passes: Cast Shadows Two Sided / two-sided materials (PIPE_SHADOW culls back faces)
     PIPE_SHADOW_MORPH_2S,   // the same for terrain geomorph casters (PIPE_SHADOW_MORPH culls back faces)
+    PIPE_UI_RGBA8,          // PIPE_UI into an RGBA8 item view target (render_ui_offscreen)
     PIPE_COUNT
 } PipelineId;
 
@@ -428,6 +432,10 @@ typedef struct Renderer {
     UiVertex *ui_verts; u32 ui_vcount, ui_vcap;
     u32 *ui_indices; u32 ui_icount, ui_icap;
     UiDrawCmd *ui_cmds; u32 ui_ccount, ui_ccap;
+    // Offscreen UI jobs (render_ui_offscreen): their vertices / indices share the UI arrays above,
+    // their commands are ui_cmds[ui_ccap - ui_off_ccount ..] (filled from the end).
+    struct UiOffscreenJob { TextureId target; u32 clear; u32 first_cmd, cmd_count; bool backdrop; } ui_off[4];
+    u32 ui_off_count, ui_off_ccount;
 
     RenderCamera cam;
     RenderEnvironment env;
@@ -442,6 +450,8 @@ typedef struct Renderer {
     bool shadow_redraw[4];
     struct ShadowHold { bool valid; mat4 vps, vp_ndc; vec3 center, L; float radius, texel_m, bias, span, nbias, mpt; } shadow_hold[4];
     u32 shadow_hold_key;                        // cascades / tile / fit / shadow image generation the holds belong to
+    vec3 shadow_pivot;                          // the light views' pivot near the camera (csm_pivot)
+    bool shadow_pivot_valid;
     bool moon_active;
     // Unity-style controls (docs/SHADOWS_UNITY_MODEL.md): this frame's quality knobs, the
     // directional light's settings, its effective type / filter.
@@ -515,6 +525,8 @@ typedef struct Renderer {
 // render_ui.c (frame graph hooks)
 void render_ui_build(int ldr, u32 out_w, u32 out_h);   // before the final pass: backdrop blur, item views
 void render_ui_final_reads(int final_pass);
+// The UI pipeline's draw loop (render.c): cmds into the current rendering, w x h pixels, pipeline `pipe`.
+void vkr_ui_draw_cmds(VkCommandBuffer cmd, const UiDrawCmd *cmds, u32 count, u32 w, u32 h, int pipe);
 bool render_ui_wants_wait(void);
 void render_ui_frame_done(void);
 void render_ui_shutdown(void);

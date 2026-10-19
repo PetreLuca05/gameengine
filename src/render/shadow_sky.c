@@ -226,7 +226,10 @@ static void light_eval(SskyLight *l, vec3 rgb, float sky_e, float radius_target,
 void ssky_update(ShadowSkyState *s, const ShadowSkyConfig *c, const ShadowSkyInput *in, ShadowSkyOut *out) {
     memset(out, 0, sizeof(*out));
     bool snap = !s->init || in->dt <= 0.0f;
-    float dt = in->dt;
+    // The fades and the source radius follow the sky, which follows the clock: at time_scale 60 they
+    // keep up with the sun instead of lagging an hour of game time (the tier crossfade below stays in
+    // real seconds: a settings change is not the sky's).
+    float dt = in->dt * fmaxf(in->clock_speed, 1.0f);
     out->sky_e = vmax3(in->sky_up);
     // Cloud sheet over the key's path.
     out->veil_tau = ssky_veil_tau(c, in->cloud_cover, in->cloud_density);
@@ -271,8 +274,8 @@ void ssky_update(ShadowSkyState *s, const ShadowSkyConfig *c, const ShadowSkyInp
     float max_target = c->pcss_max_texels[soft];
     if (snap || s->max_tex <= 0.0f) { s->pcss_w = pcss_target; s->max_tex = max_target; }
     else {
-        s->pcss_w = approach(s->pcss_w, pcss_target, dt, c->mode_s);
-        s->max_tex = approach(s->max_tex, max_target, dt, c->mode_s);
+        s->pcss_w = approach(s->pcss_w, pcss_target, in->dt, c->mode_s);
+        s->max_tex = approach(s->max_tex, max_target, in->dt, c->mode_s);
         if (fabsf(s->pcss_w - pcss_target) < 1e-3f) s->pcss_w = pcss_target;
     }
     out->filter_model = in->fixed_hardness ? 0 : soft;
@@ -289,11 +292,15 @@ void ssky_update(ShadowSkyState *s, const ShadowSkyConfig *c, const ShadowSkyInp
     float ws = fmaxf(in->wind_speed * c->cloud_wind_aloft, c->cloud_wind_min);
     float wd = in->wind_dir_deg * DG_DEG2RAD;
     out->cloud_vel = v2(sinf(wd) * ws, -cosf(wd) * ws);
+    // The drift advances with the world clock (drift_dt: paused with it, a time-lapse at time_scale),
+    // in double without a wrap: after 100 game days (~1e6 m) a frame's step is still exact.
     if (!snap) {
-        s->cloud_offset.x = (float)fmod(s->cloud_offset.x + out->cloud_vel.x * dt, 1.0e6);
-        s->cloud_offset.y = (float)fmod(s->cloud_offset.y + out->cloud_vel.y * dt, 1.0e6);
+        s->cloud_offset[0] += (double)out->cloud_vel.x * in->drift_dt;
+        s->cloud_offset[1] += (double)out->cloud_vel.y * in->drift_dt;
     }
-    out->cloud_offset = s->cloud_offset;
+    out->cloud_offset_d[0] = s->cloud_offset[0];
+    out->cloud_offset_d[1] = s->cloud_offset[1];
+    out->cloud_offset = v2((float)s->cloud_offset[0], (float)s->cloud_offset[1]);
     // Exposure: overcast / snow scenes metered to mid grey read darker than they are.
     float eff_cover = clampf(in->cloud_cover * (0.6f + 0.4f * clampf(in->cloud_density, 0.0f, 1.0f)) + in->precip * 0.3f, 0.0f, 1.0f);
     out->exposure_comp = ssky_curve(&c->exposure_cover, eff_cover) + ssky_curve(&c->exposure_snow, clampf(in->snow, 0.0f, 1.0f));

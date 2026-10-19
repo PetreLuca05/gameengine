@@ -14,7 +14,7 @@
 #include "player/camera.h"
 #include "render/mesh_gen.h"
 #include "gameplay/items.h"
-#include "gameplay/inv_ops.h"
+#include "gameplay/inventory.h"
 #include "gameplay/kill_stats.h"
 #include "gameplay/ping.h"
 #include "usercmd.h"
@@ -44,7 +44,9 @@ typedef struct Game {
     // local view + command building
     ViewState view;
     CamHeadStab cam_stab;        // first-person head camera stabilizer (src/player/camera_fp.c)
-    u8 hotbar_slot;
+    u8 sel_slot;                 // selection (UserCmd.slot): INV_SEL_* (docs/INVENTORY.md "Selection")
+    u8 sel_weapon;               // the last weapon slot selected (the hands fall back to it)
+    bool attack_wait_release;    // fire masked until released (the hands fell back to a weapon mid-press)
     UserCmd last_cmd;
     vec2 frame_look;
     bool use_pressed_frame;
@@ -73,10 +75,15 @@ typedef struct Game {
     EntityId container_ent;
     bool bench_open;                 // weapon bench attachment UI (EV_BENCH)
     EntityId bench_ent;
-    InvSlot container_slots[CONTAINER_SLOTS];
-    int inv_selected;            // slot picked up for moving (-1 none)
-    // inventory intents (client prediction)
-    InvOp inv_pending[64];
+    // Grid inventory (docs/INVENTORY.md). Client: the host's last trees (bases) and the predicted
+    // copies (bases + the unacknowledged intents re-applied). The host's own player uses the real trees.
+    Inventory inv_base;
+    bool inv_base_valid;
+    InvTree loot;                // the open world inventory (predicted)
+    InvTree loot_base;
+    EntityId loot_ent;           // ENT_NONE: no tree received yet
+    u32 loot_rev;
+    InvIntent inv_pending[64];
     int inv_pending_count;
     u32 inv_seq;
     bool paused;                 // single player / host alone: the pause menu stops the simulation
@@ -130,6 +137,7 @@ Player *game_local_player(void);
 void game_perf_init(void);
 void game_perf_frame(void);   // main loop, after the command buffer
 float game_ads_vis(void);       // the viewed player's ADS progress interpolated to this frame (zoom, sight presentation)
+int game_cam_mode(void);        // this frame's world camera: 0 fallback eye, 1 head camera (first person), 2 death, 3 third person / free / vehicle orbit
 // Spectating (docs/SPECTATE.md): whose eyes the first-person presentation uses. The watched player
 // in first / third person, else the local player. Input, prediction and RPCs stay on local_slot.
 int game_view_slot(void);
@@ -145,6 +153,7 @@ void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick);
 void game_cl_disconnected(const char *reason);
 void game_handle_event(const GameEvent *ev);   // client-side event handling
 void game_rpc(int type, int a, int b, int c);   // client -> host request (inventory, containers)
+void game_select(int sel);                      // the local selection (INV_SEL_*): keys 1-3, the wheels, `slot`
 const PingTypes *game_ping_types(void);         // assets/ui/wheels/ping.json (game_pings.c)
 void wheels_draw(void);                         // radial wheels + the HUD timed ring (game_wheels.c)
 void game_sv_handle_rpc(int slot, int type, int a, int b, int c);
@@ -185,7 +194,10 @@ const char *weather_event_name(WeatherEvent e);
 const char *weather_name(World *w);              // the current preset ("clear", "light_rain" ...; photo sidecars)
 
 enum RpcType {
-    RPC_INV_MOVE = 1, RPC_INV_DROP, RPC_CONTAINER_TAKE, RPC_CONTAINER_PUT, RPC_CONTAINER_CLOSE, RPC_INV_USE, RPC_ATTACH, RPC_INV_OP, RPC_SET_PART,
+    RPC_INV_DROP = 1,      // a = selection (INV_SEL_*): the held item on the ground (G tap); inventory changes are MSG_INV_INTENT
+    RPC_CONTAINER_CLOSE,   // the inventory screen closed: the open world inventory too
+    RPC_ATTACH,            // a = inventory slot, b = attachment slot, c = attachment id (bench)
+    RPC_SET_PART,          // modular character part
     RPC_SPECTATE,    // a = SpecMode, b = target slot or SpecTargetReq, c = 1 dev (alive; host / sv_cheats)
     RPC_RESPAWN,     // respawn request (sv_respawn_mode 1)
     RPC_SPEC_POS,    // free camera position x 16 (relevance)
@@ -193,11 +205,21 @@ enum RpcType {
     RPC_PING,        // a / b / c = ping_pack (gameplay/ping.h)
 };
 
-// Inventory intents (gameplay/inv_ops.h, docs/UI.md): applied at once on the host; a client predicts
-// them on its copy and re-applies the unacknowledged ones on every inventory the host sends.
-struct InvOp;
-int game_inv_op(struct InvOp *op);   // returns the (predicted) InvOpResult
-void game_cl_inventory(int slot, u32 revision, u32 ack_seq, const InvSlot *slots);
-int game_inv_pending(void);          // client: intents not yet acknowledged
+// Inventory intents (gameplay/inventory/inv_intent.h, docs/INVENTORY.md): applied at once on the
+// host; a client predicts them on its copies and re-applies the unacknowledged ones on every
+// inventory / loot tree the host sends.
+int game_inv_intent(InvIntent *in);   // returns the (predicted) InvResult; fills in->seq
+int game_inv_pending(void);           // client: intents not yet acknowledged
+void game_cl_inventory(int slot, u32 revision, u32 ack_seq, u16 hands, const InvTree *tree);
+void game_cl_loot(EntityId e, u32 revision, const InvTree *tree);   // tree NULL: closed
+// The open world inventory as this machine sees it (host: the real tree; client: the predicted
+// copy), NULL when none is open / not received yet.
+InvTree *game_loot_tree(void);
+EntityId game_loot_ent(void);
+void game_sv_inv_intent(int slot, const InvIntent *in);   // host: validate + apply + world effects
+int game_sv_inv_intent_r(int slot, const InvIntent *in);  // the same, returning the InvResult
+void game_sv_loot_close(int slot);
+float game_loot_reach(World *w, EntityId e);   // sv_inv_reach (+ 1 m for vehicles)
+void game_loot_register(void);
 
 #endif

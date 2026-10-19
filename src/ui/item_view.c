@@ -1,5 +1,6 @@
 #include "item_view.h"
 #include "gameplay/attachments.h"
+#include "assets/item_mesh.h"
 #include <math.h>
 #include <string.h>
 
@@ -31,10 +32,28 @@ int item_view_parts(const ItemDB *db, u16 item, const u8 *att, int highlight_slo
         static WeaponDef eff;
         u8 none[ATT_SLOTS] = { 0 };
         attach_weapon_effective(db, wd, att ? att : none, &eff);
-        for (int i = 0; i < eff.part_count; i++) add(out, &n, max, eff.parts[i].offset, quat_identity(), eff.parts[i].half, eff.parts[i].color, 0, 0, mn, mx);
+        ItemMesh *wm = item_mesh_get(eff.model.mesh);
+        if (wm) {   // the detailed model (docs/ITEM_PIPELINE.md): filled slots hide / fold their parts
+            ItemMeshPose pose = { 0 };
+            pose.wobble = quat_identity();
+            for (int k = 0; k < ATT_SLOTS; k++)
+                if (eff.att_applied[k]) pose.fold_slots |= (u8)(1u << k);
+            pose.hide_slots = pose.fold_slots;
+            n += item_mesh_ui_parts(wm, item_mesh_condition(eff.model.condition), xf_identity(), &pose, 0, out + n, max - n, mn, mx);
+        } else {
+            for (int i = 0; i < eff.part_count; i++) add(out, &n, max, eff.parts[i].offset, quat_identity(), eff.parts[i].half, eff.parts[i].color, 0, 0, mn, mx);
+        }
         AttachDrawPart parts[ATT_SLOTS * ATT_MAX_PARTS];
         for (int k = 0; k < ATT_SLOTS; k++) {
             if (!eff.att_applied[k]) continue;
+            const AttachmentDef *amd = attach_def(db, eff.att_applied[k]);
+            const ItemModelRef *amr = amd ? attach_model_for(amd, wd) : NULL;
+            ItemMesh *am = amd && amd->slot == k && attach_allowed(&eff, amd) ? item_mesh_get(amr->mesh) : NULL;
+            if (am) {
+                n += item_mesh_ui_parts(am, item_mesh_condition(amr->condition), attach_placement(&eff, amd), NULL, k == highlight_slot ? 0.8f : 0.0f,
+                                        out + n, max - n, mn, mx);
+                continue;
+            }
             u8 one[ATT_SLOTS] = { 0 };
             one[k] = eff.att_applied[k];
             int pc = attach_draw_parts(db, &eff, one, parts, ARRAY_COUNT(parts));
@@ -58,11 +77,15 @@ int item_view_parts(const ItemDB *db, u16 item, const u8 *att, int highlight_slo
     }
     if (it->kind == ITEM_ATTACHMENT) {
         const AttachmentDef *ad = attach_def(db, it->attachment);
+        ItemMesh *am = ad ? item_mesh_get(ad->model.mesh) : NULL;
+        if (am) return item_mesh_ui_parts(am, item_mesh_condition(ad->model.condition), xf_identity(), NULL, 0, out, max, mn, mx);
         if (ad && ad->part_count) {
             for (int i = 0; i < ad->part_count; i++) add(out, &n, max, ad->parts[i].offset, quat_identity(), ad->parts[i].half, ad->parts[i].color, 0, 0, mn, mx);
             return n;
         }
     }
+    ItemMesh *im = item_mesh_get(it->model.mesh);
+    if (im) return item_mesh_ui_parts(im, item_mesh_condition(it->model.condition), xf_identity(), NULL, 0, out, max, mn, mx);
     // Pickup / held item: its box (world-scale pickup size, so small items still read well).
     vec3 h = it->size;
     u32 shape = it->shape == VIS_CYLINDER ? 1u : 0u;

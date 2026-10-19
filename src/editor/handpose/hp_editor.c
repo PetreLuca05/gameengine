@@ -66,7 +66,7 @@ static struct {
     bool saved_valid;
     World *saved_world;
     InvSlot saved_slot;
-    u8 saved_hotbar;
+    u8 saved_sel;
     int saved_force, saved_static;
     bool neutral_light;
     // rig
@@ -290,9 +290,9 @@ static void restore_slot(void) {
     Game *g = game();
     Player *p = game_local_player();
     if (!E.saved_valid || !g || g->world != E.saved_world || !p) { E.saved_valid = false; return; }
-    p->inv.slots[0] = E.saved_slot;
+    *inv_dev_sel(&p->inv, &g->items, 0) = E.saved_slot;
     p->inv.revision++;
-    g->hotbar_slot = E.saved_hotbar;
+    g->sel_slot = E.saved_sel;
     E.saved_valid = false;
 }
 
@@ -303,10 +303,10 @@ static void hold_item(u16 item, const u8 *att) {
     if (!E.saved_valid) {
         E.saved_valid = true;
         E.saved_world = g->world;
-        E.saved_slot = p->inv.slots[0];
-        E.saved_hotbar = g->hotbar_slot;
+        E.saved_slot = *inv_sel(&p->inv, 0);
+        E.saved_sel = g->sel_slot;
     }
-    InvSlot *s = &p->inv.slots[0];
+    InvSlot *s = inv_dev_sel(&p->inv, &g->items, 0);
     memset(s, 0, sizeof(*s));
     s->item = item;
     s->count = item ? 1 : 0;
@@ -314,7 +314,7 @@ static void hold_item(u16 item, const u8 *att) {
     s->ammo = wd ? (i16)(wd->mag_size > 1 ? wd->mag_size - 1 : wd->mag_size) : 0;   // one short: a reload can run
     if (att) memcpy(s->att, att, ATT_SLOTS);
     p->inv.revision++;
-    g->hotbar_slot = 0;
+    g->sel_slot = 0;
     if (item) snprintf(E.preview_text, sizeof(E.preview_text), "holding %s", item_def(&g->items, item)->id);
 }
 
@@ -371,7 +371,7 @@ static const ItemSockets *held_sockets(const HandPoseEntry **owner) {
     *owner = NULL;
     if (!g || !p) return NULL;
     const WeaponDef *wd = g->world ? weapon_equipped_def(g->world, g->local_slot) : NULL;
-    const ItemDef *id = item_def(&g->items, p->inv.slots[g->hotbar_slot < INV_SLOTS ? g->hotbar_slot : 0].item);
+    const ItemDef *id = item_def(&g->items, inv_sel_c(&p->inv, g->sel_slot < INV_SEL_COUNT ? g->sel_slot : 0)->item);
     const ItemSockets *k = wd ? &wd->sockets : (id && id->has_hold ? &id->sockets : NULL);
     if (k) {
         int e = handpose_find_hash(db(), k->pose_id[1]);
@@ -390,7 +390,7 @@ static void edit_defaults(const HandPoseEntry *e, HpEditDefaults *d) {
     const ItemSockets *it = held_sockets(&owner);
     const WeaponDef *wd = weapon_equipped_def(g->world, g->local_slot);
     Player *p = game_local_player();
-    const ItemDef *id = p ? item_def(&g->items, p->inv.slots[g->hotbar_slot < INV_SLOTS ? g->hotbar_slot : 0].item) : NULL;
+    const ItemDef *id = p ? item_def(&g->items, inv_sel_c(&p->inv, g->sel_slot < INV_SEL_COUNT ? g->sel_slot : 0)->item) : NULL;
     const char *style = wd ? wd->hold_style : (id && id->has_hold ? id->hold_style : NULL);
     if (it && e) {
         for (int h = 0; h < 2; h++) {
@@ -1095,7 +1095,7 @@ static int item_boxes(const CharacterInst *c, HandBox *out, int max) {
     Xform im = c->rt.proc.item_model;
     float k = c->rt.proc.item_scale > 0 ? c->rt.proc.item_scale : 1.0f;
     im.s = v3(1, 1, 1);
-    const InvSlot *slot = &p->inv.slots[g->hotbar_slot < INV_SLOTS ? g->hotbar_slot : 0];
+    const InvSlot *slot = inv_sel_c(&p->inv, g->sel_slot < INV_SEL_COUNT ? g->sel_slot : 0);
     const WeaponDef *wd = item_weapon(&g->items, slot->item);
     int n = 0;
     if (wd && wd->part_count) {

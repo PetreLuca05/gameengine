@@ -13,5 +13,6 @@
   "weather": "",
   "dev": true,
   "order": 60,
-  "description": "Transition test strip: one straight border per terrain material pair (grass, dirt, rock, mud, sand, field, meadow, asphalt, gravel), rows 10 m apart. r_terrain_debug 7 / 11 / 1 show the bands, border distance and weights."
+  "description": "Transition test strip: one straight border per terrain material pair (grass, dirt, rock, mud, sand, field, meadow, asphalt, gravel), rows 10 m apart. r_terrain_debug 7 / 11 / 1 show the bands, border distance and weights.",
+  "globe": { "place": "Cernavodă", "lon": 28.033, "lat": 44.338, "region": "ro_ct" }
 }

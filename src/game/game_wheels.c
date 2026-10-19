@@ -14,7 +14,6 @@
 #include "gameplay/entities.h"
 #include "gameplay/weapons.h"
 #include "gameplay/throwables.h"
-#include "gameplay/inv_ops.h"
 #include "input/input.h"
 #include "net/net.h"
 #include "ui/console.h"
@@ -122,9 +121,9 @@ static int build_inventory_slots(const WheelDef *def, WheelSlot *out, int max) {
     Player *p = game_local_player();
     if (!p) return 0;
     int n = 0;
-    for (int i = 0; i < INV_SLOTS && n < max; i++) {
-        const InvSlot *s = &p->inv.slots[i];
-        if (!s->item) continue;
+    for (int i = 0; i < INV_MAX_ITEMS && n < max; i++) {
+        const InvSlot *s = &p->inv.t.items[i].s;
+        if (!inv_alive(&p->inv.t.items[i]) || p->inv.t.items[i].loc == INV_LOC_NONE) continue;
         const ItemDef *d = item_def(w->items, s->item);
         if (!item_matches(def, d)) continue;
         int k = 0;
@@ -222,26 +221,22 @@ static bool open_kind(int kind) { return open_def(kind, def_for(kind)); }
 
 // ------------------------------------------------------------------ actions
 
-// Selects (or moves into the hotbar and selects) the first stack of an item.
+// Takes an item out of the grid into the hands (II_HOLD: its first stack, unless the hands hold one
+// already) and selects the hands (docs/INVENTORY.md "Selection").
 static bool equip_item(u16 item) {
     Player *p = game_local_player();
     if (!p || !item) return false;
-    int at = -1;
-    for (int i = 0; i < INV_SLOTS && at < 0; i++) if (p->inv.slots[i].item == item) at = i;
-    if (at < 0) return false;
-    if (at >= INV_HOTBAR) {
-        int to = inv_first_empty(&p->inv, 0, INV_HOTBAR);
-        if (to < 0) to = G->hotbar_slot;
-        InvOp op;
-        memset(&op, 0, sizeof(op));
-        op.type = IOP_EQUIP;
-        op.a = (u8)at;
-        op.b = (u8)to;
-        if (game_inv_op(&op) != IOR_OK) return false;
-        at = to;
+    if (inv_sel_c(&p->inv, INV_SEL_HANDS)->item != item) {
+        InvItem *it = inv_find(&p->inv, item);
+        if (!it) return false;
+        InvIntent in;
+        memset(&in, 0, sizeof(in));
+        in.type = II_HOLD;
+        in.src_side = INV_SIDE_SELF;
+        in.src = it->uid;
+        if (game_inv_intent(&in) != IIR_OK) return false;
     }
-    G->hotbar_slot = (u8)at;
-    G->phone_out = false;
+    game_select(INV_SEL_HANDS);
     return true;
 }
 
@@ -284,7 +279,9 @@ static void execute(int kind, const WheelSlot *s) {
 static void tap(int kind) {
     switch (kind) {
     case WK_HEAL: quick_heal(); break;
-    case WK_THROW: game_rpc(RPC_INV_DROP, G->hotbar_slot, 0, 0); break;
+    case WK_THROW:
+        if (!G->phone_out) game_rpc(RPC_INV_DROP, G->sel_slot, 0, 0);   // the held item (the phone is built in)
+        break;
     case WK_PING: game_ping_request(-1); break;
     case WK_DOOR: W.use_pulse = true; break;
     default: break;

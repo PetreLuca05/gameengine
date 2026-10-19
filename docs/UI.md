@@ -13,7 +13,7 @@ this document's theme, widgets and layouts; the pause menu gains Lobby and Leave
 in game ── Esc / pad Start ──▶ PAUSE
                                  button stack (bottom left)       logo, version, ping (bottom right)
                                  ├─ Resume
-                                 ├─ Inventory ─────▶ INVENTORY (centred modal)
+                                 ├─ Inventory ─────▶ INVENTORY (full screen, docs/INVENTORY.md)
                                  ├─ Settings ──────▶ SETTINGS  (centred modal, tabs, scroll)
                                  │                     └─ display change ─▶ CONFIRM (keep? 15 s, reverts)
                                  ├─ Multiplayer ───▶ MULTIPLAYER (host LAN / Steam, connect, LAN list)
@@ -21,9 +21,9 @@ in game ── Esc / pad Start ──▶ PAUSE
                                  ├─ Leave game / Stop hosting ─▶ CONFIRM
                                  ├─ Quit to desktop ───────────▶ CONFIRM
                                  └─ Phone card (top right) ─▶ PHONE (the Connect portal modal, docs/PHONE.md)
-in game ── Tab / I / pad Back ──▶ INVENTORY (full screen dim, same modal)
-                                     └─ drop a non-stackable outside ─▶ CONFIRM
-world: crate (hold E) ──▶ INVENTORY with the crate panel
+in game ── Tab / I / pad Back ──▶ INVENTORY (slots left, the player centre, grids right; Tab again closes)
+                                     └─ discard a weapon / container / wearable ─▶ CONFIRM
+world: crate (hold E), body, trunk ──▶ INVENTORY with the loot grid (right column)
 world: weapon bench   ──▶ BENCH (free attachment changes, stats)
 ```
 
@@ -46,8 +46,8 @@ world: weapon bench   ──▶ BENCH (free attachment changes, stats)
 | `src/ui/menus.c` | Screen stack, pause screen (from `assets/ui/screens/pause.json`), confirm dialog, commands. |
 | `src/ui/screens/` | Settings, multiplayer, inventory, bench. |
 | Settings → Graphics | A **Default** button on top (asks first; `settings_graphics_defaults`, console `r_defaults`): every archived `r_*` / `post_*` / `vfx_*` cvar plus `cl_fov`, `cl_ads_world_zoom`, `cam_weapon_fov`, `gore_level`, `sight_brightness` back to its registered default, then the Engine Fidelity level's table defaults with the custom tweaks cleared; the display (resolution, window mode, vsync) and the benchmark results stay. Two sub-tabs, **Normal** and **Debug** (see "Settings → Graphics: Normal and Debug" below). Bounded rows (`row_fid_*`): options above the level greyed with "requires &lt;level&gt;", features the level lacks locked with "Requires Engine Fidelity: &lt;level&gt;". |
-| `src/ui/inv_dragdrop.c` | Inventory drag and drop state machine. Pure (tested). |
-| `src/gameplay/inv_ops.c` | Inventory intents: the one implementation of every change. Pure (tested). |
+| `src/ui/inventory/` | The inventory screen (docs/INVENTORY.md): layout + drag and drop (pure, tested), grids, inspect, cell images, editor. |
+| `src/gameplay/inventory/` | The grid inventory model: tree, rules, intents, wire. Pure (tested). |
 | `src/ui/item_view.c`, `src/ui/icons.c` | Item models for the UI, the icon atlas and bakes. |
 | `src/render/render_ui.c` | Backdrop blur, offscreen item views, PNG readbacks. |
 | `src/ui/hud.c` | The HUD. |
@@ -176,77 +176,23 @@ small caps at 12 px as well as at 4K.
 
 ## Inventory
 
-**Layout.** The left side holds the backpack (6 × 4) and the hotbar (1–6), its slots the same size as the backpack slots (one row of the grid).
-Slots show:
-* the icon;
-* the stack count;
-* the type tint (bottom strip);
-* for guns, a magazine bar and the rounds left (the loaded weapon shows the live magazine);
-* the hotkey number.
-
-The right side holds the preview:
-* a live 3D view: auto-rotates when idle, drag to rotate, wheel to zoom;
-* attachment slots (one chip per slot the weapon has);
-* name, type, description;
-* stats with attachment deltas against the bare weapon. Green is better and red is worse;
-  "lower is better" stats are inverted.
-
-With a crate open, the crate replaces the preview.
-
-**Mouse** (`ui/inv_dragdrop.c`):
-
-| Gesture | Result |
-|---|---|
-| click | select (preview) |
-| drag (6 px threshold) | the item follows the cursor as a ghost; the source slot dims |
-| release on a slot | move: merge (the remainder stays), swap, or into an empty slot |
-| Ctrl + drag | carry half the stack (split) |
-| release on the hotbar | assign (a move) |
-| attachment onto a weapon slot / onto the preview / onto the matching attachment chip | mount (the item is consumed; a replaced attachment comes back in its place) |
-| incompatible target | rejected: the target shakes red, the reason shows in the footer ("Doesn't fit this weapon", "This weapon has no slot for it", "Takes no attachments") |
-| attachment chip dragged out | unmount (onto the slot it was dropped on, or the first free one) |
-| release outside the panel | drop into the world; non-stackable items (weapons, keys, attachments) ask first |
-| right click | context menu: Use, Equip, Split, Move to hotbar / backpack, Remove attachments, Drop one / Drop, Drop all |
-| Shift + click | quick move (hotbar ↔ backpack, merging into existing stacks first) |
-| double click | equip (to the first free hotbar slot, or swapped with the selected one, and selected) |
-| crate | drag into / out of the crate panel, Shift+click takes, "Take all" |
-
-While dragging, drop targets light up (accent) or show red when they would reject. Dragging an
-attachment highlights the matching socket on the 3D model (a glowing marker, plus a leader line
-from the chip).
-
-**Gamepad / keyboard.**
-* The focus is the cursor: d-pad, stick or arrows move between slots and chips.
-* A / Enter picks an item up and places it (the same rules as a mouse release).
-* X opens the context menu; Y quick-moves.
-* B / Esc cancels a carry, then closes.
-* Tab, I or pad Back closes.
-
-### Inventory intents (network)
-
-Every change is an `InvOp` (`gameplay/inv_ops.h`): move, split, drop, use, equip, quick move,
-mount, unmount. It goes to the host as `RPC_INV_OP` with a sequence number.
-
-* **Host:** applies it with `inv_op_apply`, then does the world effects (the dropped pickup,
-  healing). It always answers with the inventory and the last applied sequence (`MSG_INVENTORY`
-  carries the acknowledgement; protocol 9), even for a rejected intent.
-* **Client:** applies the same function to its copy at once (prediction) and keeps the intent.
-  On every inventory from the host it takes the host's slots, drops the acknowledged intents and
-  re-applies the rest (`game_cl_inventory`). A rejected prediction is corrected by the next
-  message.
-* **Host's own player:** applies directly.
-* The UI shows "syncing…" while intents are pending.
+The grid inventory (Tarkov-style: items take rectangles of cells, rotate, live in containers that
+are items, equipment slots, world containers / corpses / trunks with the same screen) has its own
+document: **docs/INVENTORY.md** (data model, rules, intents, networking, screen, commands, tests).
 
 ## HUD
 
 All HUD elements sit in the safe area:
-* **Vitals** (bottom left): small-caps label, a slim health bar (pulses red under 30 %), the
-  value, and an armour bar. The lowest bar sits on the safe area's bottom edge, the same edge as the
-  hotbar slots and the ammo panel's magazine ticks.
+* **Vitals** (bottom centre, docs/INVENTORY.md "HUD"): small-caps labels, the armour bar above
+  the health bar, both with their values. The armour bar is in segments, one per plate the player
+  can hold (1, or 4 with a plate carrier). The health bar pulses red under 30 %. The health bar sits
+  on the safe area's bottom edge.
 * **Ammo** (bottom right): weapon name, magazine (large; amber below 25 %, red when empty), the
   reserve, magazine ticks, and the fire mode when the weapon has several.
-* **Hotbar** (bottom centre): the inventory's slot widget, the selected slot lifted; the item name
-  fades in on switch.
+* **Weapon list** (bottom left, docs/INVENTORY.md "HUD"): primary / secondary / holster (keys 1-3,
+  the wheel cycles them). Each row has the cell image, the name, magazine / reserve and the drawn
+  gun's fire mode. The selected row is white; an empty row is a dim outline. An "In hands" row shows
+  while the hands hold a grid item.
 * **Interaction prompt** (under the crosshair): a key cap plus text, with a hold-progress ring
   around the key.
 * **Reload / use progress:** a ring around the crosshair.
@@ -260,6 +206,11 @@ All HUD elements sit in the safe area:
 * weapons: the effective weapon's boxes plus the mounted attachments' parts;
 * attachment items: the attachment's parts;
 * other items: their box or cylinder.
+
+Where the JSON names a detailed `"mesh"` (docs/ITEM_PIPELINE.md), the part list carries one entry per
+draw group of the mesh (`RenderUi3dPart.mesh`). The ui3d shader then reads the per-vertex albedo, AO,
+roughness and metallic. Filled slots hide or fold their parts as in the hands. So the inventory
+preview and the baked icons show the detailed models.
 
 `render_ui3d` renders such a part list into an offscreen RGBA8 target (`src/render/render_ui.c`,
 pass `ui_views`):
@@ -302,24 +253,18 @@ It costs nothing when no panel is open.
 | `ui_dump_atlas [path]` | the SDF atlas as a PNG |
 | `ui_nav <dir\|accept\|back\|tab_next\|tab_prev\|alt\|alt2\|menu\|view> [pad]` | synthetic keyboard / gamepad input (scripted tests) |
 | `ui_mouse <x> <y> [down\|up\|click\|rclick\|dclick\|wheel n]` | synthetic mouse (scripted tests) |
-| `ui_inv_drag`, `ui_inv_drag_att`, `ui_inv_drag_to_att`, `ui_inv_drag_out`, `ui_inv_drag_from_crate`, `ui_inv_rclick`, `ui_inv_shiftclick`, `ui_inv_select`, `ui_inv_dump` | scripted inventory gestures and a dump of the slots |
+| `ui_inv_drag`, `ui_inv_click`, `inv_dump`, `inv_intent`, `inv_give`, `inv_fill`, `inv_open`, `inv_editor`, `bake_cells` | the inventory's scripted gestures, dumps, intents and tools (docs/INVENTORY.md "Commands") |
 
 ## Verification
 
-**Unit tests:** `build/bin/test_ui` (402 checks).
+**Unit tests:** `build/bin/test_ui` (229 checks).
 * Layout:
   * basics (anchors, flex, aspect, stretch, gap, DPI);
   * the pause layout at 1080p, 21:9, 4:3, 720p, 4K and 3440×1440: stack bottom left in the safe
     area, logo bottom right, modal at most 60 % wide and never over the stack, dialog centred,
     4K exactly twice 1080p, hidden buttons take no space.
-* Stack merge math, including conservation over a count sweep.
-* Every intent.
-* Attachment compatibility plus a mount / unmount round trip for every weapon × attachment.
-* Swapping optics; extended-magazine removal returning rounds.
-* The drag-drop state machine: click, threshold, move, split, mount, reject with reason, unmount,
-  drop / confirm, cancel, context, double click, gamepad carry, crate.
-* Prediction plus reconcile at every acknowledgement point.
-* An icon for every item.
+* The inventory has its own tests (`test_inventory`, `test_inventory_ui`, docs/INVENTORY.md "Tests").
+* An icon and a cell image for every item.
 
 **Scripted runs:**
 * `tools/tests/ui_pause.cfg`: pause / settings / inventory screenshots.
@@ -327,8 +272,5 @@ It costs nothing when no panel is open.
   3840×2160 and 1024×768.
 * `ui_nav.cfg`: pad and keyboard through pause → settings (tabs, rows) → back → inventory → back,
   multiplayer, the quit dialog cancelled.
-* `ui_inventory.cfg`: every mouse gesture with an `inv:` dump after each.
-* `ui_crate.cfg`: hold-open a crate, drag an item out, Tab closes.
-* `inv_net_host.cfg` + `inv_net_client.cfg`: 2-client LAN with `net_fakelag 200`. Intents show at
-  once (pending 1 and 3, including three back to back inside one round trip) and converge to the
-  host's identical inventory (pending 0).
+* `ui_inventory.cfg`, `ui_crate.cfg`, `inv_net.sh`: the inventory screen, crates / the gear
+  locker, two clients looting one crate (docs/INVENTORY.md "Tests").

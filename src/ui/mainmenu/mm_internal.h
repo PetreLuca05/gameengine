@@ -63,6 +63,7 @@ void mm_play_draw(GuiRect content);
 void mm_player_draw(GuiRect content);
 void mm_cosmetics_draw(GuiRect content);
 void mm_maps_draw(GuiRect content);
+void mm_maps_background(GuiRect content, float alpha);   // the globe, before the shading and the panels
 void mm_credits_draw(GuiRect content);
 void mm_lobby_draw(GuiRect content);
 void mm_loading_draw(void);

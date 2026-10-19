@@ -23,7 +23,7 @@ void spectator_reset(void);                // a new world (map load / connect)
 void spectator_cl_block(struct World *w, const SpecBlock *b, u32 tick);
 void spectator_cl_local_data(struct World *w, int slot, const SpecLocalData *d, const SpecBlock *b);
 void spectator_cl_cmds(struct World *w, Reader *r);
-void spectator_cl_inventory(struct World *w, int slot, u32 revision, const InvSlot *slots);
+void spectator_cl_inventory(struct World *w, int slot, u32 revision, u16 hands, const InvTree *tree);
 
 // Game loop.
 void spectator_frame(float dt);            // input (spectator controls), death cam -> auto spectate, free camera

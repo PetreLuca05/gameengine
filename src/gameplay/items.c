@@ -5,6 +5,7 @@
 #include "cJSON.h"
 #include "gameplay/hitboxes.h"
 #include "gameplay/attachments.h"
+#include "assets/item_mesh.h"
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdio.h>
@@ -99,6 +100,9 @@ static void attachment_items_create(ItemDB *db) {
         d->max_stack = 1;
         d->weapon = -1;
         d->attachment = (u8)a;
+        d->container = -1;
+        d->equip_slot = EQ_NONE;
+        d->category = 255;
         d->shape = VIS_BOX;
         vec3 mn = v3s(1e9f), mx = v3s(-1e9f);
         for (int p = 0; p < ad->part_count; p++) {
@@ -117,6 +121,182 @@ static void attachment_items_create(ItemDB *db) {
     }
 }
 
+// ------------------------------------------------------------------ grid inventory (docs/INVENTORY.md)
+
+const char *equip_slot_name(int slot) {
+    static const char *n[EQ_COUNT] = { "primary", "secondary", "holster", "backpack", "headwear", "body_armor" };
+    return slot >= 0 && slot < EQ_COUNT ? n[slot] : "none";
+}
+
+int equip_slot_from_name(const char *s) {
+    for (int i = 0; i < EQ_COUNT; i++) if (!strcmp(s, equip_slot_name(i))) return i;
+    return EQ_NONE;
+}
+
+const char *inv_category_name(int cat) {
+    static const char *n[ICAT_COUNT] = { "weapons", "attachments", "medical", "throwables", "tools", "misc" };
+    return cat >= 0 && cat < ICAT_COUNT ? n[cat] : "misc";
+}
+
+int inv_category_from_name(const char *s) {
+    for (int i = 0; i < ICAT_COUNT; i++) if (!strcmp(s, inv_category_name(i))) return i;
+    return -1;
+}
+
+int container_find(const ItemDB *db, const char *id) {
+    for (int i = 0; i < db->container_count; i++) if (!strcmp(db->containers[i].id, id)) return i;
+    return -1;
+}
+
+const InvContainerDef *item_container(const ItemDB *db, u16 item) {
+    const ItemDef *d = item_def(db, item);
+    return d->container >= 0 && d->container < db->container_count ? &db->containers[d->container] : NULL;
+}
+
+static u16 kind_mask(const cJSON *arr) {
+    u16 m = 0;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, arr) if (cJSON_IsString(e)) m |= (u16)(1u << kind_from(e->valuestring));
+    return m;
+}
+
+// A "container" block (items.json) or a root container (data/containers.json); returns its index.
+// deny_items are resolved after every item is known (container_resolve).
+static const cJSON *g_deny_json[MAX_CONTAINER_DEFS];
+static int container_parse(ItemDB *db, const char *id, const cJSON *c) {
+    if (!cJSON_IsObject(c)) return -1;
+    int idx = container_find(db, id);
+    if (idx < 0) {
+        if (db->container_count >= MAX_CONTAINER_DEFS) { log_warn("items: no room for container %s", id); return -1; }
+        idx = db->container_count++;
+    }
+    InvContainerDef *cd = &db->containers[idx];
+    memset(cd, 0, sizeof(*cd));
+    dg_strcpy(cd->id, sizeof(cd->id), id);
+    const cJSON *e;
+    cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(c, "compartments")) {
+        if (cd->comp_count >= INV_MAX_COMPS) break;
+        InvCompDef *k = &cd->comp[cd->comp_count++];
+        k->w = (u8)DG_CLAMP((int)jnum(e, "w", 1), 1, 16);
+        k->h = (u8)DG_CLAMP((int)jnum(e, "h", 1), 1, 32);
+        const cJSON *at = cJSON_GetObjectItemCaseSensitive(e, "at");
+        if (cJSON_IsArray(at) && cJSON_GetArraySize(at) >= 2) {
+            k->at_x = (u8)DG_CLAMP(cJSON_GetArrayItem(at, 0)->valueint, 0, 63);
+            k->at_y = (u8)DG_CLAMP(cJSON_GetArrayItem(at, 1)->valueint, 0, 63);
+        } else if (cd->comp_count > 1) {   // default: left to right
+            const InvCompDef *p = &cd->comp[cd->comp_count - 2];
+            k->at_x = (u8)(p->at_x + p->w);
+            k->at_y = p->at_y;
+        }
+        cd->capacity += k->w * k->h;
+    }
+    cd->allow_kinds = kind_mask(cJSON_GetObjectItemCaseSensitive(c, "allow"));
+    cd->deny_kinds = kind_mask(cJSON_GetObjectItemCaseSensitive(c, "deny"));
+    const cJSON *di = cJSON_GetObjectItemCaseSensitive(c, "deny_items");
+    if (g_deny_json[idx]) cJSON_Delete((cJSON *)g_deny_json[idx]);
+    g_deny_json[idx] = di ? cJSON_Duplicate(di, true) : NULL;   // item ids: resolved once every item exists
+    cd->equip = jbool(c, "equip", false);
+    const cJSON *mx = cJSON_GetObjectItemCaseSensitive(c, "max_item");
+    if (cJSON_IsArray(mx) && cJSON_GetArraySize(mx) >= 2) {
+        cd->max_w = (u8)DG_CLAMP(cJSON_GetArrayItem(mx, 0)->valueint, 0, 16);
+        cd->max_h = (u8)DG_CLAMP(cJSON_GetArrayItem(mx, 1)->valueint, 0, 16);
+    }
+    return idx;
+}
+
+static void containers_load(ItemDB *db, const char *path) {
+    char buf[512];
+    char *text = platform_read_file(platform_data_path(path, buf, sizeof(buf)), NULL);
+    if (!text) { log_warn("items: no %s (world containers fall back to a 6x4 crate)", path); return; }
+    cJSON *root = cJSON_Parse(text);
+    free(text);
+    if (!root) { log_error("items: JSON parse error in %s", path); return; }
+    const cJSON *c;
+    cJSON_ArrayForEach(c, cJSON_GetObjectItemCaseSensitive(root, "containers")) {
+        container_parse(db, jstr(c, "id", "container"), c);
+    }
+    cJSON_Delete(root);
+}
+
+// Grid defaults per class (docs/INVENTORY.md "Class defaults") for items that don't give "grid".
+static void grid_defaults(ItemDB *db, ItemDef *d) {
+    const WeaponDef *wd = d->kind == ITEM_WEAPON && d->weapon >= 0 ? &db->weapons[d->weapon] : NULL;
+    int w = 1, h = 1;
+    u8 eq = EQ_NONE;
+    if (wd) {
+        if (wd->kind == WPN_MELEE) {
+            // A knife goes in the holster, a bat in a long-gun slot.
+            bool small = fmaxf(d->size.x, fmaxf(d->size.y, d->size.z)) < 0.2f;
+            w = 1; h = small ? 2 : 3; eq = small ? EQ_HOLSTER : EQ_PRIMARY;
+        } else if (!strcmp(wd->hold_style, "pistol")) {
+            w = 2; h = 1; eq = EQ_HOLSTER;
+        } else {
+            float len = 2.0f * fmaxf(d->size.x, fmaxf(d->size.y, d->size.z));
+            w = len < 0.7f ? 3 : len < 1.0f ? 4 : 5; h = 2; eq = EQ_PRIMARY;
+        }
+    } else {
+        switch (d->kind) {
+        case ITEM_CONSUMABLE:
+            if (d->vehicle_use == VUSE_FUEL) { w = 2; h = 3; }
+            else if (d->vehicle_use == VUSE_SPARE_TIRE) { w = 3; h = 3; }
+            else if (d->vehicle_use == VUSE_TIRE_REPAIR || d->heal >= 40.0f || d->armor > 0) { w = 2; h = 2; }
+            break;
+        case ITEM_ATTACHMENT: {
+            const AttachmentDef *a = attach_def(db, d->attachment);
+            if (a && a->slot == ATT_OPTIC && a->zoom > 1.01f) w = 2;
+            break;
+        }
+        default: {
+            float m = fmaxf(d->size.x, fmaxf(d->size.y, d->size.z));
+            if (m > 0.25f) { w = 2; h = 2; }
+            break;
+        }
+        }
+    }
+    if (!d->grid_w) { d->grid_w = (u8)w; d->grid_h = (u8)h; }
+    if (d->equip_slot == EQ_NONE && eq != EQ_NONE && d->container < 0) d->equip_slot = eq;
+}
+
+// The category bar's default for an item without "category" (docs/INVENTORY.md "Categories").
+static int category_default(const ItemDef *d) {
+    switch (d->kind) {
+    case ITEM_WEAPON: case ITEM_AMMO: return ICAT_WEAPONS;
+    case ITEM_ATTACHMENT: return ICAT_ATTACHMENTS;
+    case ITEM_THROWABLE: return ICAT_THROWABLES;
+    case ITEM_CONSUMABLE: return d->vehicle_use ? ICAT_TOOLS : ICAT_MEDICAL;
+    case ITEM_KEY: return ICAT_TOOLS;
+    default: return d->hands || d->camera ? ICAT_TOOLS : ICAT_MISC;
+    }
+}
+
+// After items, weapons and attachments: class defaults, container deny lists.
+static void inventory_defs_resolve(ItemDB *db) {
+    for (int i = 1; i < db->item_count; i++) {
+        ItemDef *d = &db->items[i];
+        if (d->kind == ITEM_ATTACHMENT && !d->grid_w) { d->container = -1; d->equip_slot = EQ_NONE; }
+        grid_defaults(db, d);
+        if (d->category >= ICAT_COUNT) d->category = (u8)category_default(d);
+        // Only a worn backpack has a grid: anything else with a "container" block is a plain item.
+        if (d->container >= 0 && d->equip_slot != EQ_BACKPACK) {
+            log_warn("items: %s: only backpacks have a grid (\"container\" ignored)", d->id);
+            d->container = -1;
+        }
+        if (d->default_pack && d->equip_slot == EQ_BACKPACK && d->container >= 0 && !db->default_backpack) db->default_backpack = (u16)i;
+        if (d->rotatable && d->grid_w == d->grid_h) d->rotatable = false;
+        if (d->kind == ITEM_CONSUMABLE && d->use_type == INV_USE_NONE) d->use_type = INV_USE_CONSUME;
+    }
+    for (int c = 0; c < db->container_count; c++) {
+        InvContainerDef *cd = &db->containers[c];
+        cd->deny_count = 0;
+        const cJSON *e;
+        cJSON_ArrayForEach(e, g_deny_json[c]) {
+            u16 it = cJSON_IsString(e) ? item_find(db, e->valuestring) : 0;
+            if (it && cd->deny_count < (int)ARRAY_COUNT(cd->deny_items)) cd->deny_items[cd->deny_count++] = it;
+        }
+    }
+    for (int c = 0; c < MAX_CONTAINER_DEFS; c++) { if (g_deny_json[c]) cJSON_Delete((cJSON *)g_deny_json[c]); g_deny_json[c] = NULL; }
+}
+
 static DamageType dmg_from(const char *s) {
     if (!strcmp(s, "bullet")) return DMG_BULLET;
     if (!strcmp(s, "melee")) return DMG_MELEE;
@@ -129,6 +309,26 @@ static DamageType dmg_from(const char *s) {
 const char *damage_type_name(DamageType t) {
     static const char *n[DMG_COUNT] = { "generic", "bullet", "melee", "explosive", "fall", "drown" };
     return (t >= 0 && t < DMG_COUNT) ? n[t] : "?";
+}
+
+void item_model_parse(ItemModelRef *m, const cJSON *j, const char *owner) {
+    memset(m, 0, sizeof(*m));
+    m->condition = ITEM_COND_WORN;
+    const char *cs = jstr(j, "condition", NULL);
+    if (cs && item_condition_from(cs) >= 0) m->condition = (i8)item_condition_from(cs);
+    else if (cs) log_warn("items: %s: unknown condition '%s' (new | worn | rusty)", owner, cs);
+    dg_strcpy(m->mesh, sizeof(m->mesh), jstr(j, "mesh", ""));
+    if (!m->mesh[0]) return;
+    // Only the header: gameplay needs the bounds (pickup rest height), the renderer loads the rest on first draw.
+    char buf[512];
+    DgimHeader h;
+    if (!platform_read_file_range(platform_data_path(m->mesh, buf, sizeof(buf)), 0, &h, sizeof(h)) || h.magic != DGIM_MAGIC || h.version != DGIM_VERSION) {
+        log_warn("items: %s: mesh %s missing or not DGIM v%u (box placeholder)", owner, m->mesh, DGIM_VERSION);
+        return;
+    }
+    m->has_bounds = true;
+    m->bmin = v3(h.bmin[0], h.bmin[1], h.bmin[2]);
+    m->bmax = v3(h.bmax[0], h.bmax[1], h.bmax[2]);
 }
 
 static cJSON *load_json(const char *path) {
@@ -438,15 +638,9 @@ static void iron_box(WeaponDef *d, float x0, float x1, float y0, float y1, float
     d->parts[d->part_count++] = (WeaponModelPart){ v3((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, z), v3((x1 - x0) * 0.5f, (y1 - y0) * 0.5f, hz), col, mech };
 }
 
-// "iron_sights": { "type": "aperture" | "notch", "line", "rear_z", "front_z", "rear_base", "front_base",
-// "aperture", "ring", "notch", "notch_depth", "post", "rear_half", "wings", "mech", "color" } (docs/ATTACHMENTS.md). Builds the
-// rear sight and front post as model parts and puts the ADS sight socket on their line: the top of the
-// post sits exactly in the notch / the aperture centre, on the view axis.
-static void parse_iron_sights(WeaponDef *d, const cJSON *is) {
-    if (!is) return;
+// The generated iron sight parts: rear sight at rear_z and front post at front_z, tops on line.
+static void iron_parts_build(WeaponDef *d, const cJSON *is, float line, float rz, float fz) {
     bool aperture = !strcmp(jstr(is, "type", "aperture"), "aperture");
-    float line = jnum(is, "line", d->sockets.sight.y);
-    float rz = jnum(is, "rear_z", 0.0f), fz = jnum(is, "front_z", -0.3f);
     float rb = jnum(is, "rear_base", line - 0.02f), fb = jnum(is, "front_base", rb);
     float post = jnum(is, "post", 0.0026f) * 0.5f;
     float rh = jnum(is, "rear_half", 0.011f);   // notch blade half width
@@ -475,6 +669,20 @@ static void parse_iron_sights(WeaponDef *d, const cJSON *is) {
         iron_box(d, wing, wing + 0.0018f, fb, line + 0.004f, fz, hz, col, mech);
         iron_box(d, -wing - 0.0018f, wing + 0.0018f, fb, fb + 0.004f, fz, hz, col, mech);
     }
+}
+
+// "iron_sights": { "type": "aperture" | "notch", "line", "rear_z", "front_z", "rear_base", "front_base",
+// "aperture", "ring", "notch", "notch_depth", "post", "rear_half", "wings", "mech", "color" } (docs/ATTACHMENTS.md). Builds the
+// rear sight and front post as model parts and puts the ADS sight socket on their line: the top of the
+// post sits exactly in the notch / the aperture centre, on the view axis.
+// A weapon with a detailed mesh (docs/ITEM_PIPELINE.md) models its own sights on this line (rear_sight /
+// front_sight parts that hide / fold under an optic, required by assets/items/catalog.json, checked by
+// test_item_mesh): only the socket is placed, no box parts (the box placeholders of item_meshes 0 have none).
+static void parse_iron_sights(WeaponDef *d, const cJSON *is) {
+    if (!is) return;
+    float line = jnum(is, "line", d->sockets.sight.y);
+    float rz = jnum(is, "rear_z", 0.0f), fz = jnum(is, "front_z", -0.3f);
+    if (!d->model.has_bounds) iron_parts_build(d, is, line, rz, fz);
     // The stock weld (eye -> grip) stays where the derived sight put it: only the gun's height in the
     // view changes, and the rear sight's z sets how far it is from the eye (red dots / scopes keep the weld).
     d->sockets.hp.eye_relief_add += d->sockets.sight.z - rz;
@@ -569,6 +777,7 @@ static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
     d->grip_offset = jvec3(w, "grip", v3(0, 0, 0));
     d->support_offset = jvec3(w, "support", v3(0, 0, -0.1f));
     d->muzzle_offset = jvec3(w, "muzzle", v3(0, 0.05f, -0.2f));
+    item_model_parse(&d->model, w, d->id);
     const cJSON *p;
     cJSON_ArrayForEach(p, cJSON_GetObjectItemCaseSensitive(w, "model")) {
         if (d->part_count >= WPN_MAX_PARTS) break;
@@ -708,7 +917,11 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
     dg_strcpy(db->items[0].id, sizeof(db->items[0].id), "none");
     dg_strcpy(db->items[0].name, sizeof(db->items[0].name), "Empty");
     db->items[0].weapon = -1;
+    db->items[0].container = -1;
+    db->items[0].equip_slot = EQ_NONE;
+    db->items[0].category = ICAT_MISC;
     db->item_count = 1;
+    containers_load(db, "data/containers.json");   // the roots first: body, crate, ... (docs/INVENTORY.md)
 
     cJSON *iroot = load_json(items_path);
     if (!iroot) return false;
@@ -750,6 +963,28 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
         }
         d->weapon = -1;
         dg_strcpy(d->icon, sizeof(d->icon), jstr(it, "icon", ""));
+        item_model_parse(&d->model, it, d->id);
+        // Grid inventory (docs/INVENTORY.md); missing values take the class defaults (inventory_defs_resolve).
+        {
+            const cJSON *g = cJSON_GetObjectItemCaseSensitive(it, "grid");
+            if (cJSON_IsArray(g) && cJSON_GetArraySize(g) >= 2) {
+                d->grid_w = (u8)DG_CLAMP(cJSON_GetArrayItem(g, 0)->valueint, 1, 16);
+                d->grid_h = (u8)DG_CLAMP(cJSON_GetArrayItem(g, 1)->valueint, 1, 16);
+            }
+            d->rotatable = jbool(it, "rotatable", true);
+            d->equip_slot = (u8)equip_slot_from_name(jstr(it, "equip", ""));
+            int cat = inv_category_from_name(jstr(it, "category", ""));
+            d->category = (u8)(cat >= 0 ? cat : 255);   // 255: from the kind (inventory_defs_resolve)
+            d->default_pack = jbool(it, "default", false);
+            d->plates = (u8)DG_CLAMP((int)jnum(it, "plates", 0), 0, 16);
+            const char *use = jstr(it, "use", "");
+            d->use_type = !strcmp(use, "charges") ? INV_USE_CHARGES : !strcmp(use, "consume") ? INV_USE_CONSUME : INV_USE_NONE;
+            d->charges = (u8)DG_CLAMP((int)jnum(it, "charges", 0), 0, 255);
+            d->durability = (u16)DG_CLAMP((int)jnum(it, "durability", 0), 0, 65535);
+            d->fold_dw = (u8)DG_CLAMP((int)jnum(it, "fold", 0), 0, 4);
+            dg_strcpy(d->cell_image, sizeof(d->cell_image), jstr(it, "cell_image", ""));
+            d->container = (i16)container_parse(db, d->id, cJSON_GetObjectItemCaseSensitive(it, "container"));
+        }
         if (d->kind == ITEM_ATTACHMENT) {
             // Resolved after the attachments load (attachment_items_create).
             const char *aid = jstr(it, "attachment", "");
@@ -764,6 +999,15 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
         const cJSON *hold = cJSON_GetObjectItemCaseSensitive(it, "hold");
         dg_strcpy(d->hold_style_alt, sizeof(d->hold_style_alt), jstr(hold, "style_landscape", ""));
         d->builtin = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "builtin"));
+        d->hands = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "hands"));
+        const cJSON *wn = cJSON_GetObjectItemCaseSensitive(it, "worn");   // docs/CHARACTERS.md "Worn gear"
+        dg_strcpy(d->worn.bone, sizeof(d->worn.bone), jstr(wn, "bone", ""));
+        d->worn.has_pos = cJSON_GetObjectItemCaseSensitive(wn, "pos") != NULL;
+        d->worn.has_rot = cJSON_GetObjectItemCaseSensitive(wn, "rot") != NULL;
+        d->worn.has_scale = cJSON_GetObjectItemCaseSensitive(wn, "scale") != NULL;
+        d->worn.pos = jvec3(wn, "pos", v3(0, 0, 0));
+        d->worn.rot = jvec3(wn, "rot", v3(0, 0, 0));
+        d->worn.scale = jnum(wn, "scale", 1.0f);
         parse_camera(d, cJSON_GetObjectItemCaseSensitive(it, "camera"));
         const cJSON *sk = cJSON_GetObjectItemCaseSensitive(hold, "sockets");
         apply_sockets(&d->sockets, sk);
@@ -784,7 +1028,8 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
     bool ok = load_weapons(db, weapons_path);
     attachments_resolve(db);
     attachment_items_create(db);
-    log_info("items: %d item defs, %d weapon defs", db->item_count - 1, db->weapon_count);
+    inventory_defs_resolve(db);
+    log_info("items: %d item defs, %d weapon defs, %d containers", db->item_count - 1, db->weapon_count, db->container_count);
     return ok;
 }
 
@@ -836,6 +1081,12 @@ bool item_model_bounds(const ItemDB *db, u16 item, vec3 *mn, vec3 *mx) {
     const WeaponDef *wd = item_weapon(db, item);
     *mn = v3s(1e9f);
     *mx = v3s(-1e9f);
+    const ItemModelRef *mr = wd ? &wd->model : &item_def(db, item)->model;
+    if (mr->has_bounds) {   // the detailed model rests on the ground by its own shape
+        *mn = mr->bmin;
+        *mx = mr->bmax;
+        return true;
+    }
     if (wd && wd->part_count > 0) {
         for (int i = 0; i < wd->part_count; i++) {
             *mn = v3_min(*mn, v3_sub(wd->parts[i].offset, wd->parts[i].half));

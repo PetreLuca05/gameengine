@@ -154,7 +154,7 @@ Root (item root / case anchor)          translate / rotate / scale (scale: grips
 
 `scene handpose` opens the editor in the running game (host, local player); `scene off` / the
 **Leave** button closes it. While it is open the world is frozen (below), the local player holds
-the selected grip's item (hotbar slot 1, restored on leave), the hold point has no sway, and the
+the selected grip's item (the primary slot, restored on leave), the hold point has no sway, and the
 view is an orbit camera (or first person).
 
 ### Panels

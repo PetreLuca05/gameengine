@@ -72,7 +72,7 @@ def levels():
     for i, lvl in enumerate(LEVELS):
         text = run_game('level_' + lvl, [
             'set r_fidelity %d' % i, 'wait 30',
-            'time_set 12:00', 'weather_lock 1', 'weather_set fog 0',
+            'time_set 12:00 instant', 'weather_lock 1', 'weather_set fog 0',
             'foliage_test_scatter 300000', 'wait 60',
             'setpos 220 0.1 82 180 -4', 'wait 240',
             'visibility_probe ' + lvl,

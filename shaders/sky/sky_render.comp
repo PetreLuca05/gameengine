@@ -20,7 +20,7 @@ layout(set = 0, binding = 7) uniform sampler2D cshadow_tex;
 layout(set = 0, binding = 8, rgba16f) uniform image2D hdr;
 layout(set = 0, binding = 15) uniform sampler2D moon_tex;    // lunar albedo, equirectangular (longitude 0 at u = 0.5), sRGB, mipmapped
 
-vec3 transmittance(float r, float mu) { return textureLod(trans_lut, trans_uv(r, mu), 0.0).rgb; }
+vec3 transmittance(float r, float mu) { return trans_eval(textureLod(trans_lut, trans_uv(r, mu), 0.0)); }
 
 vec3 sky_lut(vec3 dir) {
     float r = length(planet_pos());
@@ -166,7 +166,7 @@ void main() {
         if (uv.x < box.x && uv.y < box.y) {
             vec2 q = uv / box;
             vec3 c = vec3(0.0);
-            if (dbg == 1) c = textureLod(trans_lut, q, 0.0).rgb;
+            if (dbg == 1) c = trans_eval(textureLod(trans_lut, q, 0.0));
             else if (dbg == 2) c = textureLod(ms_lut, q, 0.0).rgb * 30.0;
             else if (dbg == 3) c = textureLod(skyview_lut, q, 0.0).rgb * 2.0;
             else if (dbg == 4) c = vec3(textureLod(cshadow_tex, q, 0.0).r);

@@ -12,7 +12,18 @@ EntityId spawn_switch(World *w, vec3 pos, float yaw, u32 group);
 EntityId spawn_light(World *w, vec3 pos, vec3 color, float radius, float intensity, u32 group, bool on);
 EntityId spawn_container(World *w, vec3 base, float yaw);
 EntityId spawn_container_ex(World *w, vec3 base, float yaw, vec3 half, bool visible);
+// World inventories (docs/INVENTORY.md): the grid tree of a container / corpse / vehicle entity,
+// created on first use (root: Container.root, "crate" by default). NULL: none and !create, or
+// the pool is full. container_add: items into its root grids (weapons loaded, default
+// attachments); returns how many didn't fit.
+struct InvTree *container_tree(World *w, EntityId e, bool create);
+int container_add(World *w, EntityId e, u16 item, int count);
+void container_set_root(World *w, EntityId e, const char *root_id);   // before the first item
+void container_send(World *w, EntityId e, int player);               // host: open it for player (any entity with a tree)
 EntityId spawn_pickup(World *w, vec3 pos, u16 item, int count, i16 ammo, float respawn);
+// A dropped item as one pickup (docs/INVENTORY.md): uid of t. The weapon keeps its attachments, a
+// plate carrier its plates (ammo); anything under it (never, in a valid tree) drops beside it.
+EntityId spawn_pickup_tree(World *w, vec3 pos, const struct InvTree *t, u16 uid);
 EntityId spawn_bench(World *w, vec3 pos, float yaw);   // weapon bench interaction (attachments UI)
 EntityId spawn_prop(World *w, vec3 pos, quat rot, VisShape shape, vec3 half, u32 color, float mass);
 EntityId spawn_dummy(World *w, vec3 feet, float yaw, float hp);

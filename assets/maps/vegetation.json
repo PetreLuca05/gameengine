@@ -9,5 +9,6 @@
   "season": "summer",
   "weather": "cloudy",
   "order": 20,
-  "description": "A 500 m valley with every kind of foliage: pine and broadleaf forest, a dead wood, a meadow, a wheat field and a pond."
+  "description": "A 500 m valley with every kind of foliage: pine and broadleaf forest, a dead wood, a meadow, a wheat field and a pond.",
+  "globe": { "place": "Hârșova", "lon": 27.953, "lat": 44.685, "region": "ro_ct" }
 }

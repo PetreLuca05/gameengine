@@ -230,7 +230,18 @@ static VkPipeline cl_pipeline(const char *vert, const char *frag, bool impostor,
     gp.pDynamicState = &dy;
     gp.layout = C.layout;
     VkPipeline p = VK_NULL_HANDLE;
-    if (vkCreateGraphicsPipelines(R->device, R->pipeline_cache, 1, &gp, NULL, &p) != VK_SUCCESS) log_error("classic: pipeline %s / %s failed", vert, frag ? frag : "-");
+    VkResult res = vkCreateGraphicsPipelines(R->device, R->pipeline_cache, 1, &gp, NULL, &p);
+    if (res != VK_SUCCESS) {
+        // One retry without the pipeline cache: a driver compile seen failing once under memory
+        // pressure would otherwise turn the classic renderer off for the whole session.
+        log_warn("classic: pipeline %s / %s failed (%d), retrying without the cache", vert, frag ? frag : "-", (int)res);
+        p = VK_NULL_HANDLE;
+        res = vkCreateGraphicsPipelines(R->device, VK_NULL_HANDLE, 1, &gp, NULL, &p);
+        if (res != VK_SUCCESS) {
+            p = VK_NULL_HANDLE;
+            log_error("classic: pipeline %s / %s failed (%d)", vert, frag ? frag : "-", (int)res);
+        }
+    }
     vkDestroyShaderModule(R->device, vs, NULL);
     if (fs) vkDestroyShaderModule(R->device, fs, NULL);
     return p;

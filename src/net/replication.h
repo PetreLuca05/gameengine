@@ -21,7 +21,7 @@ typedef struct NetEnt {
     float anim;
     u16 item, count;
     u8 attach[5];              // ATT_SLOTS attachment ids of item (NF_ATTACH)
-    float hp, max_hp, armor;
+    float hp, max_hp, armor, max_armor;
     vec3 half;
     u32 color;
     char name[24];

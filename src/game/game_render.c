@@ -27,6 +27,7 @@
 #include "ui/ui.h"
 #include "ui/hud.h"
 #include "ui/menus.h"
+#include "ui/screens/screens.h"
 #include "ui/console.h"
 #include "audio/audio.h"
 #include "assets/assets.h"
@@ -57,7 +58,11 @@ typedef struct GameRender {
 } GameRender;
 #define GR (g_engine.game_render)
 
+int game_cam_mode(void) { return GR ? GR->cam_mode : 0; }
+
 static void cmd_cam_stats(int argc, const char **argv);
+static void cmd_cam_track(int argc, const char **argv);
+static void cam_track_frame(const RenderCamera *cam);
 
 // fp_cam_test start | report: per-frame first-person invariants while a script drives the player
 //   |camera - head bone| < 0.15 m, camera forward . (camera - pelvis) >= 0 (never behind the body),
@@ -216,6 +221,9 @@ void game_render_init(void) {
     shadow_sky_register();
     terrain_game_register();
     ground_ref_register();
+    char_preview_register();
+    items_game_register();
+    blender_open_register();
     weather_register();
     water_register();
     ledge_register();
@@ -231,6 +239,7 @@ void game_render_init(void) {
     GR = ARENA_PUSH(&g_engine.perm_arena, GameRender);
     GR->pen_min_dist = 1e9f;
     cmd_register("cam_stats", cmd_cam_stats, "print + reset camera penetration / stabilizer stats (sampled while cam_debug is on)");
+    cmd_register("cam_track", cmd_cam_track, "cam_track <frames> [label]: log the rendered camera's largest drift (position, rotation, FOV) over the next frames, and whether the inventory is open (tests)");
 }
 const char *game_cam_debug_text(void) { return GR ? GR->cam_text : ""; }
 
@@ -248,6 +257,30 @@ static void cam_penetration_sample(PhysicsWorld *pw, vec3 safe, vec3 eye) {
         if (phys_raycast(pw, eye, v3_scale(dirs[i], 0.5f), PL_MASK_WORLD, PHYS_INVALID_BODY, &rh)) best = fminf(best, rh.distance);
     if (best < near_margin) GR->pen_near++;
     if (GR->pen_frames == 1 || best < GR->pen_min_dist) GR->pen_min_dist = best;
+}
+
+// cam_track <frames> [label] (tests: tools/tests/inv_camera.cfg): the rendered camera over the next
+// frames against the first one: the largest position, rotation and FOV drift; then one log line.
+static struct { int left, frames; char label[32]; RenderCamera first; float dpos, drot, dfov; bool inv_open; } CT;
+
+static void cmd_cam_track(int argc, const char **argv) {
+    memset(&CT, 0, sizeof(CT));
+    CT.left = CT.frames = argc > 1 ? DG_MAX(1, atoi(argv[1])) : 60;
+    dg_strcpy(CT.label, sizeof(CT.label), argc > 2 ? argv[2] : "track");
+}
+
+static void cam_track_frame(const RenderCamera *cam) {
+    if (CT.left <= 0) return;
+    if (CT.left == CT.frames) { CT.first = *cam; CT.inv_open = G->inventory_open; }
+    CT.dpos = fmaxf(CT.dpos, v3_dist(cam->pos, CT.first.pos));
+    float dr = fmaxf(fabsf(wrap_angle(cam->yaw - CT.first.yaw)), fmaxf(fabsf(cam->pitch - CT.first.pitch), fabsf(cam->roll - CT.first.roll)));
+    CT.drot = fmaxf(CT.drot, dr * DG_RAD2DEG);
+    CT.dfov = fmaxf(CT.dfov, fabsf(cam->fov_deg - CT.first.fov_deg));
+    CT.inv_open = CT.inv_open && G->inventory_open;
+    if (--CT.left == 0)
+        log_info("cam_track %s: %d frames, inventory %s, pos %.4f %.4f %.4f yaw %.4f pitch %.4f fov %.3f, max drift pos %.6f m rot %.5f deg fov %.5f deg", CT.label, CT.frames,
+                 CT.inv_open ? "open" : "closed", CT.first.pos.x, CT.first.pos.y, CT.first.pos.z, CT.first.yaw * DG_RAD2DEG, CT.first.pitch * DG_RAD2DEG, CT.first.fov_deg,
+                 CT.dpos, CT.drot, CT.dfov);
 }
 
 static void cmd_cam_stats(int argc, const char **argv) {
@@ -635,6 +668,40 @@ static void draw_debug(World *w, vec3 cam) {
     }
 }
 
+// Aiming laser (docs/ITEM_PIPELINE.md): a faint red beam from the module's emitter to the first world hit,
+// a bright dot there with a little red glow.
+static void laser_render(World *w, vec3 from, vec3 dir) {
+    RayHit rh;
+    float range = 80.0f;
+    bool hit = phys_raycast(w->phys, from, v3_scale(dir, range), PL_MASK_WORLD, PHYS_INVALID_BODY, &rh);
+    vec3 to = hit ? rh.point : v3_madd(from, dir, range);
+    float len = v3_len(v3_sub(to, from));
+    if (len < 0.02f) return;
+    DrawItem d;
+    memset(&d, 0, sizeof(d));
+    d.mesh = G->meshes.cube;
+    quat q = quat_euler(atan2f(-dir.x, -dir.z), asinf(clampf(dir.y, -1.0f, 1.0f)), 0);   // -Z onto the beam (dir_from_angles)
+    d.model = mat4_trs(v3_scale(v3_add(from, to), 0.5f), q, v3(0.0012f, 0.0012f, len));
+    d.mat = material_color(v4(1.0f, 0.06f, 0.03f, 0.22f));
+    d.mat.flags = MAT_UNLIT | MAT_NO_SHADOW;
+    render_draw(&d);
+    if (!hit) return;
+    float r = 0.004f + len * 0.0006f;
+    d.mesh = G->meshes.sphere;
+    d.model = mat4_trs(v3_madd(rh.point, rh.normal, 0.002f), quat_identity(), v3s(r * 2.0f));
+    d.mat = material_color(v4(1.0f, 0.1f, 0.05f, 1));
+    d.mat.flags = MAT_UNLIT | MAT_NO_SHADOW;
+    d.mat.emissive = 6.0f;
+    render_draw(&d);
+    PointLight pl = { 0 };
+    pl.pos = v3_madd(rh.point, rh.normal, 0.03f);
+    pl.radius = 0.6f;
+    pl.color = v3(1.0f, 0.08f, 0.04f);
+    pl.intensity = 0.6f;
+    pl.flags = LIGHT_NO_SHADOW;
+    render_add_light(&pl);
+}
+
 // Flashlights (F): a cookie-projected spot light. The local one
 // sits just ahead of the eye (in front of the held gun) along the view; other players' come from
 // their eye along the replicated aim (EF_FLASHLIGHT).
@@ -664,7 +731,19 @@ static void flashlights_render(World *w, const RenderCamera *cam, const Player *
     s.color = v3(1.0f, 0.97f, 0.92f);
     // The viewed player's light rides the camera: the local toggle, or a spectated player's replicated one.
     bool own_on = view_slot == G->local_slot ? G->flashlight : (lp && (w->flags[ENT_INDEX(lp->ent)] & EF_FLASHLIGHT));
-    if (own_on && lp && !dead) {
+    vec3 ep, ef;
+    if (own_on && lp && !dead && view_slot == G->local_slot && hands_emitter(1, &ep, &ef)) {
+        // A weapon light / held flashlight (docs/ITEM_PIPELINE.md): the beam leaves its emitter along the barrel.
+        s.pos = v3_madd(ep, ef, 0.01f);
+        s.dir = ef;
+        s.inner_deg = 5.0f;
+        s.outer_deg = 20.0f;
+        s.intensity = 170.0f;
+        render_add_spot(&s);
+        s.inner_deg = 7.0f;
+        s.outer_deg = 24.0f;
+        s.intensity = 140.0f;
+    } else if (own_on && lp && !dead) {
         vec3 f = dir_from_angles(cam->yaw, cam->pitch), r = right_from_yaw(cam->yaw), u = v3_cross(r, f);
         // Off-hand side, a little ahead of the eye: the held gun (to the right, mostly behind
         // the light) isn't flooded, the beam still starts at the view.
@@ -672,6 +751,7 @@ static void flashlights_render(World *w, const RenderCamera *cam, const Player *
         s.dir = f;
         render_add_spot(&s);
     }
+    if (own_on && lp && !dead && view_slot == G->local_slot && hands_emitter(2, &ep, &ef)) laser_render(w, ep, ef);
     for (int k = 0; k < MAX_PLAYERS; k++) {
         const Player *op = &w->players[k];
         if (!op->active || k == view_slot || !ent_valid(w, op->ent)) continue;
@@ -734,6 +814,12 @@ void game_render(void) {
         float ck = cvar_find("cam_kick_scale") ? cvar_find("cam_kick_scale")->f : 1.0f;   // visual camera kick (aim recoil unaffected)
         const FireAnimOut *fo = game_fire_sample(G->alpha);
         vec3 kr = v3_scale(v3(fo->cam_rot.x, fo->cam_rot.y, fo->cam_rot.z), ck);
+        // cam_kick_rot (0): the layer's pitch / yaw. The camera stays on the aim line, so the centred
+        // crosshair stays on the bullets' line (docs/AIM.md "Sway, recoil and the camera"); the roll
+        // twitch, the FOV punch and the push-back don't move the screen centre.
+        float kro = camera_fp_cvars()->kick_rot ? camera_fp_cvars()->kick_rot->f : 0.0f;
+        kr.x *= kro;
+        kr.y *= kro;
         float kb = fo->cam_back * ck;
         cam.fov_deg = fmaxf(5.0f, cam.fov_deg - fo->fov_punch * ck);
         // Sway and ADS bob move the weapon (about the eye), not the camera: the sight centre stays
@@ -869,6 +955,7 @@ void game_render(void) {
     }
     flashlights_render(w, &cam, p, dead, vs);
     terrain_game_frame(cam.pos);   // terrain level / debug / reload (before the frame's parameters)
+    cam_track_frame(&cam);
     render_set_camera(&cam);
     // Time of day first: the post settings (exposure floor / curves, fog) follow this frame's sky.
     RenderEnvironment tod_env;
@@ -979,6 +1066,7 @@ void game_render(void) {
     // Phone: lens view from the phone as drawn this frame, companion server, capture.
     phone_frame(w, &cam, p);
     fx_render(cam.pos);
+    items_game_draw(&cam);
     draw_debug(w, cam.pos);
     recoil_debug_draw(cam.pos);
     anim_debug_draw();
@@ -995,6 +1083,7 @@ void game_render(void) {
     daynight_draw();
     shadow_sky_draw();
     ground_ref_draw();
+    char_preview_dev_draw();
     weather_draw();
     game_audio_draw(cam.pos);
     flesh_range_draw();

@@ -46,7 +46,7 @@ void screens_confirm_expired(void);        // the display countdown ran out with
 // Multiplayer (scr_multiplayer.c)
 bool multiplayer_draw(GuiRect r);
 
-// Inventory (scr_inventory.c)
+// Inventory (ui/inventory/inv_screen.c, docs/INVENTORY.md)
 void inventory_open(void);
 void inventory_register_commands(void);
 void inventory_close(void);

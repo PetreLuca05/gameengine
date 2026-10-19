@@ -4,6 +4,7 @@
 #include "core/platform.h"
 #include "cJSON.h"
 #include <SDL3/SDL.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -63,6 +64,19 @@ bool maplist_parse(const char *json, const char *id, MapInfo *out, MapFileExists
         out->dev = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "dev"));
         get_s(root, "scene", out->scene, sizeof(out->scene));
         get_s(root, "chapter", out->chapter, sizeof(out->chapter));
+        const cJSON *geo = cJSON_GetObjectItemCaseSensitive(root, "globe");
+        if (!bad && geo) {
+            const cJSON *lon = cJSON_GetObjectItemCaseSensitive(geo, "lon"), *lat = cJSON_GetObjectItemCaseSensitive(geo, "lat");
+            if (!cJSON_IsObject(geo) || !cJSON_IsNumber(lon) || !cJSON_IsNumber(lat)) bad = "\"globe\" needs \"lon\" and \"lat\"";
+            else if (fabs(lon->valuedouble) > 180.0 || fabs(lat->valuedouble) > 90.0) bad = "\"globe\" lon / lat out of range";
+            else {
+                out->has_geo = true;
+                out->geo_lon = lon->valuedouble;
+                out->geo_lat = lat->valuedouble;
+                get_s(geo, "region", out->geo_region, sizeof(out->geo_region));
+                if (!get_s(geo, "place", out->geo_place, sizeof(out->geo_place))) dg_strcpy(out->geo_place, sizeof(out->geo_place), out->name);
+            }
+        }
     }
     if (!bad && file_exists && !file_exists(out->thumbnail, user)) bad = "thumbnail file missing";
     cJSON_Delete(root);

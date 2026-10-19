@@ -44,6 +44,16 @@ KNOWN = {
 }
 
 
+# Open data behind the Maps tab globe (tools/globe/build_globe.py, docs/CREDITS.md "Globe data").
+DATA = [
+    ("Copernicus Sentinel-2 L2A (ESA), via the AWS Open Data registry", ("regional satellite imagery (modified: grey, mosaicked, cloud-masked)", "Copernicus data licence (free, attribution)")),
+    ("NASA Blue Marble", ("world imagery", "public domain")),
+    ("Natural Earth", ("coasts, borders, lakes, rivers, land cover raster", "public domain")),
+    ("AWS Terrain Tiles (Mapzen: SRTM, GMTED2010, ETOPO1, NED and others)", ("height map and ocean depths", "attribution, see the AWS registry")),
+    ("geoBoundaries (William & Mary geoLab; US Census TIGER, Romania ADM1 / ADM2)", ("states, counties, judete, communes", "CC BY 4.0")),
+]
+
+
 def licence_hint(path):
     """The first licence line found in a directory's licence file or headers."""
     pats = re.compile(r"(MIT|Apache|BSD|zlib|public domain|Unlicense|ISC|CC0|SIL Open Font)", re.I)
@@ -88,6 +98,8 @@ def main():
         found = licence_hint(d) if d and os.path.isdir(d) else None
         ver = next((v for k, v in versions.items() if k in name.lower()), "")
         lines.append(f"{name}: {what}. Licence: {lic}" + (f" (file: {found})" if found and found.lower() not in lic.lower() else "") + (f". {ver}" if ver else ""))
+    lines += ["", "## Map data", "The Maps tab globe (docs/MENU_GLOBE.md) is built from open data:", ""]
+    lines += [f"{name}: {what}. Licence: {lic}" for name, (what, lic) in DATA]
     lines += ["", "## Licence texts", "The full licence texts ship next to the libraries in third_party/ and assets/ui/fonts/OFL.txt.", ""]
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", newline="\n") as f:

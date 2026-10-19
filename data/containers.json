@@ -1,0 +1,13 @@
+{
+  "_comment": "Root containers (docs/INVENTORY.md): what an inventory tree is, one grid each. 'body' must stay first (a zeroed tree's root): the equipment slots and no grid of its own (the worn backpack's grid is the player's). Backpacks live in items.json.",
+  "containers": [
+    { "id": "body", "equip": true, "compartments": [] },
+    { "id": "crate", "compartments": [ { "w": 6, "h": 4 } ] },
+    { "id": "crate_small", "compartments": [ { "w": 4, "h": 3 } ] },
+    { "id": "cabinet", "compartments": [ { "w": 4, "h": 6 } ] },
+    { "id": "wardrobe", "compartments": [ { "w": 4, "h": 6 } ] },
+    { "id": "trunk", "compartments": [ { "w": 8, "h": 5 } ] },
+    { "id": "fabricator", "compartments": [ { "w": 4, "h": 2 } ], "allow": ["misc"] },
+    { "id": "stash", "compartments": [ { "w": 10, "h": 12 } ] }
+  ]
+}

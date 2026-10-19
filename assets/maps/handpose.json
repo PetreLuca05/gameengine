@@ -14,5 +14,6 @@
   "weather": "",
   "dev": true,
   "order": 99,
-  "description": "The hand-pose rig editor (scene handpose) over a frozen dev room: grips and cases for every item and weapon. Leave with scene off."
+  "description": "The hand-pose rig editor (scene handpose) over a frozen dev room: grips and cases for every item and weapon. Leave with scene off.",
+  "globe": { "place": "Eforie", "lon": 28.632, "lat": 44.058, "region": "ro_ct" }
 }

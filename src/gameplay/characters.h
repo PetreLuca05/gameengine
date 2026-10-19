@@ -16,6 +16,7 @@
 #include "render/lod_fade.h"
 #include "anim/fire_anim.h"
 #include "gameplay/hitboxes.h"
+#include "gameplay/aim.h"
 #include "physics/ragdoll.h"
 
 #define MAX_CHARACTERS 2048   // hordes (src/gameplay/zombies)
@@ -35,6 +36,9 @@ typedef struct ZombieAI {
 } ZombieAI;
 
 typedef struct NetSample { u32 tick; AnimNetState s; } NetSample;
+
+// Worn gear slots (chars_set_worn, docs/CHARACTERS.md "Worn gear").
+typedef enum CharWornSlot { CWORN_HEAD, CWORN_CHEST, CWORN_BACK, CWORN_COUNT } CharWornSlot;
 
 typedef struct CharacterInst {
     EntityId ent;
@@ -67,10 +71,16 @@ typedef struct CharacterInst {
     Xform veh_prev, veh_cur;   // seated: the vehicle transform at the two evaluated poses (re-attached when drawn)
     bool veh_valid;
     Xform item_cam_prev, item_cam_cur;   // hold point item in camera space (owner re-places per frame)
-    vec3 muzzle_cam;                     // aim model: the muzzle socket relative to the player's simulated eye / view (docs/AIM.md)
+    quat ads_aim_prev, ads_aim_cur;      // the exact ADS item rotation turned by the hold aim, same ticks (ADS checks)
+    vec3 muzzle_cam;                     // aim model: the muzzle socket relative to the player's simulated eye / view (docs/AIM.md),
+                                         // of the gameplay pose aimed at this tick's aim point (the drawn pose without a hold solve)
     vec3 barrel_cam;                     // the barrel's forward axis (item -Z) in the same camera space
     bool muzzle_cam_valid;
     u32 muzzle_cam_tick;                 // chars tick of that pose
+    AimHoldRaw aim_raw;                  // the gameplay pose before the hold aim, same frame: every machine re-aims it at its P
+    bool aim_raw_valid;                  // the hold solve ran for a gun (not the LOD2+ baked arms; weight 0 without the hold aim)
+    u32 aim_raw_tick;
+    vec3 drawn_barrel_cam;               // the drawn item's barrel (sway, kick), same frame (aim_report)
     vec3 eye_cam;                        // aim model: the head's camera socket, same frame (the camera ray's origin)
     bool eye_cam_valid;
     u32 eye_cam_tick;
@@ -162,6 +172,7 @@ typedef struct CharacterInst {
     u8 part_gpu_sel[CSLOT_COUNT];     // selection the cache was built for
     u32 part_gpu_gen;
     SkeletonInstance *si;
+    u16 worn[CWORN_COUNT];            // worn gear item defs drawn on the body (chars_set_worn; cosmetic, every machine)
 } CharacterInst;
 
 typedef struct CharacterSystem {
@@ -194,6 +205,14 @@ bool chars_barrel_cam(World *w, EntityId e, vec3 *dir, int *age_ticks);
 // The same for the first-person camera (the head's "camera" socket): where the player's view really
 // starts. The capsule eye (player_eye_pos) can be 10 cm (standing) to 30 cm (crouched) away from it.
 bool chars_eye_cam(World *w, EntityId e, vec3 *cam, int *age_ticks);
+// The gameplay hold pose before the hold aim (docs/AIM.md "Hold aim"), same camera space: the muzzle,
+// barrel, pivot, weight and limit aim_hold_solve re-aims at any P (the command's claim, the host's
+// check, the crosshair). False without a hold solve (no gun, LOD2+ baked arms, dead).
+bool chars_aim_raw(World *w, EntityId e, AimHoldRaw *raw, int *age_ticks);
+// Hold aim diagnostics of the latest pose (aim_report): the wall pull, the weight, the limit, the
+// turn, and the drawn barrel (camera space as above).
+typedef struct CharAimInfo { float pull, w, max_deg, angle_deg, miss; vec3 drawn_barrel; } CharAimInfo;
+bool chars_aim_info(World *w, EntityId e, CharAimInfo *out);
 // Eye (camera socket) of a character's current pose, ragdoll included (death camera).
 bool chars_head_world(World *w, EntityId e, float alpha, vec3 *out);
 // Corpses (docs/REVIVE.md): the body of an ET_CORPSE entity. While its player is dead the player's
@@ -202,6 +221,21 @@ CharacterInst *chars_attach_corpse(World *w, EntityId corpse, int owner_slot);
 // Reconstruction display body: the given player's character (definition + modular parts) on a
 // client-local entity, evaluated in an idle pose and drawn with the dissolve (docs/REVIVE.md).
 CharacterInst *chars_attach_phantom(World *w, EntityId local_ent, int player_slot);
+// Worn gear drawn on a player's character (docs/CHARACTERS.md "Worn gear"): item defs (0 = none).
+void chars_set_worn(World *w, int player_slot, const u16 worn[CWORN_COUNT]);   // called by the game every frame (host: from the inventory, clients: replicated)
+// Inventory character preview (docs/CHARACTERS.md "Character preview"; the screen: docs/INVENTORY.md): a second, client-only instance
+// of a player's character (same model and cosmetics, its own pose: the idle clip, empty hands unless
+// held_item), drawn alone into its own RGBA target: transparent background, a fixed studio light rig,
+// front view framed head to mid-thigh. Call once per frame while it is shown (nothing renders on frames
+// it isn't called); returns the texture to draw this frame (0 until one is ready).
+typedef struct CharPreviewIn {
+    int w, h;                    // target size in pixels (the target follows changes)
+    u16 held_item;               // item def in the hands, 0 = empty hands (the default)
+    u8 held_att[ATT_SLOTS];      // its attachments
+    u16 worn[CWORN_COUNT];       // worn gear item defs (head = helmet, chest = plate carrier, back = backpack; 0 none)
+    float yaw;                   // extra turn about the vertical axis (radians; the UI may drag-rotate)
+} CharPreviewIn;
+TextureId chars_preview(World *w, int player_slot, const CharPreviewIn *in);
 // Pelvis + head of a character's current (ragdoll / settled / animated) pose.
 bool chars_body_axis(World *w, EntityId e, vec3 *pelvis, vec3 *head);
 // extract_blood hand IK: [0] where the free hand steadies the body (chest), [1] the needle point (arm / neck).
@@ -335,5 +369,6 @@ typedef struct VehiclePoseHooks {
 extern VehiclePoseHooks g_vehicle_pose;
 extern bool g_chars_force_phys_step;   // client: step physics this tick (vehicle prediction)
 extern bool g_chars_frozen;            // host: the world is frozen (hand pose editor): zombies / NPCs don't simulate
+
 
 #endif

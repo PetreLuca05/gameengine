@@ -59,8 +59,14 @@ Everything here uses the game's design system: theme colours and `layout` tokens
 | Ping | middle mouse, Z: contextual ping / wheel | `ping.json` |
 | Door | E on a door: use / wheel (Open, Slam, Peek) | `door.json` |
 
-Healing items are equipped and used at once (`wheel_heal_auto_use`). From the backpack they move
-into the hotbar first (`IOP_EQUIP`). The hotbar's selected slot is white too.
+Healing items are taken into the hands and used at once (`wheel_heal_auto_use`). The wheels take
+an item out of the grid into the hands (`II_HOLD`, docs/INVENTORY.md "Selection"). When it is used
+up, the last weapon comes back; fire waits for a release. The HUD weapon list's selected row is
+white too.
+
+The G tap drops the held item (the drawn weapon or the item in the hands, never the built-in phone): `RPC_INV_DROP`,
+applied by the host as a discard, so it lands in front of the player as a pickup (a weapon with its
+attachments). `tools/tests/inv_drop.cfg` checks it.
 
 ## Timed ring
 

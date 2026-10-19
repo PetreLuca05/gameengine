@@ -1,0 +1,20 @@
+{
+  "_comment": "Weapon light (docs/ITEM_PIPELINE.md): hangs under the handguard / pistol frame rail. With it mounted the flashlight (F) shines from its emitter socket along the barrel instead of from beside the eye. The pistol carries the compact light (mesh_for).",
+  "id": "weapon_light",
+  "name": "Weapon Light",
+  "slot": "underbarrel",
+  "emitter": "light",
+  "fire": { "mass": 0.11 },
+  "mount": {
+    "pos": [0, 0, 0]
+  },
+  "modifiers": {
+    "ads_time": 1.03
+  },
+  "mesh": "assets/items/meshes/att_weapon_light.dgim",
+  "mesh_for": { "pistol": "assets/items/meshes/att_weapon_light_pistol.dgim" },
+  "model": [
+      {"offset": [0, -0.006, 0], "half": [0.012, 0.006, 0.02], "color": [0.08, 0.08, 0.085]},
+      {"offset": [0, -0.022, -0.016], "half": [0.013, 0.013, 0.05], "color": [0.07, 0.07, 0.075]}
+    ]
+}

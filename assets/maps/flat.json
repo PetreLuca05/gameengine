@@ -13,5 +13,6 @@
   "weather": "",
   "dev": true,
   "order": 96,
-  "description": "Endless flat procedural ground: an empty canvas for movement, vehicle and network tests."
+  "description": "Endless flat procedural ground: an empty canvas for movement, vehicle and network tests.",
+  "globe": { "place": "Vama Veche", "lon": 28.575, "lat": 43.75, "region": "ro_ct" }
 }

@@ -325,7 +325,7 @@ static void cmd_preset(int argc, const char **argv) {
         snprintf(line, sizeof(line), "weather_params %s time 0", p->params);
         cmd_execute_line(line);
     }
-    if (p->elev >= 89.0f) cmd_execute_line("time_set 12:30");
+    if (p->elev >= 89.0f) cmd_execute_line("time_set 12:30 instant");
     else if (p->elev < 0.0f) daynight_preset_morning(w, -p->elev);
     else daynight_preset_time(w, p->elev, p->moon != 0);
     ssky_state_reset(&SS.st);   // a jump, not a transition: snap the fades

@@ -58,6 +58,7 @@ void main() {
     vec3 n = normalize(v_normal);
     if (!GB_FRONT_FACING) n = -n;
     float rough = clamp(GB_PARAMS.x, 0.04, 1.0), metal = clamp(GB_PARAMS.y, 0.0, 1.0), emissive = GB_PARAMS.z;
+    if (mat_vertex_pbr(GB_PARAMS.x)) { rough = clamp(v_uv.x, 0.04, 1.0); metal = clamp(v_uv.y, 0.0, 1.0); }   // item meshes
 #ifdef PBR_MAPS
     vec2 map_uv = v_uv * max(GB_PARAMS.w, 1e-3);
     n = pbr_normal(flags, map_uv, v_world, n);

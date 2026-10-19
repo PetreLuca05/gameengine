@@ -47,3 +47,16 @@ Thumbs.db
 
 # Packaged builds for playing / comparing (not source)
 /openable builds/
+
+# Item authoring scenes (docs/ITEM_PIPELINE.md): build products of assets/src/items/<id>.py
+# (tools/blender/build_items.py regenerates them); the scripts are the source.
+/assets/src/items/*.blend
+/assets/src/items/*.blend1
+# Combined model scenes (tools/blender/open_models.py rebuilds them; outside assets/ so builds do not copy them)
+/tools/blender/cache/
+
+# Maps tab globe: downloaded source data (tools/globe/build_globe.py re-fetches it)
+/tools/globe/cache/
+
+# Cell images turned a quarter (bake_cells writes them for tools; docs/INVENTORY.md "Cell images")
+/assets/ui/cells/*_r.png

@@ -1,0 +1,20 @@
+{
+  "_comment": "Aiming laser (docs/ITEM_PIPELINE.md): under the handguard / pistol frame. The flashlight toggle (F) turns the visible laser on: a beam from its emitter socket and a dot where it lands (local view).",
+  "id": "laser",
+  "name": "Laser Module",
+  "slot": "underbarrel",
+  "emitter": "laser",
+  "fire": { "mass": 0.09 },
+  "mount": {
+    "pos": [0, 0, 0]
+  },
+  "modifiers": {
+    "spread_hip": 0.85,
+    "ads_time": 1.02
+  },
+  "mesh": "assets/items/meshes/att_laser.dgim",
+  "model": [
+      {"offset": [0, -0.004, -0.002], "half": [0.012, 0.004, 0.018], "color": [0.3, 0.24, 0.15]},
+      {"offset": [0, -0.017, -0.012], "half": [0.0165, 0.0105, 0.033], "color": [0.32, 0.25, 0.16]}
+    ]
+}

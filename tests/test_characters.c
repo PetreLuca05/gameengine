@@ -476,6 +476,18 @@ static void test_part_replication(void) {
     CHECK(!memcmp(&out, &s1, sizeof(out)) && !r.overflow, "part selection round trip");
     CHECK((int)w.len == 2 + anim_net_size(&s1, f) && w.len == 2 + 2 + 4, "part selection %u bytes", w.len);
     CHECK(anim_net_diff(&s1, &s1) == 0, "unchanged parts must not be resent");
+    // The worn gear rides in the same block (docs/CHARACTERS.md "Worn gear"): two of three worn.
+    AnimNetState s2 = s1;
+    s2.worn[0] = 41;
+    s2.worn[2] = 43;
+    w = writer_make(buf, sizeof(buf));
+    f = anim_net_diff(&s1, &s2);
+    CHECK(f == ANS_PARTS, "worn gear change mask %04x", f);
+    anim_net_write(&w, &s2, f);
+    out = s1;
+    r = reader_make(buf, w.len);
+    anim_net_read(&r, &out, NULL);
+    CHECK(!memcmp(&out, &s2, sizeof(out)) && !r.overflow && w.len == 2 + 2 + 4 + 2, "worn gear round trip (%u bytes)", w.len);
     // Every machine builds the same parts from the same seed.
     const CharacterDef *def = anim_lib_char_by_id(L, "zombie_placeholder");
     u8 a[CSLOT_COUNT], b[CSLOT_COUNT];

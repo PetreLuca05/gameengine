@@ -1,5 +1,6 @@
-// HUD (docs/UI.md "HUD"): vitals bottom left, ammo bottom right, the hotbar (the inventory's slot
-// widget) bottom centre, the interaction prompt under the crosshair, hints, kill feed top right.
+// HUD (docs/UI.md "HUD"): the weapon list (primary / secondary / holster, docs/INVENTORY.md) bottom
+// left, health and armor (plates) bottom centre, ammo bottom right, the interaction prompt under the
+// crosshair, hints, kill feed top right.
 // Everything sits in the UI safe area and hides while a game screen is open. The crosshair and
 // hit markers are crosshair.c; the developer overlays keep the small debug font. All of it shows
 // the *viewed* player: a spectated player's HUD exactly as they see it, plus the spectator bar
@@ -11,6 +12,7 @@
 #include "menus.h"
 #include "ui.h"
 #include "icons.h"
+#include "inventory/inv_screen.h"
 #include "gui/gui_widgets.h"
 #include "core/engine.h"
 #include "core/cvar.h"
@@ -27,13 +29,14 @@
 #include "gameplay/revive/revive.h"
 #include "widgets/timed_ring.h"
 #include "game/game_revive.h"
+#include "gameplay/health.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
 
 #define COL_PANEL UI_RGBA(10, 12, 14, 150)
 
-void inventory_slot_view(const InvSlot *s, const ItemDB *db, int mag_override, GuiSlotView *v);   // scr_inventory.c
+void inventory_slot_view(const InvSlot *s, const ItemDB *db, int mag_override, GuiSlotView *v);   // ui/inventory/inv_screen.c
 
 static float s_compass_bottom;
 float hud_compass_bottom(void) { return s_compass_bottom; }
@@ -82,29 +85,37 @@ static void draw_damage_indicators(Game *g) {
     }
 }
 
+// Health and armor, centred at the bottom (theme tokens hud_vitals_*): the armor bar above the health
+// bar, one segment per plate the player can hold (1, 4 with a plate carrier: docs/DAMAGE.md "Armor").
 static void draw_vitals(World *w, GuiRect safe) {
     Player *p = hud_player();
     if (!p) return;
     Health *h = &w->health[ENT_INDEX(p->ent)];
-    // The lowest bar sits on the safe area's bottom edge, like the hotbar and the ammo ticks.
-    float bw = gui_s(250), x = safe.x, y = safe.y + safe.h - gui_s(h->max_armor > 0 ? 34.0f : 24.0f);
+    float bw = gui_s(gui_tok("hud_vitals_w")), hb = gui_s(gui_tok("hud_vitals_hp_h")), ab = gui_s(gui_tok("hud_vitals_armor_h"));
+    float lab = gui_s(gui_tok("hud_vitals_label_w")), numw = gui_s(gui_tok("hud_vitals_num_w")), row = gui_s(gui_tok("hud_vitals_row_h"));
+    float total = lab + bw + numw, x0 = gui_w() * 0.5f - total * 0.5f, x = x0 + lab;
+    float hy = safe.y + safe.h - row, ay = hy - row;   // the health row on the safe area's bottom edge, armor above
     float hp = h->hp / fmaxf(1, h->max_hp);
-    gd_shadow(gui_rect(x, y - gui_s(2), bw + gui_s(60), gui_s(44)), 0, gui_s(30), UI_RGBA(0, 0, 0, 55));
-    caps(x, y - gui_s(6), gui_s(TH->t_label), TH->text_dim, GUI_LEFT, "Health");
+    gd_shadow(gui_rect(x0, ay, total, 2 * row), 0, gui_s(30), gui_rgba_mul(TH->shadow, 0.45f));
     char b[16];
-    snprintf(b, sizeof(b), "%.0f", fmaxf(0.0f, h->hp));
-    GuiText num = { gui_s(26), GW_SEMIBOLD, hp > 0.3f ? TH->hud_text : TH->danger, GUI_LEFT, 0, false, true, 0 };
-    gd_text(&num, x + bw + gui_s(12), y + gui_s(4), b);
-    float low = hp < 0.3f ? 0.6f + 0.4f * sinf((float)gui_time() * 6.0f) : 1.0f;
-    bar(gui_rect(x, y + gui_s(16), bw, gui_s(8)), hp, gui_rgba_mul(hp > 0.3f ? UI_RGBA(232, 232, 226, 235) : TH->danger, low), UI_RGBA(255, 255, 255, 30));
-    if (h->max_armor > 0) {
-        bar(gui_rect(x, y + gui_s(30), bw, gui_s(4)), h->armor / fmaxf(1, h->max_armor), TH->info, UI_RGBA(255, 255, 255, 20));
-        if (h->armor > 0) {
-            snprintf(b, sizeof(b), "%.0f", h->armor);
-            GuiText an = { gui_s(TH->t_small), GW_MEDIUM, TH->info, GUI_LEFT, 0, false, true, 0 };
-            gd_text(&an, x + bw + gui_s(12), y + gui_s(32) - gd_line_height(an.size) * 0.5f, b);   // centred on the bar
-        }
+    // Armor: plates as segments.
+    int plates = DG_MAX(1, (int)lrintf(h->max_armor / ARMOR_PER_PLATE));
+    float gap = gui_s(gui_tok("hud_vitals_plate_gap")), sw = (bw - gap * (float)(plates - 1)) / (float)plates;
+    caps(x0, ay + (row - gui_s(TH->t_label)) * 0.5f - gui_s(2), gui_s(TH->t_label), TH->text_dim, GUI_LEFT, "Armor");
+    for (int i = 0; i < plates; i++) {
+        float f = saturate((h->armor - (float)i * ARMOR_PER_PLATE) / ARMOR_PER_PLATE);
+        bar(gui_rect(x + (float)i * (sw + gap), ay + (row - ab) * 0.5f, sw, ab), f, TH->info, gui_rgba_mul(TH->slot_hi, 0.8f));
     }
+    snprintf(b, sizeof(b), "%.0f", fmaxf(0.0f, h->armor));
+    GuiText an = { gui_s(TH->t_small + 2), GW_SEMIBOLD, h->armor > 0 ? TH->info : TH->text_faint, GUI_LEFT, 0, false, true, 0 };
+    gd_text(&an, x + bw + gui_s(10), ay + (row - gd_line_height(an.size)) * 0.5f, b);
+    // Health.
+    caps(x0, hy + (row - gui_s(TH->t_label)) * 0.5f - gui_s(2), gui_s(TH->t_label), TH->text_dim, GUI_LEFT, "Health");
+    float low = hp < 0.3f ? 0.6f + 0.4f * sinf((float)gui_time() * 6.0f) : 1.0f;
+    bar(gui_rect(x, hy + (row - hb) * 0.5f, bw, hb), hp, gui_rgba_mul(hp > 0.3f ? TH->hud_text : TH->danger, low), gui_rgba_mul(TH->slot_hi, 0.9f));
+    snprintf(b, sizeof(b), "%.0f", fmaxf(0.0f, h->hp));
+    GuiText num = { gui_s(TH->t_body + 3), GW_SEMIBOLD, hp > 0.3f ? TH->hud_text : TH->danger, GUI_LEFT, 0, false, true, 0 };
+    gd_text(&num, x + bw + gui_s(10), hy + (row - gd_line_height(num.size)) * 0.5f, b);
 }
 
 static const char *hud_fire_mode_name(int m) { return m == FM_SINGLE ? "Single" : (m == FM_BURST ? "Burst" : "Auto"); }
@@ -177,38 +188,66 @@ static void draw_ammo(Game *g, World *w, GuiRect safe) {
     }
 }
 
-static void draw_hotbar(Game *g, World *w, GuiRect safe) {
+// One row of the weapon list: the key, the item's cell image, the name, the magazine / reserve and
+// the fire mode; selected: white; empty: a dim outline with the slot's name.
+static void weapon_row(GuiRect r, const char *key, const char *empty_name, const InvSlot *s, bool sel, bool drawn, const Player *p, const ItemDB *db) {
+    float rad = gui_s(TH->radius), fs = gui_s(TH->t_small);
+    float tw = gui_tween(gui_idi("hud_wrow", (int)key[0]), sel ? 1.0f : 0.0f, 0.1f);
+    r.x += tw * gui_s(gui_tok("hud_wlist_lift"));
+    if (!s->item) {
+        gd_round_outline(r, rad, 1, gui_rgba_mul(TH->slot_border, 1.2f));
+        GuiText k = { fs, GW_SEMIBOLD, TH->text_faint, GUI_LEFT, 0, false, true, 0 };
+        gd_text(&k, r.x + gui_s(8), r.y + (r.h - gd_line_height(fs)) * 0.5f, key);
+        caps(r.x + gui_s(26), r.y + (r.h - gui_s(TH->t_tiny)) * 0.5f - gui_s(2), gui_s(TH->t_tiny), TH->text_faint, GUI_LEFT, empty_name);
+        return;
+    }
+    gd_alpha_push(sel ? 1.0f : 0.72f);
+    gd_round_border(r, rad, sel ? fmaxf(1.0f, gui_s(1.5f)) : 1.0f, TH->hud_panel, sel ? TH->select : TH->slot_border);
+    u32 tc = sel ? TH->select : TH->hud_text;
+    GuiText k = { fs, GW_SEMIBOLD, sel ? TH->select : TH->text_dim, GUI_LEFT, 0, false, true, 0 };
+    gd_text(&k, r.x + gui_s(8), r.y + (r.h - gd_line_height(fs)) * 0.5f, key);
+    float iw = gui_s(gui_tok("hud_wlist_img_w"));
+    GuiRect img = { r.x + gui_s(24), r.y + gui_s(4), iw, r.h - gui_s(8) };
+    inv_draw_item_image(img, db, s, false, 1.0f);
+    float tx = img.x + iw + gui_s(8);
+    char b[48] = "";
+    const WeaponDef *wd = item_weapon(db, s->item);
+    if (wd && wd->kind != WPN_MELEE && wd->mag_size > 0) {
+        int mag = drawn ? p->sim.wpn.mag : s->ammo;
+        snprintf(b, sizeof(b), "%d / %d", mag, wd->ammo_item ? inv_count(&p->inv, wd->ammo_item) : 0);
+    } else if (s->count > 1) {
+        snprintf(b, sizeof(b), "x%d", s->count);
+    }
+    GuiText am = { fs, GW_SEMIBOLD, tc, GUI_RIGHT, 0, false, true, 0 };
+    float aw = b[0] ? gd_text_width(&am, b) : 0.0f;
+    GuiText nm = { fs, GW_MEDIUM, tc, GUI_LEFT, 0, false, true, r.x + r.w - tx - aw - gui_s(16) };
+    float ny = r.y + gui_s(5);
+    gd_text(&nm, tx, ny, item_def(db, s->item)->name);
+    if (b[0]) gd_text(&am, r.x + r.w - gui_s(8), ny, b);
+    // The fire mode of the drawn gun (a gun with more than one).
+    if (drawn && wd && wd->recoil.fire_modes && (wd->recoil.fire_modes & (wd->recoil.fire_modes - 1)))
+        caps(r.x + r.w - gui_s(8), r.y + r.h - gui_s(TH->t_tiny) - gui_s(6), gui_s(TH->t_tiny), TH->accent, GUI_RIGHT, hud_fire_mode_name(p->sim.wpn.fire_mode));
+    gd_alpha_pop();
+}
+
+// The weapon list, bottom left (theme tokens hud_wlist_*): primary, secondary, holster (keys 1-3, the
+// wheel cycles them), the selected one white; the item in the hands (from the wheels) above them.
+static void draw_weapon_list(Game *g, World *w, GuiRect safe) {
     Player *p = hud_player();
     if (!p) return;
-    // The selection: the local hotbar key, or what a spectated player has equipped.
-    int hot = p->local ? g->hotbar_slot : (p->sim.wpn.slot < INV_HOTBAR ? p->sim.wpn.slot : g->hotbar_slot);
-    float sz = gui_s(TH->slot * 0.82f), gap = gui_s(TH->slot_gap);
-    float total = INV_HOTBAR * sz + (INV_HOTBAR - 1) * gap;
-    float x0 = gui_w() * 0.5f - total * 0.5f, y = safe.y + safe.h - sz;
-    for (int i = 0; i < INV_HOTBAR; i++) {
-        GuiRect r = { x0 + (float)i * (sz + gap), y, sz, sz };
-        bool sel = i == hot;
-        float lift = gui_tween(gui_idi("hud_hot", i), sel ? 1.0f : 0.0f, 0.1f);
-        r.y -= lift * gui_s(6);
-        GuiSlotView v;
-        inventory_slot_view(&p->inv.slots[i], w->items, i == p->sim.wpn.slot ? p->sim.wpn.mag : -1, &v);
-        v.hotkey = i + 1;
-        v.selected = sel;
-        gd_alpha_push(sel ? 1.0f : 0.78f);
-        gd_round(r, gui_s(TH->radius), UI_RGBA(0, 0, 0, 70));
-        gw_slot(r, &v);
-        gd_alpha_pop();
-    }
-    // Name of the selected item, fading out after a switch.
-    const InvSlot *s = &p->inv.slots[hot];
-    static int last = -1;
-    static double since;
-    if (last != hot || !s->item) { last = hot; since = gui_time(); }
-    float a = 1.0f - saturate((float)(gui_time() - since - 1.2) / 0.4f);
-    if (s->item && a > 0.01f) {
-        gd_alpha_push(a);
-        caps(gui_w() * 0.5f, y - gui_s(34), gui_s(TH->t_small), TH->hud_text, GUI_CENTER, item_def(w->items, s->item)->name);
-        gd_alpha_pop();
+    int sel = p->local ? g->sel_slot : p->sim.wpn.slot;
+    if (p->local && g->phone_out) sel = -1;
+    float rw = gui_s(gui_tok("hud_wlist_w")), rh = gui_s(gui_tok("hud_wlist_row_h")), gap = gui_s(gui_tok("hud_wlist_gap"));
+    float x = safe.x, y = safe.y + safe.h - (float)INV_SEL_WEAPONS * (rh + gap) + gap;
+    static const char *keys[INV_SEL_WEAPONS] = { "1", "2", "3" }, *names[INV_SEL_WEAPONS] = { "Primary", "Secondary", "Holster" };
+    gd_shadow(gui_rect(x, y, rw, (float)INV_SEL_WEAPONS * (rh + gap)), 0, gui_s(30), gui_rgba_mul(TH->shadow, 0.45f));
+    for (int k = 0; k < INV_SEL_WEAPONS; k++)
+        weapon_row(gui_rect(x, y + (float)k * (rh + gap), rw, rh), keys[k], names[k], inv_sel_c(&p->inv, k), k == sel, p->sim.wpn.slot == k, p, w->items);
+    const InvSlot *hs = inv_sel_c(&p->inv, INV_SEL_HANDS);
+    if (hs->item && sel == INV_SEL_HANDS) {
+        GuiRect r = { x, y - rh - gap * 3.0f, rw * 0.8f, rh };
+        caps(r.x, r.y - gui_s(TH->t_tiny) - gui_s(4), gui_s(TH->t_tiny), TH->text_dim, GUI_LEFT, "In hands");
+        weapon_row(r, "\xE2\x80\xA2", "", hs, true, true, p, w->items);
     }
 }
 
@@ -487,6 +526,7 @@ void hud_draw(void) {
     World *w = g->world;
     float s = ui_scale();
     icons_tick();
+    inv_cells_tick();   // the weapon list's cell images (docs/INVENTORY.md "Cell images"); bake_cells runs here too
     draw_dev(g, w, s);
     if (menus_open()) return;   // the HUD hides behind game screens
     if (game_death_hud_hidden()) return;   // the death sequence: the fall and the black are HUD-free (docs/REVIVE.md)
@@ -500,7 +540,7 @@ void hud_draw(void) {
     draw_damage_indicators(g);
     draw_vitals(w, safe);
     draw_ammo(g, w, safe);
-    draw_hotbar(g, w, safe);
+    draw_weapon_list(g, w, safe);
     draw_hints(g, safe);
     hud_story_draw(safe);
     hud_pings_draw(g, safe);

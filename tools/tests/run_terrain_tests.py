@@ -78,7 +78,7 @@ def test_reload(bin_dir, work):
     shutil.copyfile(tj, backup)
     cfg = os.path.join(work, "reload.cfg")
     with open(cfg, "w") as f:
-        f.write("set r_maxfps 60\nmap terrain_yard\nwait 20\ntime_set 11:30\ntime_pause\nsetpos -2 12.5 -61 160 -30\nwait 1\nnoclip\nwait 10\n"
+        f.write("set r_maxfps 60\nmap terrain_yard\nwait 20\ntime_set 11:30 instant\ntime_pause\nsetpos -2 12.5 -61 160 -30\nwait 1\nnoclip\nwait 10\n"
                 "screenshot reload_a.png\nwait 2\nwait 12\nscreenshot reload_b.png\nwait 2\nquit\n")
     state = {"edited": None, "reloaded": None}
 
@@ -121,7 +121,7 @@ def test_seam(bin_dir, work):
     cfg = os.path.join(work, "seam.cfg")
     h, vfov = 15.0, 75.0
     with open(cfg, "w") as f:
-        f.write("set r_maxfps 60\nset cl_fov %g\nmap terrain_yard\nwait 20\ntime_set 11:30\ntime_pause\nweather_set overcast 0\nweather_lock 1\nset r_fidelity 4\n"
+        f.write("set r_maxfps 60\nset cl_fov %g\nmap terrain_yard\nwait 20\ntime_set 11:30 instant\ntime_pause\nweather_set overcast 0\nweather_lock 1\nset r_fidelity 4\n"
                 "setpos 60 %g -85 180 0\nwait 1\nnoclip\nwait 40\nscreenshot seam.png\nwait 2\nquit\n" % (vfov, 10.0 + h))
     run(bin_dir, cfg, work, os.path.join(work, "seam.log"))
     p = os.path.join(work, "seam.png")
