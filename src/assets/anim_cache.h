@@ -7,7 +7,7 @@
 #include "anim/anim_mesh.h"
 #include "render/skeletal_mesh.h"
 
-#define ANIM_BAKE_VERSION 8   // 8: per-bone file binds (SkmBone.bind_fix) for meshes whose bind differs, exact 255 weight sums; 7: 7: SkeletalMesh (per-mesh bone lists, mesh-only leaf bones, aliases); 6: namespace-insensitive bones, skin retargeting to the canonical bind pose
+#define ANIM_BAKE_VERSION 9   // 9: clips keep their authored facing (no first-frame hips alignment), one-shots keep their hips' sway unless they turn 45+ deg, " to " transitions play once; 8: per-bone file binds (SkmBone.bind_fix) for meshes whose bind differs, exact 255 weight sums; 7: 7: SkeletalMesh (per-mesh bone lists, mesh-only leaf bones, aliases); 6: namespace-insensitive bones, skin retargeting to the canonical bind pose
 
 void anim_cache_set_dir(const char *dir);        // absolute directory (created on demand)
 void anim_cache_set_rebuild(bool rebuild);       // --rebuild-cache: ignore existing entries

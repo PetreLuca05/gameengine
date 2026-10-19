@@ -118,6 +118,11 @@ typedef struct CharacterInst {
     bool dead, rag_pending, settled;
     bool tool_rag;                    // ragdolled by a dev tool (not dead): no auto revive
     bool corpse;                      // a corpse entity's body (docs/REVIVE.md): never evaluated, holds an adopted ragdoll / pose
+    // Controller states with "root_y": "clip" (the hang climb, clip_root_apply): the root height at the
+    // state's start and the height the clip climbs from.
+    bool croot_on;
+    i16 croot_state;
+    float croot_from_y, croot_anchor_y;
     bool adopted;                     // corpse: took over its player's ragdoll when the player came back
     bool phantom;                     // client-local display body (fabricator reconstruction): idle, no foot IK
     vec4 recon;                       // phantom: MAT_RECON spine base + progress (docs/REVIVE.md)

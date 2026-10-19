@@ -191,7 +191,7 @@ static void st_add(Stats *s, double e, double thr) {
     if (e > thr) s->over++;
 }
 
-static const char *k_clips[] = { "crouch", "Zombie Attack", "Zombie Punching", "death", "jog", "running", "Hanging Idle", "jump" };
+static const char *k_clips[] = { "jog", "sprint", "hang", "jump", "crawl", "swim" };
 
 static int collect_poses(Xform (**out)[ANIM_MAX_BONES]) {
     int cap = 256, n = 0;

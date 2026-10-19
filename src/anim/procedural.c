@@ -460,6 +460,18 @@ void proc_run(ProcState *st, const ProcInput *in0, Pose *pose, Xform *model) {
     vec3 anim_foot[2] = { { 0 }, { 0 } };
     if (in.foot_ik) proc_foot_pelvis(st, &in, pose, model, foot_off, anim_foot);
     if (in.lean) proc_lean(st, &in, pose, model);
+    {
+        // The clip's own chest yaw (a bladed rifle idle turns it ~40 deg, a run sways it): the hold's
+        // bladed stance turns the chest to its twist from there, so a held item sees the same upper
+        // body whatever the clip. None while the chest faces the ground (crawl, swim stroke).
+        int sp2 = in.skel->role[BR_SPINE2];
+        st->clip_chest_yaw = 0;
+        if (sp2 >= 0) {
+            vec3 f = quat_rotate(quat_mul(model[sp2].r, quat_conj(in.skel->bind_model[sp2].r)), v3(0, 0, -1));
+            float flat = sqrtf(f.x * f.x + f.z * f.z);
+            if (flat > 1e-3f) st->clip_chest_yaw = atan2f(-f.x, -f.z) * DG_RAD2DEG * smoothstepf(0.3f, 0.7f, flat);
+        }
+    }
     if (in.spine) proc_spine(st, &in, pose, model);
     // Before the hand solve: whatever moved above, the arm chains start from the clip's shoulders.
     keep_clavicles(in.skel, pose, model, clav, clav_clip);

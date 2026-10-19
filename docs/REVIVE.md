@@ -27,7 +27,7 @@ Status:
 | Game integration | `src/gameplay/revive/revive.{c,h}`: host effects, interactables, replication fields, commands |
 | Death sequence (local) | `src/game/game_death.c`: post, mix, HUD, impact probe, `die` / `death_preview` |
 | Chamber + reconstruction | `src/game/game_revive.c`, `draw_fabricator` in `src/game/game_render.c`, `shaders/recon.glsl` |
-| Kneel | `proc_kneel` in `src/anim/procedural.c`, state `downed` in `assets/human/controller.json` |
+| Kneel / crawl | `proc_kneel` in `src/anim/procedural.c` (still), the crawl clip while moving (`downed_crawl`), state `downed` in `assets/human/controller.json` |
 | HUD | `src/ui/hud.c` (downed panel, recovery status, fabricator panels), `src/ui/hud/hud_compass.c`, `src/game/game_wheels.c` (rings) |
 | Data | `assets/gameplay/revive_rules.json`, `assets/vfx/death_sequence.json`, `assets/audio/death_ring.json`, `assets/vfx/effects/reconstruction.json` (+ `recon_*.json`), `data/items.json` (`syringe`, `dna_sample`) |
 | Tests | `tests/test_revive.c`, `tools/tests/revive_loop.cfg`, `tools/tests/revive_net*.{sh,cfg}` |

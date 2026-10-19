@@ -253,6 +253,7 @@ bool ctrl_def_load(ControllerDef *def, const char *text, const Skeleton *skel, c
             S->hand_ik = jb(sj, "hand_ik", true);
             S->sync = jb(sj, "sync", false);
             S->speed_match = jb(sj, "speed_match", false);
+            S->clip_root_y = !strcmp(js(sj, "root_y", "movement"), "clip");
             const char *tp = js(sj, "time_param", NULL);
             if (tp) S->time_param = (i16)param_ref(&p, tp);
             const char *sp = js(sj, "speed_param", NULL);
@@ -901,6 +902,24 @@ void ctrl_evaluate(ControllerInst *c, const Skeleton *skel, const ClipLookup *cl
     pose_copy(&c->prev_out, c->have_last ? &c->last_out : out);
     pose_copy(&c->last_out, out);
     c->have_last = true;
+}
+
+bool ctrl_state_start_hips_y(const ControllerInst *c, const ClipLookup *cl, int layer, int state, float *y) {
+    if (!cl || layer < 0 || layer >= c->def->layer_count) return false;
+    const LayerDef *L = &c->def->layers[layer];
+    int node = state_node(L, state, state == c->layer[layer].state ? c->layer[layer].variant : 0);
+    if (node < 0) return false;
+    LeafSet ls;
+    resolve_leaves_ex(c, node, &ls, layer == 0);
+    int lead = -1;
+    for (int i = 0; i < ls.n; i++)
+        if (ls.l[i].clip >= 0 && ls.l[i].clip < cl->count && (lead < 0 || ls.l[i].weight > ls.l[lead].weight)) lead = i;
+    if (lead < 0) return false;
+    const Clip *cp = &cl->clips[ls.l[lead].clip];
+    float u = ls.l[lead].reverse ? ls.l[lead].r1 : ls.l[lead].r0;
+    int f = DG_CLAMP((int)lrintf(u * (float)(cp->frames - 1)), 0, cp->frames - 1);
+    *y = cp->data[(size_t)f * (size_t)cp->bones].t.y;
+    return true;
 }
 
 void ctrl_root_delta(const ControllerInst *c, const ClipLookup *cl, float dt, vec3 *dpos, float *dyaw) {

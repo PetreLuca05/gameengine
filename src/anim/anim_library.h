@@ -52,6 +52,7 @@ typedef struct AnimLibrary {
     union { SkeletonAsset skeleton; Skeleton skel; };
     Clip clips[LIB_MAX_CLIPS];
     float clip_yaw[LIB_MAX_CLIPS];                // clips.json "yaw" applied to the clip's root (degrees)
+    bool clip_air[LIB_MAX_CLIPS];                 // clips.json "air_in_place" applied (hips capped at standing height)
     int clip_count;
     ClipLookup lookup;
     ControllerDef ctrl;

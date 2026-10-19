@@ -658,6 +658,7 @@ static void player_inputs(World *w, CharacterInst *c, const Player *p, CharInput
     in->dead = m->mode == MOVE_DEAD || (w->flags[ENT_INDEX(p->ent)] & EF_DEAD);
     in->downed = p->sim.down.downed || (w->flags[ENT_INDEX(p->ent)] & EF_DOWNED);   // knocked down (docs/REVIVE.md)
     if (in->downed) in->crouch = true;
+    in->swimming = (w->flags[ENT_INDEX(p->ent)] & (EF_SWIM | EF_UNDERWATER)) != 0;
     in->mantle_t = m->m_t;
     in->vertical_vel = m->vel.y;
     in->aim_pitch = m->pitch;
@@ -786,6 +787,7 @@ static void inputs_from_net(const World *w, CharacterInst *c, const AnimNetState
     in->dead = (s->flags & ANF_DEAD) != 0;
     in->downed = (w->flags[ENT_INDEX(c->ent)] & EF_DOWNED) != 0;   // replicated entity flag (no anim-state bit)
     if (in->downed) in->crouch = true;
+    in->swimming = (w->flags[ENT_INDEX(c->ent)] & (EF_SWIM | EF_UNDERWATER)) != 0;   // replicated entity flags
     in->mantle_t = (float)s->mantle_t / 255.0f;
     in->aim_pitch = and_pitch(s->aim_pitch);
     in->aim_yaw = and_angle(s->aim_yaw);
@@ -898,6 +900,37 @@ static void note_steps(CharacterInst *c) {
         }
 }
 
+// Controller states with "root_y": "clip" (the hang climb): the clip carries the vertical travel, so
+// the rendered root keeps the height it had when the state began, moved so the clip's first frame puts
+// the hips where the previous pose had them (eased in over the cross-fade, back to the movement's over
+// the next one). Same on every machine: the state, its blend and the root at its start are.
+static void clip_root_apply(CharacterInst *c) {
+    const ControllerInst *ct = &c->rt.ctrl;
+    if (!ct->def || !ct->def->layer_count || !LIB) return;
+    const LayerDef *L = &ct->def->layers[0];
+    const LayerState *S = &ct->layer[0];
+    bool blending = S->blend_total && S->prev_state >= 0;
+    float a = blending ? (float)S->blend_ticks / (float)S->blend_total : 1.0f;
+    a = a * a * (3.0f - 2.0f * a);   // the controller's cross-fade curve
+    if (L->states[S->state].clip_root_y) {
+        if (!c->croot_on || c->croot_state != S->state) {
+            int hips = LIB->skel.role[BR_HIPS];
+            float y0, off = 0;
+            if (hips >= 0 && c->rt.base_valid && ctrl_state_start_hips_y(ct, &LIB->lookup, 0, S->state, &y0))
+                off = (c->rt.base_model[hips].t.y - y0) * c->def->scale;
+            c->croot_on = true;
+            c->croot_state = S->state;
+            c->croot_from_y = c->root.t.y;
+            c->croot_anchor_y = c->root.t.y + off;
+        }
+        c->root.t.y = lerpf(c->croot_from_y, c->croot_anchor_y, blending ? a : 1.0f);
+    } else if (c->croot_on && blending && L->states[S->prev_state].clip_root_y) {
+        c->root.t.y = lerpf(c->croot_anchor_y, c->root.t.y, a);
+    } else {
+        c->croot_on = false;
+    }
+}
+
 static void sim_pre(World *w, CharacterInst *c, int i) {
     bool dead_now = (w->flags[i] & EF_DEAD) != 0 || (c->is_player && c->slot >= 0 && w->players[c->slot].sim.move.mode == MOVE_DEAD);
     if (c->dead && !dead_now && !c->tool_rag) revive(w, c);
@@ -929,6 +962,7 @@ static void sim_core(World *w, CharacterInst *c, int i, float dt) {
         }
     }
     c->root = xf_make(feet_of(w, i), quat_yaw(c->body_yaw));
+    clip_root_apply(c);
     // Hitboxes from the sim-only pose (never from render LOD / IK).
     Xform world[ANIM_MAX_BONES];
     charrt_to_world(&c->rt, c->rt.base_model, c->root, c->def->scale, world);
@@ -1144,6 +1178,7 @@ static void client_one(World *w, CharacterInst *c, int i, double rt, float dt) {
     }
     c->limb = rep.limb_status;
     c->root = xf_make(feet_of(w, i), quat_yaw(c->body_yaw));
+    clip_root_apply(c);
     // Death replicated (late joiners get the death tick + seed).
     if ((rep.flags & ANF_DEAD) && !c->dead && rep.death_tick) {
         c->dead = true;
@@ -1203,6 +1238,7 @@ void chars_local_predict(World *w, int slot, bool first) {
         if (c->mismatch_ticks > 30) { ctrl_force_state(ct, 0, rep->state[0], 0, and_phase(rep->phase)); c->mismatch_ticks = 0; c->resyncs++; }
     }
     c->root = xf_make(p->sim.move.pos, quat_yaw(c->body_yaw));
+    clip_root_apply(c);
 }
 
 const AnimNetState *chars_net_state(const World *w, int i) {
@@ -1611,7 +1647,9 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
         if (m->hand_anchor_valid && (m->mode == MOVE_HANG || m->mode == MOVE_MANTLE || m->mode == MOVE_VAULT)) {
             pi.hand_anchor[0] = m->hand_anchor[0];
             pi.hand_anchor[1] = m->hand_anchor[1];
-            pi.hand_anchor_w = 1.0f;
+            // A mantle lets go of the ledge gradually (the anchors end at m_t 0.75): the climb
+            // clip's own hands take over without a snap.
+            pi.hand_anchor_w = m->mode == MOVE_MANTLE ? 1.0f - smoothstepf(0.4f, 0.72f, m->m_t) : 1.0f;
             // The ledge case (mantle_ledge) at the traversal's progress, once it has a pose.
             u32 mc = handpose_mantle_case();
             for (int h = 0; h < 2 && mc; h++) {
@@ -2088,7 +2126,7 @@ static bool pose_key(const CharacterInst *c, float t, int phases, PoseKey *k) {
     const ControllerDef *d = ct->def;
     if (!d || !ct->bind || !d->layer_count || c->rt.override_clip >= 0) return false;
     if (ct->inert_pending || ct->inert_duration > 0.0f) return false;
-    if (c->rt.in.weapon_id || fabsf(c->rt.leg_yaw) > 0.02f || c->rt.proc.kneel_w > 0.01f || c->rt.proc.swim_w > 0.0f) return false;
+    if (c->rt.in.weapon_id || c->croot_on || c->rt.proc.kneel_w > 0.01f || c->rt.proc.swim_w > 0.0f) return false;
     for (int li = 0; li < d->layer_count; li++) {
         const LayerState *S = &ct->layer[li];
         if (ct->mute[li] || ct->solo[li]) return false;

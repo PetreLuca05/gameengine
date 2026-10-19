@@ -138,10 +138,12 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     float w = saturate(in->hand_ik_weight);
 
     // Bladed stance (before the camera / arms): the chest yaws so the support shoulder comes
-    // forward, the neck counter-rotates so the head (and the camera on it) keeps facing the view;
-    // clavicles protract. Scaled by the hand IK weight (clips own the body otherwise).
+    // forward, to `twist` off the body from wherever the clip holds it (a weapon idle authored
+    // bladed needs less, a run's chest sway is held still), the neck counter-rotates so the head
+    // (and the camera on it) keeps facing the view; clavicles protract. Scaled by the hand IK
+    // weight (clips own the body otherwise).
     {
-        float tw = hs.hp.twist * DG_DEG2RAD * w;
+        float tw = (hs.hp.twist + st->clip_chest_yaw) * DG_DEG2RAD * w;
         int sp1 = s->role[BR_SPINE1], neck = s->role[BR_NECK];
         if (fabsf(tw) > 1e-5f && sp1 >= 0 && neck >= 0) {
             float base_yaw = wrap_angle(in->aim_yaw - st->render_body_yaw);
