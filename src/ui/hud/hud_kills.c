@@ -100,9 +100,9 @@ static float draw_feed(Game *g, GuiRect safe, float y) {
         GuiText vt = { gui_s(TH->t_small + 1), GW_MEDIUM, e->me_victim ? TH->danger : TH->hud_text, GUI_LEFT, 0, false, true, gui_s(150) };
         float kw = e->killer[0] ? fminf(gd_text_width(&kt, e->killer), gui_s(150)) : 0;
         float vw = fminf(gd_text_width(&vt, e->victim), gui_s(150));
-        bool head = (e->flags & KILLF_HEADSHOT) != 0;
+        bool head = (e->flags & KILLF_HEADSHOT) != 0, coll = (e->flags & KILLF_COLLATERAL) != 0;
         float pad = gui_s(10), sp = gui_s(8);
-        float w = pad * 2 + kw + (kw > 0 ? sp : 0) + is + (head ? sp + is * 0.8f : 0) + sp + vw;
+        float w = pad * 2 + kw + (kw > 0 ? sp : 0) + is + (coll ? sp + is : 0) + (head ? sp + is * 0.8f : 0) + sp + vw;
         GuiRect r = { right - w + (1.0f - in) * gui_s(40), y, w, rh };
         gd_alpha_push(a * in);
         gd_round(r, gui_s(TH->radius), TH->hud_panel);
@@ -111,6 +111,7 @@ static float draw_feed(Game *g, GuiRect safe, float y) {
         if (kw > 0) { gd_text(&kt, x, ty, e->killer); x += kw + sp; }
         hud_item_icon(e->weapon, (e->flags & KILLF_KILLER_PLAYER) ? "skull" : "zombie", x + is * 0.5f, cy, is, TH->select);   // white
         x += is;
+        if (coll) { x += sp; hud_icon("collateral", x + is * 0.5f, cy, is, TH->select); x += is; }
         if (head) { x += sp; hud_icon("headshot", x + is * 0.4f, cy, is * 0.8f, TH->select); x += is * 0.8f; }
         x += sp;
         gd_text(&vt, x, ty, e->victim);

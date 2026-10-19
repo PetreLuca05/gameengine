@@ -9,6 +9,7 @@
 #include "gameplay/recoil.h"
 #include "gameplay/effects.h"
 #include "gameplay/events.h"
+#include "gameplay/health.h"
 #include "core/cvar.h"
 #include "core/engine.h"
 #include "core/log.h"
@@ -579,8 +580,11 @@ static bool resolve_hit(World *w, BalLive *l, const SegHit *s, vec3 dir, float p
             float deposit = r.energy_in > 0.0f ? r.energy_deposit / r.energy_in : 1.0f;
             float scale = before * lerpf(0.75f, 1.0f, saturate(deposit));
             bool was_alive = h.character && ent_valid(w, h.ent) && !(w->flags[ENT_INDEX(h.ent)] & EF_DEAD);
+            health_set_collateral(l->kills > 0);   // through someone it already killed: the kill feed's collateral
             weapon_apply_hit(w, l->slot, d, &h, dir, scale);
+            health_set_collateral(false);
             bool killed = was_alive && (w->flags[ENT_INDEX(h.ent)] & EF_DEAD);
+            if (killed && l->kills < 255) l->kills++;
             weapon_push_impact(w, l->slot, d, &h, dir, killed, extra);
             if (w->players[l->slot].local) weapon_local_impact(w, d, &h, dir, extra);   // listen-server shooter
             // A burning tracer stopped in dry grass: the fire hook (stub until foliage burns).

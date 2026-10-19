@@ -12,7 +12,9 @@
 #define KILL_STREAK_GAP 4.0f    // seconds between kills that keep a streak going
 
 // EV_KILL id bits (the event's text keeps the old one-line message).
-enum { KILLF_HEADSHOT = 1u << 0, KILLF_VICTIM_PLAYER = 1u << 1, KILLF_VICTIM_ZOMBIE = 1u << 2, KILLF_KILLER_PLAYER = 1u << 3, KILLF_SELF = 1u << 4 };
+// KILLF_COLLATERAL: the bullet had already killed someone (through them: one shot, several kills).
+enum { KILLF_HEADSHOT = 1u << 0, KILLF_VICTIM_PLAYER = 1u << 1, KILLF_VICTIM_ZOMBIE = 1u << 2, KILLF_KILLER_PLAYER = 1u << 3, KILLF_SELF = 1u << 4,
+       KILLF_COLLATERAL = 1u << 5 };
 
 typedef struct KillStats {
     int zombies, players, headshots;

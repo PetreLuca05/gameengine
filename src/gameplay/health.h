@@ -19,6 +19,8 @@ float apply_damage_part(World *w, EntityId target, float amount, DamageType type
 float apply_damage_ex(World *w, EntityId target, float amount, DamageType type, EntityId attacker, vec3 point, vec3 dir, int part, float part_mult, u32 flags);
 // Kill feed: the item doing the damage until reset to 0 (thrown grenades, fire); 0 = the attacker's held item.
 void health_set_source_item(u16 item);
+// The bullet applying this damage already killed someone: a kill now is a collateral (KILLF_COLLATERAL).
+void health_set_collateral(bool on);
 void heal(World *w, EntityId target, float hp, float armor);
 // Host, every tick: the armor cap from the worn plate carrier; the carrier holds the plates above
 // the base ones (its InvSlot.ammo, armor points), so taken off or looted it keeps them.

@@ -18,6 +18,8 @@ void health_init(Health *h, float hp, float armor) {
 // The item doing the damage when it isn't the attacker's held one (thrown grenades): the kill feed icon.
 static u16 s_source_item;
 void health_set_source_item(u16 item) { s_source_item = item; }
+static bool s_collateral;
+void health_set_collateral(bool on) { s_collateral = on; }
 
 float apply_damage(World *w, EntityId target, float amount, DamageType type, EntityId attacker, vec3 point, vec3 dir, bool headshot) {
     return apply_damage_part(w, target, amount, type, attacker, point, dir, headshot ? BP_HEAD : -1, 0.0f);
@@ -113,7 +115,7 @@ float apply_damage_ex(World *w, EntityId target, float amount, DamageType type, 
         // Structured for the kill counter / feed (docs/UI_WHEELS_HUD.md).
         ev.id = (headshot ? KILLF_HEADSHOT : 0u) | (victim_player >= 0 ? KILLF_VICTIM_PLAYER : 0u) |
                 (w->type[i] == ET_ZOMBIE ? KILLF_VICTIM_ZOMBIE : 0u) | (attacker_player >= 0 ? KILLF_KILLER_PLAYER : 0u) |
-                (attacker_player >= 0 && attacker_player == victim_player ? KILLF_SELF : 0u);
+                (attacker_player >= 0 && attacker_player == victim_player ? KILLF_SELF : 0u) | (s_collateral ? KILLF_COLLATERAL : 0u);
         ev.value = (float)type;
         KillEventData kd;
         memset(&kd, 0, sizeof(kd));

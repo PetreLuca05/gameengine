@@ -69,6 +69,7 @@ typedef struct BalLive {
     u8 crack_done;         // this machine's listener already heard the crack / whizz
     vec3 visual_offset;    // tracer start: the visible muzzle - launch, blended out over the first 15 m
     vec3 prev_pos;         // position at the start of the last step (render interpolation)
+    u8 kills;              // host: characters this bullet killed (the next one is a collateral)
 } BalLive;
 
 void bal_world_register(void);          // cvars / commands (once)

@@ -101,6 +101,11 @@ static void i_headshot(const IconCtx *k) {
     ring(k, 0, 0, 0.75f);
     dot(k, 0, 0, 0.22f);
 }
+static void i_collateral(const IconCtx *k) {   // two heads on one bullet's line
+    ring(k, -0.42f, 0, 0.36f);
+    ring(k, 0.42f, 0, 0.36f);
+    L(k, -0.98f, 0, 0.98f, 0);
+}
 static void i_zombie(const IconCtx *k) {    // reaching hand
     ring(k, 0, -0.55f, 0.32f);
     L(k, 0, -0.2f, 0, 0.4f); L(k, 0, 0.4f, -0.4f, 0.95f); L(k, 0, 0.4f, 0.4f, 0.95f);
@@ -132,7 +137,7 @@ static const IconEntry k_icons[] = {
     { "generic", i_generic }, { "enemy", i_enemy }, { "loot", i_loot }, { "danger", i_danger },
     { "go", i_go }, { "help", i_help }, { "vehicle", i_vehicle }, { "defend", i_defend },
     { "door_open", i_door_open }, { "door_close", i_door_close }, { "door_slam", i_door_slam }, { "peek", i_peek },
-    { "skull", i_skull }, { "headshot", i_headshot }, { "zombie", i_zombie }, { "player", i_player },
+    { "skull", i_skull }, { "headshot", i_headshot }, { "collateral", i_collateral }, { "zombie", i_zombie }, { "player", i_player },
     { "grenade", i_grenade }, { "flare", i_flare }, { "molotov", i_molotov }, { "heal", i_heal },
 };
 
