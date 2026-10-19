@@ -25,6 +25,7 @@ typedef struct CrossStyle {
     bool ads_dot, shotgun_circle;
     int circle_segments;
     float hm_time, hm_inner, hm_outer, hm_thickness, hm_kill_scale;
+    float hm_alpha, hm_ads_alpha;   // a hit's marker opacity at the hip / aimed (a kill's is opaque)
     u32 hm_color, hm_head, hm_kill;
 } CrossStyle;
 
@@ -76,6 +77,8 @@ static void style_defaults(CrossStyle *s) {
     s->hm_outer = 14;
     s->hm_thickness = 2.5f;
     s->hm_kill_scale = 1.35f;
+    s->hm_alpha = 0.5f;
+    s->hm_ads_alpha = 0.25f;
     s->hm_color = UI_RGBA(255, 255, 255, 255);
     s->hm_head = UI_RGBA(255, 200, 60, 255);
     s->hm_kill = UI_RGBA(255, 60, 40, 255);
@@ -120,6 +123,8 @@ bool crosshair_reload(void) {
         s.hm_outer = num(hm, "outer", s.hm_outer);
         s.hm_thickness = num(hm, "thickness", s.hm_thickness);
         s.hm_kill_scale = num(hm, "kill_scale", s.hm_kill_scale);
+        s.hm_alpha = saturate(num(hm, "alpha", s.hm_alpha));
+        s.hm_ads_alpha = saturate(num(hm, "ads_alpha", s.hm_ads_alpha));
         s.hm_color = rgba_arr(hm, "color", s.hm_color);
         s.hm_head = rgba_arr(hm, "head_color", s.hm_head);
         s.hm_kill = rgba_arr(hm, "kill_color", s.hm_kill);
@@ -176,10 +181,13 @@ static void circle(float cx, float cy, float r, float th, int seg, u32 c) {
     }
 }
 
+// The marker fades out over its time; a hit's is see-through (fainter aimed, by the crosshair's ADS
+// fade), a kill's opaque.
 static void draw_hitmarker(Game *g, float cx, float cy, float s) {
     if (!CH.hitmarker->i || g->hitmarker_time <= 0) return;
     const CrossStyle *st = &CH.st;
-    float a = saturate(g->hitmarker_time / crosshair_hitmarker_duration());
+    float a = smoothstepf(0.0f, 1.0f, saturate(g->hitmarker_time / crosshair_hitmarker_duration()));
+    if (!g->hitmarker_kill) a *= lerpf(st->hm_alpha, st->hm_ads_alpha, CH.ads_fade);
     u32 base = g->hitmarker_kill ? st->hm_kill : (g->hitmarker_head ? st->hm_head : st->hm_color);
     u32 c = with_alpha(base, a);
     float k = g->hitmarker_kill ? st->hm_kill_scale : 1.0f;

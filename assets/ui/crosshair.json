@@ -27,6 +27,8 @@
     "color": [255, 255, 255, 255],
     "head_color": [255, 200, 60, 255],
     "kill_color": [255, 60, 40, 255],
-    "kill_scale": 1.35
+    "kill_scale": 1.35,
+    "alpha": 0.5,
+    "ads_alpha": 0.25
   }
 }

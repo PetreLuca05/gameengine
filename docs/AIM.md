@@ -49,6 +49,8 @@ crosshair's aim point, the crosshair moving to an obstruction) was reverted on 2
 - The gap is the exact screen projection of the spread cone.
 - Aimed, there is none: it fades out over `ads_fade_time` and no dot replaces it (`ads_dot` false in
   `assets/ui/crosshair.json`, 2026-10-20); the sights are the aim.
+- Hit markers fade out over `hitmarker.time` (smoothstep); a hit's is see-through (`alpha` 0.5, aimed
+  `ads_alpha` 0.25 by the crosshair's ADS fade), a kill's opaque.
 - `crosshair_pos` prints where it was drawn (tests).
 
 ## Tests
