@@ -203,6 +203,9 @@ void terrain_game_register(void);
 void items_game_register(void);
 void items_game_draw(const RenderCamera *cam);
 void items_game_shutdown(void);
+// game_blender.c: blender_open, tools/blender/open_models.py from the console (docs/ITEM_PIPELINE.md "Open models in Blender")
+void blender_open_register(void);
+void blender_open_poll(void);   // per frame: the running scripts' output -> the console
 // game_ground_ref.c: reference viewer, camera presets, colour sampler (docs/GROUND_REFERENCE.md)
 void ground_ref_register(void);
 void ground_ref_draw(void);

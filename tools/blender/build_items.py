@@ -4,6 +4,8 @@ and validates it (docs/ITEM_PIPELINE.md).
     python tools/blender/build_items.py [ids ...] [--all] [--no-blend] [--samples N]     (pip install bpy)
     blender -b -P tools/blender/build_items.py -- [ids ...] [--all]                       (a Blender install)
     python tools/blender/build_items.py --blend assets/src/items/rifle.blend               (export a hand-edited .blend)
+    blender -b -P tools/blender/build_items.py -- [ids ...] --blend-only                  (only save the .blend: no .dgim,
+                                                                                            no validation; open_models.py)
 
 An item script defines build(ctx) -> item_lib.Item. ctx: .id, .root (repo), .weapon / .item / .attachment
 (the item's JSON objects, or None), .lib (item_lib). The .blend files are build products (git-ignored):
@@ -53,7 +55,7 @@ def load_json_objects():
     return weapons, items, atts
 
 
-def build_one(item_id, save_blend=True, samples=48):
+def build_one(item_id, save_blend=True, samples=48, blend_only=False):
     path = os.path.join(SRC, item_id + ".py")
     spec = importlib.util.spec_from_file_location("item_" + item_id, path)
     mod = importlib.util.module_from_spec(spec)
@@ -70,6 +72,11 @@ def build_one(item_id, save_blend=True, samples=48):
     item = mod.build(ctx)
     item.finish(clear=False)
     t1 = time.time()
+    if blend_only:  # the authoring scene only (tools/blender/open_models.py): the tracked .dgim stays untouched
+        item_export.find_root()
+        bpy.ops.wm.save_as_mainfile(filepath=os.path.join(SRC, item_id + ".blend"), check_existing=False, compress=True)
+        print("%-16s %3d objects  model %.1fs save %.1fs" % (item_id, len(bpy.data.objects), t1 - t0, time.time() - t1))
+        return {}
     rep = {}
     item_export.export(os.path.join(OUT, item_id + ".dgim"), rep, os.path.join(SRC, item_id + ".blend") if save_blend else None, samples)
     print("%-16s %2d parts  tris %6d / %6d / %6d  %5.1f KB  model %.1fs export %.1fs  sockets %s" %
@@ -83,6 +90,7 @@ def main(argv):
     else:
         argv = argv[1:]
     save_blend = "--no-blend" not in argv
+    blend_only = "--blend-only" in argv
     samples = 48
     if "--samples" in argv:
         samples = int(argv[argv.index("--samples") + 1])
@@ -99,13 +107,15 @@ def main(argv):
     failed = []
     for i in ids:
         try:
-            build_one(i, save_blend, samples)
+            build_one(i, save_blend, samples, blend_only)
         except Exception as e:  # keep going: report every broken item
             import traceback
             traceback.print_exc()
             failed.append((i, str(e)))
     for (i, e) in failed:
         print("FAILED %s: %s" % (i, e))
+    if blend_only:
+        return 1 if failed else 0
     import validate_item
     return validate_item.main(["validate_item"] + ids) or (1 if failed else 0)
 
