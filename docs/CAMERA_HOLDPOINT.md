@@ -134,12 +134,15 @@ interpolated state and forwarded angles. The glide restarts on a target switch.
 
 ## Rule 3: the arms layer
 
-The forearms and hands (the `arm` mesh: triangles ≥ 50 % skinned to a forearm chain) and the held
-item with its attachments are drawn in the viewmodel pass:
+The arms, shoulder to hand (the `arm` mesh: triangles ≥ 50 % skinned to an arm chain, the upper arm
+down; 2026-10-20, before only the forearms), and the held item with its attachments are drawn in the
+viewmodel pass:
 - with their own **camera**, **FOV** and depth buffer, so they never clip walls;
 - with the same skeleton instance as the body, so the bones are identical;
-- the body draw (`fpbody`) leaves them out, so nothing is drawn twice; it also hides the owner's
-  upper arms, like the head (the arms camera has its own position, "Framing").
+- the body draw (`fpbody`) leaves them out, so nothing is drawn twice; it hides the head as well;
+- the arms (not the item) are cut closer than `arm_cut` (0.2 m along the arms camera, a hardware clip
+  distance in `skin.vert`): the camera sits behind the eye ("Framing"), so looking up it would be
+  under the shoulders and see them from inside.
 
 **The arms camera** is the pose eye: the frame where the hold point lives. A rigid layer transform
 in that camera's space places the drawn arms + item, in this order (`src/render/arms_layer.c`):
@@ -315,11 +318,10 @@ The fit writes the camera to the item's hip / crouch / prone / sprint states (`a
 one straight screen path, no overshoot. The ADS state takes the hip's camera (a second, state blend of
 it would lag the item).
 
-**What the arms camera draws:** the forearms, hands and the item only (`arm` mesh: triangles ≥ 50 %
-skinned to a forearm chain). The body is the world camera's; the owner's upper arms are hidden in the
-first-person body like the head (a camera 20 cm behind the eye would see the shoulders from inside, and
-an upper arm drawn by the world camera would not meet the forearm). The shoulder seam is off
-(`seam.on`).
+**What the arms camera draws:** the arms from the shoulder down, the hands and the item (`arm` mesh:
+triangles ≥ 50 % skinned to an arm chain), the arms cut `arm_cut` (0.2 m) in front of it (a camera 20 cm
+behind the eye would otherwise see the shoulders from inside, looking up from under them). The body is
+the world camera's, the head hidden. The shoulder seam is off (`seam.on`).
 
 **Tools:** `fp_framing [tag]` (this frame against the targets: PASS / FAIL, triangles cut by the near
 plane on screen, the reach), `fp_framing_fit [fov]`, `fp_framing_sweep lo hi step`,

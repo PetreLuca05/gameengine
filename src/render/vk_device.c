@@ -322,6 +322,8 @@ bool vkd_create_device(SDL_Window *window) {
     f2.features.shaderStorageImageReadWithoutFormat = supported.shaderStorageImageReadWithoutFormat;
     f2.features.shaderStorageImageWriteWithoutFormat = supported.shaderStorageImageWriteWithoutFormat;
     f2.features.independentBlend = supported.independentBlend;
+    f2.features.shaderClipDistance = supported.shaderClipDistance;   // the first-person arms' near cut (skin.vert)
+    if (!supported.shaderClipDistance) log_warn("vulkan: no shaderClipDistance: the first-person arms are not cut near their camera");
     f2.features.fragmentStoresAndAtomics = supported.fragmentStoresAndAtomics;
     f2.features.vertexPipelineStoresAndAtomics = supported.vertexPipelineStoresAndAtomics;   // storage buffers in sets the vertex stage sees
     f2.features.multiDrawIndirect = supported.multiDrawIndirect;

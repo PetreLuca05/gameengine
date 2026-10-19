@@ -58,6 +58,7 @@ typedef struct ArmsLayerDef {
     float seam_r0, seam_r1;           // the world camera, past r1 with the arms camera (m); off: the arms camera draws
                                       // the arms + item only, the body is the world camera's
     float znear;                      // the arms projection's near plane (m)
+    float arm_cut;                    // m: the arms (upper arm down) are cut closer than this to the arms camera
     float weapon_fov[WEAPON_FOV_COUNT];   // Weapon Field of View presets: narrow, default, wide (hip, horizontal deg at 16:9)
     float screen_scale;               // the layer's size on screen at the hip (0.25 .. 2; 1 aimed) ...
     vec2 screen_anchor;               // ... about this screen point (fractions: x from the left, y from the top; 1 = the bottom edge)

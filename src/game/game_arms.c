@@ -209,6 +209,7 @@ void game_arms_frame(const RenderCamera *cam, vec2 aim_deg, float aim_pitch, flo
     rl.view = AL.out.view;
     rl.fov_deg = hands_fov(cam, AL.out.fov_add);
     rl.znear = AL.def.znear;
+    rl.arm_cut = AL.def.arm_cut;
     rl.shoulder[0] = fa.shoulder[0];
     rl.shoulder[1] = fa.shoulder[1];
     rl.seam_r0 = AL.def.seam_r0;   // (seam_r1 0: off, the arms camera draws only the arms + item)

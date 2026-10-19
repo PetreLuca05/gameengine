@@ -22,6 +22,7 @@ layout(location = 9) flat out vec4 v_recon;
 layout(location = 10) flat out uint v_normal_scale;   // float bits (PBR maps, shaders/pbr_maps.glsl)
 
 invariant gl_Position;
+out float gl_ClipDistance[1];
 
 // The arms layer's shoulder seam (docs/CAMERA_HOLDPOINT.md "Rule 3"): 0 at an upper-arm joint (drawn
 // where the world camera sees it, so the arm meets the body) .. 1 past r1 (the arms camera).
@@ -66,6 +67,10 @@ void main() {
         gl_Position = frame.vm_proj * frame.view * world;
         v_cur_clip = frame.vm_view_proj_nj * world;
         v_prev_clip = frame.prev_vm_view_proj_nj * prev_world;
+        // The arms are cut closer than arms_seam.w (m, depth along the arms camera) to their camera:
+        // the upper arms reach the shoulders, which a camera behind the eye (looking up: under it) would
+        // otherwise see from inside. The item and the depth are untouched.
+        gl_ClipDistance[0] = frame.arms_seam.w > 0.0 ? gl_Position.w - frame.arms_seam.w : 1.0;
         float w = arms_seam_w(world.xyz, frame.arms_shoulder[0], frame.arms_shoulder[1]);
         if (w < 1.0) {
             gl_Position = arms_seam_mix(frame.view_proj * world, gl_Position, w);
@@ -77,5 +82,6 @@ void main() {
         gl_Position = frame.view_proj * world;
         v_cur_clip = frame.view_proj_nj * world;
         v_prev_clip = frame.prev_view_proj_nj * prev_world;
+        gl_ClipDistance[0] = 1.0;
     }
 }

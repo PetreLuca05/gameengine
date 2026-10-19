@@ -691,6 +691,7 @@ typedef struct RenderArmsLayer {
     float znear;
     vec3 shoulder[2];       // the upper-arm joints (world): the seam centres
     float seam_r0, seam_r1; // m: world camera within r0, arms camera past r1
+    float arm_cut;          // m: the arms' triangles closer than this to the arms camera are cut (0 none)
     float screen_scale;     // the picture's size on screen (0 / 1: as projected) about ...
     vec2 screen_anchor;     // ... this screen point (fractions: x from the left, y from the top)
 } RenderArmsLayer;

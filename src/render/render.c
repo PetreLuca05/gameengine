@@ -1830,7 +1830,7 @@ static void compute_matrices(FrameData *fd) {
         vec3 ae = a->valid ? mat4_mul_point(mat4_inverse(R->arms_view), v3(0, 0, 0)) : R->cam.pos;
         fd->arms_eye = v4(ae.x, ae.y, ae.z, 0);
         bool seam = a->valid && a->seam_r1 > 0.0f && v3_dist(ae, R->cam.pos) < 0.3f;
-        fd->arms_seam = v4(a->seam_r0, fmaxf(a->seam_r1, a->seam_r0 + 0.01f), seam ? 1.0f : 0.0f, 0);
+        fd->arms_seam = v4(a->seam_r0, fmaxf(a->seam_r1, a->seam_r0 + 0.01f), seam ? 1.0f : 0.0f, a->valid ? fmaxf(a->arm_cut, 0.0f) : 0.0f);
     }
     fd->shadow_vp = R->shadow_vp;
     memcpy(fd->shadow_vps, R->shadow_vps, sizeof(fd->shadow_vps));

@@ -27,6 +27,7 @@ void arms_layer_defaults(ArmsLayerDef *d) {
     d->seam_r0 = 0.06f;
     d->seam_r1 = 0.16f;
     d->znear = 0.01f;
+    d->arm_cut = 0.2f;
     d->weapon_fov[WEAPON_FOV_NARROW] = 60.0f;
     d->weapon_fov[WEAPON_FOV_DEFAULT] = 70.0f;
     d->weapon_fov[WEAPON_FOV_WIDE] = 85.0f;
@@ -89,6 +90,7 @@ void arms_layer_parse(ArmsLayerDef *d, const cJSON *root) {
     d->seam_r0 = fmaxf(0.0f, jf(seam, "r0", d->seam_r0));
     d->seam_r1 = fmaxf(d->seam_r0 + 0.01f, jf(seam, "r1", d->seam_r1));
     d->znear = clampf(jf(root, "znear", d->znear), 0.002f, 0.05f);
+    d->arm_cut = clampf(jf(root, "arm_cut", d->arm_cut), 0.0f, 0.5f);
     const cJSON *wf = jget(root, "weapon_fov");
     for (int i = 0; i < WEAPON_FOV_COUNT; i++) d->weapon_fov[i] = clampf(jf(wf, k_weapon_fov[i], d->weapon_fov[i]), 30.0f, 130.0f);
     const cJSON *sc = jget(root, "screen");
@@ -149,6 +151,7 @@ char *arms_layer_to_json(const ArmsLayerDef *d) {
     cJSON_AddNumberToObject(seam, "r0", r4(d->seam_r0));
     cJSON_AddNumberToObject(seam, "r1", r4(d->seam_r1));
     cJSON_AddNumberToObject(o, "znear", r4(d->znear));
+    cJSON_AddNumberToObject(o, "arm_cut", r4(d->arm_cut));
     cJSON *wf = cJSON_AddObjectToObject(o, "weapon_fov");
     for (int i = 0; i < WEAPON_FOV_COUNT; i++) cJSON_AddNumberToObject(wf, k_weapon_fov[i], r4(d->weapon_fov[i]));
     cJSON *sc = cJSON_AddObjectToObject(o, "screen");

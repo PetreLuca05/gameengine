@@ -152,7 +152,8 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 city;            // city windows: x lit fraction, y intensity (0 off), zw district centre (xz)
     vec4 city_power[2];   // 8 districts: 0..1 power level, 1..2 flicker (the off share)
     // First-person arms layer (docs/CAMERA_HOLDPOINT.md "Rule 3"): arms-layer point -> where it appears
-    // in the world; the shoulder seam (the upper-arm joints this / last frame, x r0 / y r1 m / z on).
+    // in the world; the shoulder seam (the upper-arm joints this / last frame, x r0 / y r1 m / z on;
+    // w: the arms' near cut, m along the arms camera, 0 none).
     mat4 vm_apparent;
     vec4 arms_shoulder[2];
     vec4 arms_shoulder_prev[2];

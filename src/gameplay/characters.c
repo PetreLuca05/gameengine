@@ -105,7 +105,7 @@ typedef struct CharGlobals {
     char parts_sent[256];
     // First-person body: arm bone set (arm-only meshes for the arms layer, the side of each arm bone)
     // and the head bones (masked out of the owner's view by mesh, never by bone).
-    bool arm_bone[ANIM_MAX_BONES], head_bone[ANIM_MAX_BONES], upper_arm_bone[ANIM_MAX_BONES];
+    bool arm_bone[ANIM_MAX_BONES], head_bone[ANIM_MAX_BONES];
     u8 arm_side[ANIM_MAX_BONES];
     Cvar *fp_body, *fp_debug, *fp_parity, *fp_layers;
     // First-person frame re-solve inputs (the viewed player, docs/CAMERA_HOLDPOINT.md "Rule 1"): the
@@ -305,8 +305,8 @@ static void build_part_meshes(const SkeletalMesh *sm, const u32 *colors, const i
         }
         out_lod[l] = render_skinned_mesh_create(v, L->vcount, L->indices, L->icount);
         if (l == 0) {
-            // First-person split: arm triangles (every vertex mostly skinned to a forearm chain), per
-            // side; the rest without them (noarm) and without the head / neck and the upper arms as well
+            // First-person split: arm triangles (every vertex mostly skinned to an arm chain, the upper
+            // arm down), per side; the rest without them (noarm) and without the head / neck as well
             // (fpbody: the owner's body is masked by mesh, never by collapsing bones).
             u32 *ai = (u32 *)malloc(sizeof(u32) * L->icount);
             u32 *si[2] = { (u32 *)malloc(sizeof(u32) * L->icount), (u32 *)malloc(sizeof(u32) * L->icount) };
@@ -314,11 +314,11 @@ static void build_part_meshes(const SkeletalMesh *sm, const u32 *colors, const i
             u32 *fi = (u32 *)malloc(sizeof(u32) * L->icount);
             u32 aic = 0, sic[2] = { 0, 0 }, bic = 0, fic = 0;
             for (u32 t = 0; t + 2 < L->icount; t += 3) {
-                bool arm = true, head = true, upper = true;
+                bool arm = true, head = true;
                 int side_w[2] = { 0, 0 };
                 for (int k = 0; k < 3; k++) {
                     const SkinVertex *sv = &v[L->indices[t + k]];
-                    int aw = 0, hw = 0, uw = 0;
+                    int aw = 0, hw = 0;
                     for (int j = 0; j < 4; j++) {
                         int b = jmap[sv->joints[j]];
                         if (CG->arm_bone[b]) {
@@ -326,11 +326,9 @@ static void build_part_meshes(const SkeletalMesh *sm, const u32 *colors, const i
                             side_w[CG->arm_side[b]] += sv->weights[j];
                         }
                         if (CG->head_bone[b]) hw += sv->weights[j];
-                        if (CG->upper_arm_bone[b]) uw += sv->weights[j];
                     }
                     arm = arm && aw >= 128;
                     head = head && hw >= 128;
-                    upper = upper && uw >= 128;
                 }
                 const u32 *tri = &L->indices[t];
                 if (arm) {
@@ -339,7 +337,7 @@ static void build_part_meshes(const SkeletalMesh *sm, const u32 *colors, const i
                     continue;
                 }
                 for (int k = 0; k < 3; k++) bi[bic++] = tri[k];
-                if (!head && !upper) for (int k = 0; k < 3; k++) fi[fic++] = tri[k];
+                if (!head) for (int k = 0; k < 3; k++) fi[fic++] = tri[k];
             }
             *out_arm = arm_mesh(v, L->vcount, ai, aic, jmap);
             for (int sd = 0; sd < 2; sd++) out_side[sd] = arm_mesh(v, L->vcount, si[sd], sic[sd], jmap);
@@ -380,18 +378,14 @@ static void ensure_gpu_meshes(void) {
     if (!LIB || CG->lib_revision == LIB->revision) return;
     destroy_gpu_parts();
     const Skeleton *s = &LIB->skel;
-    // Bone sets for the first-person body: the hands' chains (forearm and below: the arms layer's
-    // camera draws them with the item, never the body; the upper arms and shoulders stay with the body)
-    // and the head.
+    // Bone sets for the first-person body: the arms' chains (the upper arm down: the arms layer's camera
+    // draws them with the item, shoulder to hand in one camera, never the body; the clavicles stay
+    // with the body) and the head.
     for (int i = 0; i < s->count; i++) {
         int p = s->parent[i];
-        CG->arm_bone[i] = i == s->role[BR_L_FOREARM] || i == s->role[BR_R_FOREARM] || (p >= 0 && CG->arm_bone[p]);
-        CG->arm_side[i] = i == s->role[BR_R_FOREARM] ? 1 : (i == s->role[BR_L_FOREARM] ? 0 : (p >= 0 ? CG->arm_side[p] : 0));
+        CG->arm_bone[i] = i == s->role[BR_L_ARM] || i == s->role[BR_R_ARM] || (p >= 0 && CG->arm_bone[p]);
+        CG->arm_side[i] = i == s->role[BR_R_ARM] ? 1 : (i == s->role[BR_L_ARM] ? 0 : (p >= 0 ? CG->arm_side[p] : 0));
         CG->head_bone[i] = i == s->role[BR_HEAD] || i == s->role[BR_NECK] || (p >= 0 && CG->head_bone[p]);
-        // The upper arms (and their twist bones): hidden in the owner's view like the head - the arms
-        // layer's camera draws the forearms + hands + item on its own, an upper arm drawn by the world
-        // camera would not meet them.
-        CG->upper_arm_bone[i] = !CG->arm_bone[i] && (i == s->role[BR_L_ARM] || i == s->role[BR_R_ARM] || (p >= 0 && CG->upper_arm_bone[p]));
     }
     CG->lib_revision = LIB->revision;
 }
