@@ -35,8 +35,8 @@ void inv_layout(const InvLayoutIn *in, InvLayout *o) {
         o->cats = R(S.x, S.y + row_h, S.w, cats_h);
     }
     float by = o->header.y + o->header.h + g;
-    // Columns: the slots ~24 %, the grid panel ~30 % (ten cells) and its gear column, the character
-    // the middle (at least 300 px).
+    // Columns: the grid panel ~30 % (ten cells) and its gear column on the left, the weapon slots
+    // ~24 % on the right, the character the middle (at least 300 px).
     float lw = clampf_(S.w * 0.24f, 280 * s, 460 * s), rw = clampf_(S.w * 0.30f, 320 * s, 600 * s), gw = clampf_(rw * 0.22f, 72 * s, 132 * s);
     float cw = S.w - lw - rw - gw - 3 * g;
     if (cw < 300 * s) {
@@ -47,25 +47,26 @@ void inv_layout(const InvLayoutIn *in, InvLayout *o) {
         cw = 300 * s;
     }
     // The grid panel and the gear column go down to the bottom of the safe area; the footer runs
-    // under the left and centre columns.
+    // under the centre and the weapon slots.
     float bottom = S.y + S.h;
-    o->gear = R(S.x + S.w - gw, by, gw, bottom - by);
-    o->right = R(o->gear.x - g - rw, by, rw, bottom - by);
-    o->footer = R(S.x, bottom - 24 * s, o->right.x - g - S.x, 24 * s);
+    o->panel = R(S.x, by, rw, bottom - by);
+    o->gear = R(S.x + rw + g, by, gw, bottom - by);
+    float fx = o->gear.x + gw + g;
+    o->footer = R(fx, bottom - 24 * s, S.x + S.w - fx, 24 * s);
     float bh = o->footer.y - g - by;
-    o->left = R(S.x, by, lw, bh);
-    o->center = R(S.x + lw + g, by, cw, bh);
+    o->center = R(fx, by, cw, bh);
+    o->slots = R(S.x + S.w - lw, by, lw, bh);
     // One cell size everywhere: ten cells (or the widest grid) across the grid panel. Tall grids
     // scroll; the cells never shrink to fit the height.
     int cols = DG_MAX(INV_UI_GRID_COLS, DG_MAX(in->grid_cols, in->loot ? in->loot_cols : 0));
     o->cell = DG_MIN(58 * s, (rw - 2 * o->pad) / (float)cols);
     float cell = o->cell;
-    // Left: primary + its chips, secondary + its chips, holster. The chips are squares across the
+    // Right: primary + its chips, secondary + its chips, holster. The chips are squares across the
     // slot's width; the weapon slots are as tall as the column allows (a live preview each).
     o->chip = (lw - (float)(ATT_SLOTS - 1) * o->chip_gap) / (float)ATT_SLOTS;
     float chips = INV_UI_WEAPON_ROWS * (o->chip + 1.5f * g) + 4 * g;
     float weap_h = clampf_((bh - chips) / 2.85f, 64 * s, 210 * s);
-    float x = o->left.x, y = o->left.y;
+    float x = o->slots.x, y = o->slots.y;
     static const int ws[3] = { EQ_PRIMARY, EQ_SECONDARY, EQ_HOLSTER };
     for (int i = 0; i < 3; i++) {
         float h = i == 2 ? weap_h * 0.85f : weap_h;
@@ -84,7 +85,7 @@ void inv_layout(const InvLayoutIn *in, InvLayout *o) {
     float discard_h = 30 * s;
     o->discard = R(o->center.x + cw * 0.3f, o->center.y + bh - discard_h, cw * 0.4f, discard_h);
     // The grid panel: (scrolling) the world container above the player's grid.
-    o->view = R(o->right.x + o->pad, o->right.y + o->pad * 0.5f, rw - 2 * o->pad, o->right.h - o->pad);
+    o->view = R(o->panel.x + o->pad, o->panel.y + o->pad * 0.5f, rw - 2 * o->pad, o->panel.h - o->pad);
     float cy = o->view.y;
     if (in->loot) {
         float eq = in->loot_body ? 1.6f * cell + g : 0.0f;

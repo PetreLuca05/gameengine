@@ -2,13 +2,13 @@
 // behind it (the camera never moves) under a full-screen blur.
 //   header: the title centred, the category bar (highlights, never moves anything) and Compact above
 //           the divider;
-//   left:   the primary and secondary weapon slots (a live 3D view of the weapon each), each with its
-//           attachment chips across the slot's width, the holster;
+//   left:   one panel down to the bottom of the screen: an open world container's grid above the
+//           player's grid (the worn backpack's), scrolling; right of it the helmet, plate carrier
+//           and backpack slots stacked;
 //   centre: a second render of the player character (its own instance, idle, the worn gear) on the
 //           blur, head to mid-thigh; dropping a weapon or gear on it equips it; the discard zone;
-//   right:  one panel down to the bottom of the screen: an open world container's grid above the
-//           player's grid (the worn backpack's), scrolling; right of it the helmet, plate carrier
-//           and backpack slots stacked.
+//   right:  the primary and secondary weapon slots (a live 3D view of the weapon each), each with its
+//           attachment chips across the slot's width, the holster.
 // The inspect window floats over it (right click > Inspect, double click): dragged by its title bar,
 // closed with its x or Esc.
 // Mouse: drag between any grids / slots / chips (R rotates, the footprint shows green / red),
@@ -1121,8 +1121,8 @@ static void draw_own_grid(float oy) {
 static void draw_right(void) {
     InvLayout *L = &V.L;
     Game *g = g_();
-    gw_panel(L->right, true);
-    gui_block_rect(L->right);
+    gw_panel(L->panel, true);
+    gui_block_rect(L->panel);
     gw_scroll_begin(&V.right_scroll, gui_id("inv_right_scroll"), L->view);
     float oy = gw_scroll_y(&V.right_scroll) - L->view.y;
     if (g->container_open) draw_loot(oy);
@@ -1291,7 +1291,7 @@ static InvTarget hit_test(vec2 m) {
     }
     InvLayout *L = &V.L;
     // The columns and the panels: dropping on them does nothing (only outside the screen's body discards).
-    GuiRect body = { L->left.x, L->header.y, L->gear.x + L->gear.w - L->left.x, L->right.y + L->right.h - L->header.y };
+    GuiRect body = { L->panel.x, L->header.y, L->slots.x + L->slots.w - L->panel.x, L->panel.y + L->panel.h - L->header.y };
     if (gui_rect_contains(body, m.x, m.y)) none.kind = IT_PANEL;
     return none;
 }

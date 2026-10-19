@@ -282,18 +282,18 @@ World container saves migrate the same way (a three-drawer cabinet into its one 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
 │ syncing…                    INVENTORY        [ALL][WEAPONS][ATTACHMENTS]…[MISC]  [COMPACT]  │
-├───────────────────────────┬──────────────────────────────┬────────────────────────┬─────────┤
-│ PRIMARY               AUTO│                              │ CRATE / BODY  6 / 24   │ HELMET  │
-│   (the rifle in 3D,       │     the player character     │ (open only; a body:    │  40/40  │
-│    turning when hovered)  │   (a second render: idle,    │  its gear) [Take all]  ├─────────┤
-│ Assault Rifle     30/30·90│    worn gear, its own light, │ ────────────────────── │ BODY    │
-│ [OPT][MUZ][UND][MAG][STK] │    head to mid-thigh)        │ HIKING BACKPACK 7 / 80 │ ARMOR   │
-│ SECONDARY (3D)            │                              │ ┌────────────────────┐ │  1/4    │
-│ [OPT][MUZ][UND][MAG][STK] │  drop a weapon / gear on it: │ │                    │ ├─────────┤
-│ HOLSTER (3D)              │  it is worn                  │ │                    │ │ BACKPACK│
-│                           │         [ DISCARD ]          │ └────────────────────┘ │  10 x 8 │
-│ hints  ·  last rejection                                 │      (scrolls)         │         │
-└──────────────────────────────────────────────────────────┴────────────────────────┴─────────┘
+├────────────────────────┬─────────┬──────────────────────────────┬───────────────────────────┤
+│ CRATE / BODY  6 / 24   │ HELMET  │                              │ PRIMARY               AUTO│
+│ (open only; a body:    │  40/40  │     the player character     │   (the rifle in 3D,       │
+│  its gear) [Take all]  ├─────────┤   (a second render: idle,    │    turning when hovered)  │
+│ ────────────────────── │ BODY    │    worn gear, its own light, │ Assault Rifle     30/30·90│
+│ HIKING BACKPACK 7 / 80 │ ARMOR   │    head to mid-thigh)        │ [OPT][MUZ][UND][MAG][STK] │
+│ ┌────────────────────┐ │  1/4    │                              │ SECONDARY (3D)            │
+│ │                    │ ├─────────┤  drop a weapon / gear on it: │ [OPT][MUZ][UND][MAG][STK] │
+│ │                    │ │ BACKPACK│  it is worn                  │ HOLSTER (3D)              │
+│ └────────────────────┘ │  10 x 8 │         [ DISCARD ]          │                           │
+│      (scrolls)         │         │ hints  ·  last rejection                                 │
+└────────────────────────┴─────────┴──────────────────────────────────────────────────────────┘
 ```
 
 * **The camera never moves.**
@@ -305,7 +305,7 @@ World container saves migrate the same way (a three-drawer cabinet into its one 
 * **Header:** the title centred. The **category bar** and Compact sit above the divider, right of
   the title, or on a centred row of their own under it when that half is narrower than ~700 design
   px (4:3). The chips' padding shrinks to fit.
-* **Left column:**
+* **Weapon column (right):**
   - The weapon slots stacked, as tall as the column allows (up to 210 design px). Each shows the
     weapon **live in 3D** (`render_ui3d`, its own target per slot): as the hands hold it, with its
     mounted attachments, from the side, zoomed so its bounds fill the slot. Hovered, it turns slowly
@@ -323,14 +323,15 @@ World container saves migrate the same way (a three-drawer cabinet into its one 
   - Drag on it to turn it; it eases back.
   - Dropping a weapon or gear on it equips it into its own slot.
   - The Discard zone sits along the bottom.
-* **Right:**
+* **Left:**
   - The **grid panel**, one panel from under the header to the bottom of the safe area. It scrolls:
     the open world container's grid above the player's grid, with a divider between them. A body
     shows its equipment row first and Take all.
   - The cell size is the same everywhere (ten cells across the panel) and never shrinks for a
     taller grid: the panel scrolls.
-  - Right of it, the **gear column**: helmet (durability), body armor (plates held / cap), backpack
-    (its grid size), square tiles stacked.
+  - Right of it (next to the character), the **gear column**: helmet (durability), body armor
+    (plates held / cap), backpack (its grid size), square tiles stacked.
+  - The footer (hints, the last rejection) runs under the character and the weapon column.
 * The category bar (All / Weapons / Attachments / Medical / Throwables / Tools / Misc) only dims
   what is outside the category and never moves anything. **Compact** packs the grid.
 * **The inspect window** (right click > Inspect, or double click) floats over the screen, first

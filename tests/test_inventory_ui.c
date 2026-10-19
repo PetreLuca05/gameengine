@@ -71,21 +71,23 @@ static void test_layout(void) {
                 CHECK(fabsf(L.cell - cell0) < 0.01f, "%s: one cell size for every pack and container (%.1f vs %.1f)", n, L.cell, cell0);
                 CHECK(L.cell >= 20.0f * res[r].scale, "%s: cells usable (%.1f px)", n, L.cell);
                 float sb = in.safe.y + in.safe.h;
-                CHECK(inside(L.left, in.safe) && inside(L.center, in.safe) && inside(L.right, in.safe) && inside(L.gear, in.safe), "%s: columns in the safe area", n);
-                CHECK(!overlaps(L.left, L.center) && !overlaps(L.center, L.right) && !overlaps(L.right, L.gear) && L.left.x < L.center.x && L.center.x < L.right.x && L.right.x < L.gear.x,
-                      "%s: left, centre, grid panel, gear apart", n);
+                CHECK(inside(L.panel, in.safe) && inside(L.gear, in.safe) && inside(L.center, in.safe) && inside(L.slots, in.safe), "%s: columns in the safe area", n);
+                CHECK(!overlaps(L.panel, L.gear) && !overlaps(L.gear, L.center) && !overlaps(L.center, L.slots) && L.panel.x < L.gear.x && L.gear.x < L.center.x && L.center.x < L.slots.x,
+                      "%s: grid panel, gear, centre, weapon slots apart, left to right", n);
+                CHECK(fabsf(L.panel.x - in.safe.x) < 0.5f && fabsf(L.slots.x + L.slots.w - (in.safe.x + in.safe.w)) < 0.5f, "%s: the grid panel on the left edge, the weapon slots on the right", n);
                 CHECK(L.player.w >= 280.0f * res[r].scale && fabsf(L.player.x - L.center.x) < 0.5f, "%s: the character between the panels (%.0f px)", n, L.player.w);
                 // The header: the category bar above the divider (the header's bottom), right of the title or on a row of its own.
                 CHECK(inside(L.cats, L.header) && fabsf(L.header.x - in.safe.x) < 0.5f && fabsf(L.header.w - in.safe.w) < 0.5f, "%s: the category bar in the header", n);
                 CHECK(L.cats.x >= L.header.x + L.header.w * 0.5f + 60 * res[r].scale || L.cats.y >= L.header.y + 40 * res[r].scale, "%s: the category bar clear of the centred title", n);
-                CHECK(L.right.y >= L.header.y + L.header.h && L.left.y >= L.header.y + L.header.h, "%s: the columns under the divider", n);
+                CHECK(L.panel.y >= L.header.y + L.header.h && L.slots.y >= L.header.y + L.header.h, "%s: the columns under the divider", n);
                 // The grid panel and the gear column reach the bottom of the safe area; the footer stays left of them.
-                CHECK(fabsf(L.right.y + L.right.h - sb) < 0.5f && fabsf(L.gear.y + L.gear.h - sb) < 0.5f, "%s: the grid panel down to the bottom", n);
-                CHECK(L.footer.x + L.footer.w <= L.right.x + 0.5f && L.footer.y >= L.left.y + L.left.h - 0.5f, "%s: the footer under the left and centre columns", n);
+                CHECK(fabsf(L.panel.y + L.panel.h - sb) < 0.5f && fabsf(L.gear.y + L.gear.h - sb) < 0.5f, "%s: the grid panel down to the bottom", n);
+                CHECK(L.footer.x >= L.gear.x + L.gear.w - 0.5f && L.footer.x + L.footer.w <= in.safe.x + in.safe.w + 0.5f && L.footer.y >= L.slots.y + L.slots.h - 0.5f,
+                      "%s: the footer under the centre and the weapon slots", n);
                 static const int weapons[3] = { EQ_PRIMARY, EQ_SECONDARY, EQ_HOLSTER }, gear[3] = { EQ_HEADWEAR, EQ_BODY_ARMOR, EQ_BACKPACK };
                 for (int a = 0; a < 3; a++) {
                     GuiRect wr = L.equip[weapons[a]], gr = L.equip[gear[a]];
-                    CHECK(inside(wr, L.left) && fabsf(wr.w - L.left.w) < 0.5f && wr.h >= 90 * res[r].scale, "%s: %s across the left column, tall (%.0f px)", n, equip_slot_name(weapons[a]), wr.h);
+                    CHECK(inside(wr, L.slots) && fabsf(wr.w - L.slots.w) < 0.5f && wr.h >= 90 * res[r].scale, "%s: %s across the slots column, tall (%.0f px)", n, equip_slot_name(weapons[a]), wr.h);
                     CHECK(inside(gr, L.gear) && fabsf(gr.w - gr.h) < 0.5f && gr.w >= 48 * res[r].scale, "%s: %s a square in the gear column", n, equip_slot_name(gear[a]));
                     if (a) CHECK(gr.y > L.equip[gear[a - 1]].y + L.equip[gear[a - 1]].h - 0.5f && fabsf(gr.x - L.equip[gear[a - 1]].x) < 0.5f, "%s: %s stacked under %s", n, equip_slot_name(gear[a]), equip_slot_name(gear[a - 1]));
                 }
@@ -95,12 +97,12 @@ static void test_layout(void) {
                 }
                 for (int c = 0; c < INV_UI_WEAPON_ROWS; c++) {
                     int slot = c == 0 ? EQ_PRIMARY : EQ_SECONDARY;
-                    CHECK(inside(L.att_row[c], L.left) && L.att_row[c].y >= L.equip[slot].y + L.equip[slot].h - 0.5f && L.att_row[c].h >= 30 * res[r].scale,
+                    CHECK(inside(L.att_row[c], L.slots) && L.att_row[c].y >= L.equip[slot].y + L.equip[slot].h - 0.5f && L.att_row[c].h >= 30 * res[r].scale,
                           "%s: the %s's chips right under it", n, equip_slot_name(slot));
                     CHECK(fabsf(L.chip * ATT_SLOTS + L.chip_gap * (ATT_SLOTS - 1) - L.equip[slot].w) < 0.5f && fabsf(L.att_row[c].h - L.chip) < 0.5f,
                           "%s: the %s's chips are squares across its width", n, equip_slot_name(slot));
                 }
-                CHECK(inside(L.view, L.right) && L.grid.w >= 10 * L.cell - 0.5f && L.grid.h >= L.title_h + rows[k] * L.cell, "%s: the player's grid fits the panel (%d rows)", n, rows[k]);
+                CHECK(inside(L.view, L.panel) && L.grid.w >= 10 * L.cell - 0.5f && L.grid.h >= L.title_h + rows[k] * L.cell, "%s: the player's grid fits the panel (%d rows)", n, rows[k]);
                 CHECK(fabsf(L.grid.x - L.view.x) < 0.5f && L.grid.y >= L.view.y - 0.5f, "%s: the grid in the grid panel", n);
                 if (loot) {
                     CHECK(L.loot.w >= in.loot_cols * L.cell && L.loot.h >= L.title_h + in.loot_rows * L.cell, "%s: the loot grid fits", n);
