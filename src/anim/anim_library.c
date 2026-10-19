@@ -565,6 +565,41 @@ static bool find_canonical(AnimLibrary *lib, char *out, size_t n) {
     return ok;
 }
 
+// The fixed finger pose under a gripping hand (docs/HANDPOSE.md "No finger animation"): an idle
+// clip's first frame, per hold style (the player set's idle_<style>, else idle). The grip's joints
+// act on it, so nothing a clip does reaches the fingers of a hand that holds something.
+static void finger_base_of(const AnimLibrary *lib, int clip, HandFingerBase *out) {
+    static Pose p;
+    out->ok = false;
+    if (clip < 0 || clip >= lib->clip_count) return;
+    clip_sample(&lib->clips[clip], 0.0f, &p);
+    for (int side = 0; side < 2; side++)
+        for (int f = 0; f < HAND_FINGERS; f++)
+            for (int k = 0; k < HAND_FINGER_JOINTS; k++) {
+                int b = handpose_finger_bone(&lib->skel, side, f, k);
+                if (b < 0) return;
+                out->r[side][f][k] = p.local[b].r;
+            }
+    out->ok = true;
+}
+
+static int idle_clip(const AnimLibrary *lib, const AnimBinding *ab, const char *slot, int fallback) {
+    int si = ab ? ctrl_slot_index(&lib->ctrl, slot) : -1;
+    return si >= 0 && ab->slots[si].clip >= 0 ? ab->slots[si].clip : fallback;
+}
+
+static void finger_bases(AnimLibrary *lib) {
+    int set = anim_lib_find_set(lib, "player");
+    const AnimBinding *ab = set >= 0 ? &lib->sets[set] : NULL;
+    int idle = idle_clip(lib, ab, "idle", ab ? ab->fallback_clip : -1);
+    finger_base_of(lib, idle, &lib->hands.finger_base[HOLD_STYLE_MAX]);
+    for (int i = 0; i < HOLD_STYLE_MAX; i++) {
+        char slot[48];
+        snprintf(slot, sizeof(slot), "idle_%s", i < lib->proc.style_count ? lib->proc.styles[i].name : "");
+        finger_base_of(lib, i < lib->proc.style_count ? idle_clip(lib, ab, slot, idle) : idle, &lib->hands.finger_base[i]);
+    }
+}
+
 bool anim_lib_load(AnimLibrary *lib, float rate) {
     memset(lib, 0, sizeof(*lib));
     lib->sample_rate = rate > 0 ? rate : ANIM_DEFAULT_RATE;
@@ -583,6 +618,7 @@ bool anim_lib_load(AnimLibrary *lib, float rate) {
     proc_hand_frames(&lib->skel, &lib->hands);
     anim_lib_reload_handposes(lib);
     load_sets(lib);
+    finger_bases(lib);
     // Canonical mesh first: its fitted radii shape the ragdoll and the hitboxes.
     int canon_mesh = anim_lib_load_mesh(lib, rig);
     if (canon_mesh >= 0) {
@@ -628,6 +664,7 @@ bool anim_lib_reload_meta(AnimLibrary *lib) {
     apply_clip_meta(lib);
     bool ok = load_controller(lib);
     load_sets(lib);
+    finger_bases(lib);
     for (int i = 0; i < lib->char_count; i++) {
         int s = anim_lib_find_set(lib, lib->chars[i].anim_set);
         lib->chars[i].anim_set_index = s >= 0 ? s : 0;
@@ -640,6 +677,7 @@ bool anim_lib_rebake(AnimLibrary *lib) {
     bool ok = load_clips(lib);
     apply_clip_meta(lib);
     load_sets(lib);
+    finger_bases(lib);
     lib->revision++;
     return ok;
 }

@@ -848,6 +848,7 @@ static void draw_onion(void) {
             anim_ik_arm_pose(s, &pose, model, a, b, hb, hand.t, &hand.r, pole, 1.0f);
             HandPose hp;
             handpose_case_key_pose(db(), kt.ci, -1, kt.key, h, &hp);
+            handpose_set_finger_base(s, &pose, model, h, &lib->hands.finger_base[HOLD_STYLE_MAX], 1.0f);
             handpose_apply_fingers(s, &pose, model, h, hp.j, &lib->hands, 1.0f);
             u32 col = cols[q];
             dbg_line(xf_point(m2w, model[a].t), xf_point(m2w, model[b].t), col, 0, false);

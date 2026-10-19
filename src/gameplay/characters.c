@@ -1776,7 +1776,6 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     pi.item_kick_rot = c->tp_fire_out.gun_rot;
     pi.hand_lag_pos = c->tp_fire_out.hand_pos;
     pi.hand_lag_rot = c->tp_fire_out.hand_rot;
-    pi.trigger = c->tp_fire_out.trigger;
     {
         const WeaponCvars *wc = weapons_cvars();
         float kk = wc->kick_scale ? wc->kick_scale->f : 1.0f;   // wpn_kick_scale: the gun kick on the hold point (1)

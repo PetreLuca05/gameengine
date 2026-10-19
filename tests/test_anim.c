@@ -757,13 +757,12 @@ static void test_frame_solve(const ItemDB *db) {
             pi.hand_ik_weight = 1.0f;
             pi.hp_view = true;
             pi.capture = &cap;
-            if (ph == 4) {   // a recoil string: kick, the hands trailing it, the trigger
+            if (ph == 4) {   // a recoil string: kick, the hands trailing it
                 float k = fabsf(sinf((float)t * 0.7f));
                 pi.item_kick_pos = v3(0, 0.004f * k, 0.03f * k);
                 pi.item_kick_rot = v3(4.0f * k, 0.6f, 1.0f * k);
                 pi.hand_lag_pos = v3(0, -0.003f * k, 0.008f * k);
                 pi.hand_lag_rot = v3(-1.5f * k, 0.2f, 0);
-                pi.trigger = k;
             }
             cap.valid = false;
             charrt_post(a, &pi);
@@ -807,6 +806,62 @@ static void test_frame_solve(const ItemDB *db) {
         CHECK(w_run > 0.99f, "running: hand IK weight %.2f (the hold should own the hands)", w_run);
         CHECK(w_sprint < 0.01f, "sprinting: hand IK weight %.2f (the sprint clip should own the arms)", w_sprint);
         printf("  hand IK: run %.2f, sprint %.2f (the sprint clip carries the arms)\n", w_run, w_sprint);
+    }
+    // A gripping hand's fingers never move (docs/HANDPOSE.md "No finger animation"): standing, walking
+    // and sprinting with a rifle (the sprint clip owns the arms, the gun stays in the right hand) while
+    // it fires, every finger joint of the right hand keeps its rotation whatever the clips do; the left
+    // hand's while it grips (the hold owns it: standing, walking). And the grip is on: the fingers are
+    // not the bind pose.
+    {
+        const WeaponDef *wd = &db->weapons[1];
+        charrt_init(a, L, def);
+        CharInputs in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.weapon_type = proc_hold_style_index(&L->proc, wd->hold_style);
+        in.weapon_id = 2;
+        static quat ref[2][HAND_FINGERS][HAND_FINGER_JOINTS];
+        float worst = 0, worst_left = 0, off_bind = 0;
+        int joints = 0;
+        for (int t = 0; t < 360; t++) {
+            in.sprint = t >= 240;
+            in.speed = t < 150 ? 0.0f : (in.sprint ? 7.0f : 3.0f);
+            in.move_local = t < 150 ? v2(0, 0) : (in.sprint ? v2(0, 1) : v2(0.4f, 1.0f));
+            ProcInput pi;
+            charrt_set_inputs(a, &in);
+            charrt_tick(a, dt);
+            charrt_eval_base(a);
+            charrt_proc_input(a, &pi, root_at(v3(0, 0, 0), 0.0f), dt);
+            pi.item = &wd->sockets;
+            float hw = 1.0f;
+            ctrl_hand_ik_weight(&a->ctrl, &hw);
+            pi.hand_ik_weight = hw;
+            float k = fabsf(sinf((float)t * 0.7f));   // firing all along: the old trigger pull / grip squeeze
+            pi.hand_lag_pos = v3(0, -0.003f * k, 0.008f * k);
+            pi.hand_lag_rot = v3(-1.5f * k, 0.2f, 0);
+            charrt_post(a, &pi);
+            for (int h = 0; h < 2; h++)
+                for (int f = 0; f < HAND_FINGERS; f++)
+                    for (int q = 0; q < HAND_FINGER_JOINTS; q++) {
+                        int b = handpose_finger_bone(&L->skel, h, f, q);
+                        if (b < 0) continue;
+                        quat r = a->final.local[b].r;
+                        if (t == 60) {
+                            ref[h][f][q] = r;
+                            joints++;
+                            off_bind = fmaxf(off_bind, quat_angle_between(r, L->skel.bind[b].r) * DG_RAD2DEG);
+                        } else if (t > 60) {
+                            float d = quat_angle_between(r, ref[h][f][q]) * DG_RAD2DEG;
+                            if (h == 1) worst = fmaxf(worst, d);
+                            else if (t < 236) worst_left = fmaxf(worst_left, d);
+                        }
+                    }
+        }
+        CHECK(joints > 0 && off_bind > 5.0f, "gripping fingers: the grip is not on (%d joints, %.1f deg from the bind pose)", joints, off_bind);
+        CHECK(worst < 0.01f, "gripping fingers (right) moved %.4f deg while standing / walking / sprinting (a clip reached them)", worst);
+        CHECK(worst_left < 0.01f, "gripping fingers (left) moved %.4f deg while standing / walking", worst_left);
+        printf("  gripping fingers: %d joints (grip %.0f deg from the bind pose), right hand within %.4f deg standing / walking / sprinting, left %.4f deg\n",
+               joints, off_bind, worst, worst_left);
     }
     free(a);
 }

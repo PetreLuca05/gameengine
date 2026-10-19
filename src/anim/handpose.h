@@ -247,6 +247,13 @@ void handpose_mirror_case_hand(HandPoseCase *c, int from_hand);     // every key
 // Applies one hand's finger joints (side 0 left, 1 right), scaled by weight. Fingers never move
 // the wrist; the finger chains' model transforms are updated. Zero spread / twist cost nothing.
 void handpose_apply_fingers(const Skeleton *s, Pose *pose, Xform *model, int side, const HandFingers j, const struct HandFrames *hf, float weight);
+// The fixed finger pose a hand that grips starts from (docs/HANDPOSE.md "No finger animation"): the
+// local rotation of every finger joint of both hands, taken once from an idle clip's first frame.
+typedef struct HandFingerBase { bool ok; quat r[2][HAND_FINGERS][HAND_FINGER_JOINTS]; } HandFingerBase;
+// Puts a hand's finger joints on the base (blended by weight) and its fingers' model transforms after
+// them, before the grip's joints act: nothing an animation clip does moves the fingers of a hand that
+// holds something.
+void handpose_set_finger_base(const Skeleton *s, Pose *pose, Xform *model, int side, const HandFingerBase *base, float weight);
 // Fingertip (model space) of finger f of the hand: the end of the distal joint.
 vec3 handpose_fingertip(const Skeleton *s, const Xform *model, int side, int finger);
 // Bone of finger f, joint k (0..2) of a hand side (-1 when the skeleton lacks it).

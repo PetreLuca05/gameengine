@@ -389,22 +389,19 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
             anim_ik_arm_pose(s, pose, model, la, lf, lh, hand_l.t, &hand_l.r, quat_rotate(yaw_q, st->hand[0].pole), w * st->hand[0].ikw);
         }
     }
-    // Fingers last: they never move the wrist. On a shot the trigger finger pulls and the support
-    // grip tightens (fire animation layer 3).
+    // Fingers last: they never move the wrist. A gripping hand's fingers are the grip alone: they start
+    // from the hold style's fixed base (its idle clip's first frame), so no clip and no shot moves
+    // them (docs/HANDPOSE.md "No finger animation"). The right hand holds the item in every state
+    // (a sprint / reload / melee clip that owns the arms carries the item in it): its fingers are the
+    // grip's at full weight; the left hand grips only while the hold owns it.
     if (!in->no_fingers) {
-        handpose_apply_fingers(s, pose, model, 1, st->hand[1].j, hf, w);
-        if (hs.left_hand && it->has_left) handpose_apply_fingers(s, pose, model, 0, st->hand[0].j, hf, w);
-        float t = in->trigger;
-        if (t > 1e-3f && w > 0.0f) {
-            HandFingers j;
-            memset(j, 0, sizeof(HandFingers));
-            for (int k = 0; k < 3; k++) j[HF_INDEX][k].curl = 12.0f * t * (k == 0 ? 1.0f : 0.6f);
-            handpose_apply_fingers(s, pose, model, 1, j, hf, w);
-            if (hs.left_hand && it->has_left) {
-                memset(j, 0, sizeof(HandFingers));
-                for (int f = HF_INDEX; f < HAND_FINGERS; f++) j[f][0].curl = 4.0f * t;
-                handpose_apply_fingers(s, pose, model, 0, j, hf, w);
-            }
+        const HandFingerBase *fb = &hf->finger_base[DG_CLAMP(st->style, 0, HOLD_STYLE_MAX - 1)];
+        if (!fb->ok) fb = &hf->finger_base[HOLD_STYLE_MAX];
+        handpose_set_finger_base(s, pose, model, 1, fb, 1.0f);
+        handpose_apply_fingers(s, pose, model, 1, st->hand[1].j, hf, 1.0f);
+        if (hs.left_hand && it->has_left) {
+            handpose_set_finger_base(s, pose, model, 0, fb, w);
+            handpose_apply_fingers(s, pose, model, 0, st->hand[0].j, hf, w);
         }
     }
     st->reach_shift = shift;
@@ -454,6 +451,10 @@ void proc_hand_anchors(ProcState *st, const ProcInput *in, Pose *pose, Xform *mo
         vec3 pole = v3(h ? 1.0f : -1.0f, -0.6f, 0.4f);
         if (posed && hp.has_pole) pole = hp.pole;
         anim_ik_arm_pose(s, pose, model, a, b, c, hand.t, &hand.r, pole, w * (posed ? hp.ik_weight : 1.0f));
-        if (posed && !in->no_fingers) handpose_apply_fingers(s, pose, model, h, hp.j, in->hands, w);
+        if (posed && !in->no_fingers) {
+            // A hand on a ledge / the controls: the case's fingers alone, on the fixed base.
+            handpose_set_finger_base(s, pose, model, h, &in->hands->finger_base[HOLD_STYLE_MAX], w);
+            handpose_apply_fingers(s, pose, model, h, hp.j, in->hands, w);
+        }
     }
 }

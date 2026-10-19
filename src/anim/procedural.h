@@ -112,6 +112,10 @@ typedef struct HandFrames {
     Xform palm[2];             // [0] left, [1] right: hand bone local -> palm frame
     vec3 curl_axis[2];         // finger curl axis in the palm frame
     float thumb_side[2];       // sign of the thumb along the palm frame's x (finger spread direction)
+    // The fixed finger pose a gripping hand starts from (no clip moves its fingers): per hold style
+    // its idle clip's first frame (the player's idle_<style>, else idle); [HOLD_STYLE_MAX] = idle,
+    // for cases (ledges, vehicle controls). Set by the animation library (proc_finger_bases).
+    HandFingerBase finger_base[HOLD_STYLE_MAX + 1];
 } HandFrames;
 void proc_hand_frames(const Skeleton *s, HandFrames *out);
 
@@ -234,9 +238,8 @@ typedef struct ProcInput {
     float lod_w;               // weight of the LOD0 systems (foot IK, lean, turn), faded over a pixel band (docs/LOD.md); 1 = full
     vec3 item_kick_pos, item_kick_rot;   // recoil kick applied to the item (aim space, m / deg)
     // Fire animation layer 3 (docs/FIRE_ANIM.md), every character alike: the hands trail the gun's
-    // one-tick kick (camera space m / deg, kick convention) and the trigger / support grip tighten (0..1).
+    // one-tick kick (camera space m / deg, kick convention). The fingers never move (docs/HANDPOSE.md).
     vec3 hand_lag_pos, hand_lag_rot;
-    float trigger;
     float crouch_drop;         // procedural crouch: pelvis lowering (m) when no crouch clips are bound
     float kneel;               // 0..1 target: knocked down (docs/REVIVE.md), knees on the ground, torso up
     ProcStageA *capture;       // non-NULL: stage A is copied here (first-person frame re-solve)

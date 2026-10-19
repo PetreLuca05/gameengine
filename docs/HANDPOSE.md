@@ -126,6 +126,20 @@ styles, 4 cases, 6 entries superseded by authored cases). Once `items/` exists, 
 Networking is unchanged: poses are derived locally from the item / case id; every grip / case that
 changes a pose (and every reviewed case) is in the hand pose hash of the asset manifest.
 
+### No finger animation
+
+A hand that grips something (an item's grip, a ledge, the vehicle controls, a case's key) has no
+animation on its fingers: before the grip's joints act, every finger joint is put on a fixed base,
+the hold style's idle clip at its first frame (the player set's `idle_<style>`, else `idle`; cases:
+`idle`), computed once when the clips / sets load (`HandFrames.finger_base`,
+`handpose_set_finger_base`). The locomotion clips, the reload hand-off blend-in and the shots never
+move those fingers (the old trigger pull and support-grip squeeze are gone). The right hand holds the
+item in every state, so its fingers stay the grip's even while a sprint / reload / melee clip owns the
+arm; the left hand's while it grips (the hold owns it). A grip that changes (another item, another
+style) still blends from the old fingers to the new. A hand that holds nothing (the free hand of a
+pistol, empty hands) keeps the clip's fingers. Test: `test_anim` "gripping fingers" (standing,
+walking, sprinting while firing: the fingers keep their rotation).
+
 ## Control rig
 
 The editor shows a **control skeleton** over the character for both arms. Hierarchy (outliner):

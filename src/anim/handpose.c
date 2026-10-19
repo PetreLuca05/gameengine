@@ -588,6 +588,21 @@ void handpose_apply_fingers(const Skeleton *s, Pose *pose, Xform *model, int sid
     for (int f = 0; f < HAND_FINGERS; f++) apply_finger(s, pose, model, side, f, j[f], hf, weight);
 }
 
+void handpose_set_finger_base(const Skeleton *s, Pose *pose, Xform *model, int side, const HandFingerBase *base, float weight) {
+    int hand = s->role[side ? BR_R_HAND : BR_L_HAND];
+    if (!base || !base->ok || weight <= 0 || hand < 0) return;
+    float w = saturate(weight);
+    for (int f = 0; f < HAND_FINGERS; f++)
+        for (int k = 0; k < HAND_FINGER_JOINTS; k++) {
+            int b = handpose_finger_bone(s, side, f, k);
+            if (b < 0) break;
+            pose->local[b].r = w >= 1.0f ? base->r[side][f][k] : quat_nlerp(pose->local[b].r, base->r[side][f][k], w);
+        }
+    // The hand's descendants follow their locals (parents come first in the skeleton, pose_to_model).
+    for (int i = hand + 1; i < s->count; i++)
+        if (skel_is_descendant(s, i, hand)) model[i] = xf_mul(model[s->parent[i]], pose->local[i]);
+}
+
 int handpose_finger_bone(const Skeleton *s, int side, int f, int joint) {
     int b = s->role[k_first[side][f]];
     for (int k = 0; k < joint && b >= 0; k++) b = first_child(s, b);
