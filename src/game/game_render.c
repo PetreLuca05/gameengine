@@ -924,9 +924,13 @@ void game_render(void) {
         // after the gun (its own overshoot), plus the roll twitch and the FOV punch.
         float ck = cvar_find("cam_kick_scale") ? cvar_find("cam_kick_scale")->f : 1.0f;   // visual camera kick (aim recoil unaffected)
         const FireAnimOut *fo = game_fire_sample(G->alpha);
-        vec3 kr = v3_scale(v3(fo->cam_rot.x, fo->cam_rot.y, fo->cam_rot.z), ck);
+        // The effects look the same at any Field of View (docs/FIRE_ANIM.md "Field of view"): the kick's
+        // pitch / yaw scale with the world FOV in use (aiming included) so the view moves as far on
+        // screen as authored at 75 deg; the punch is the same zoom; roll and the push-back are alike.
+        float kfov = fov_kick_scale(cam.fov_deg);
+        vec3 kr = v3_scale(v3(fo->cam_rot.x * kfov, fo->cam_rot.y * kfov, fo->cam_rot.z), ck);
         float kb = fo->cam_back * ck;
-        cam.fov_deg = fmaxf(5.0f, fov_punch(cam.fov_deg, fo->fov_punch * ck));   // a multiplier on the current FOV
+        cam.fov_deg = fmaxf(5.0f, fov_punch(cam.fov_deg, fo->fov_punch * ck));
         // Sway and ADS bob move the weapon (about the eye), not the camera: the sight centre stays
         // exactly on the bullets' line (weapon_aim_offset_deg is what the shots use). The visual camera
         // kick turns the view but not the aim: while aimed the weapon counters it, so the reticle keeps

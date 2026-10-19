@@ -27,7 +27,13 @@ float fov_ads_blend(float hip_v, float ads_v, float t) {
 
 float fov_sprint(float fov, float widen) { return 2.0f * atanf(tanf(fov * 0.5f * DG_DEG2RAD) * (1.0f + fmaxf(widen, 0.0f))) * DG_RAD2DEG; }
 
-float fov_punch(float fov, float punch_deg) { return fov * (1.0f - punch_deg / FOV_PUNCH_REF); }
+float fov_punch(float fov, float punch_deg) {
+    float ref = FOV_PUNCH_REF * 0.5f * DG_DEG2RAD, p = clampf(punch_deg, -FOV_PUNCH_REF * 0.5f, FOV_PUNCH_REF * 0.9f) * 0.5f * DG_DEG2RAD;
+    float zoom = tanf(ref) / tanf(ref - p);
+    return 2.0f * atanf(tanf(fov * 0.5f * DG_DEG2RAD) / zoom) * DG_RAD2DEG;
+}
+
+float fov_kick_scale(float fov) { return tanf(clampf(fov, 1.0f, 170.0f) * 0.5f * DG_DEG2RAD) / tanf(FOV_PUNCH_REF * 0.5f * DG_DEG2RAD); }
 
 float fov_weapon(const float presets[WEAPON_FOV_COUNT], int weapon_fov) { return presets[DG_CLAMP(weapon_fov, 0, WEAPON_FOV_COUNT - 1)]; }
 

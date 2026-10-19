@@ -76,6 +76,12 @@ Two instances (docs/CAMERA_HOLDPOINT.md "Rule 1"):
   drawn weapon's mechanics (layer 4: slide, wobble), the screen kick and the arms layer's cosmetic
   Weapon kick; never a bone.
 
+**Field of view.** Layer 5 looks the same at every Field of View (docs/CAMERA_HOLDPOINT.md "Field of
+view"): the camera kick's pitch / yaw (authored at a 75° vertical view) scale by `tan(V / 2) /
+tan(37.5°)` with the world FOV in use, so the view moves as far on screen (a burst: 14.4 px at Field
+of View 80, 15.5 px at 150); the FOV punch is the same zoom at any FOV; roll, the push-back, the
+screen kick, blur and chroma don't depend on it. The weapon's ADS counter uses the same scaled kick.
+
 ## Parameters
 
 Class file `assets/weapons/fire_poses/<class>.json`. Every key also works in a weapon's

@@ -228,8 +228,12 @@ the gun and arms thicker, Wide thinner with more of the arms. Aimed, the arms us
 view axis, so the reticle stays centred. `cl_hands_fov` (dev, locked) overrides the preset.
 
 **Multipliers.** Sprint widens the current FOV's tangent by `1 + cl_sprint_fov · speed / 6` (0.12 at
-full sprint, locked). The fire FOV punch scales it by `1 − punch / 75` (punches are authored against
-a 75° view). There is no vehicle FOV and no bodycam.
+full sprint, locked). The fire camera effects look the same at every Field of View (they are authored
+at a 75° vertical view, `FOV_PUNCH_REF`): the FOV punch is the zoom it gives there
+(`tan(37.5°) / tan((75 − punch) / 2)`) at any FOV, the camera kick's pitch / yaw scale by
+`tan(V / 2) / tan(37.5°)` with the world FOV in use (aiming included) so the view moves as far on
+screen; roll and the push-back are alike at any FOV (`fov_punch`, `fov_kick_scale`). There is no
+vehicle FOV and no bodycam.
 
 **Spectators.** A player's three settings ride in every `UserCmd` (`fov_h16`, `fov_flags`, protocol 36).
 A spectator in first person uses the target's (`camera_set_view_prefs`), so it sees the target's view.

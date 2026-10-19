@@ -102,8 +102,26 @@ int main(void) {
     {
         CHECK(NEAR(fov_sprint(60.0f, 0.0f), 60.0f, 1e-4f) && fov_sprint(60.0f, 0.12f) > 60.0f, "sprint");
         CHECK(NEAR(tanf(fov_sprint(50.0f, 0.1f) * 0.5f * DG_DEG2RAD), tanf(25.0f * DG_DEG2RAD) * 1.1f, 1e-5f), "sprint is a tangent multiplier");
-        CHECK(NEAR(fov_punch(75.0f, 2.5f), 72.5f, 1e-4f) && NEAR(fov_punch(50.0f, 2.5f), 50.0f * (1.0f - 2.5f / 75.0f), 1e-4f), "punch");
-        printf("  sprint x (1 + w) on the tangent, punch x (1 - p / 75): 75 -> %.2f, 50.5 -> %.2f\n", fov_punch(75.0f, 2.5f), fov_punch(fov_h16_to_v(80.0f), 2.5f));
+        // The fire punch: authored at 75 deg (2.5 -> 72.5), the same zoom at every FOV.
+        CHECK(NEAR(fov_punch(75.0f, 2.5f), 72.5f, 1e-3f), "punch at the authored FOV: %.4f", fov_punch(75.0f, 2.5f));
+        float zref = tanf(37.5f * DG_DEG2RAD) / tanf(36.25f * DG_DEG2RAD), zworst = 0;
+        for (float f = FOV_MIN; f <= FOV_MAX; f += 10.0f) {
+            float v = fov_h16_to_v(f), vp = fov_punch(v, 2.5f);
+            zworst = fmaxf(zworst, fabsf(tanf(v * 0.5f * DG_DEG2RAD) / tanf(vp * 0.5f * DG_DEG2RAD) - zref));
+        }
+        CHECK(zworst < 1e-4f, "punch: the zoom differs by %g across Field of View", zworst);
+        // The kick: a pitch of 2 deg at 75 moves the view centre as far on screen as the scaled pitch at
+        // any other FOV (NDC: tan(theta) / tan(V / 2)).
+        float sworst = 0;
+        for (float f = FOV_MIN; f <= FOV_MAX; f += 10.0f) {
+            float v = fov_h16_to_v(f), th = 2.0f * fov_kick_scale(v);
+            float ndc = tanf(th * DG_DEG2RAD) / tanf(v * 0.5f * DG_DEG2RAD), ndc_ref = tanf(2.0f * DG_DEG2RAD) / tanf(37.5f * DG_DEG2RAD);
+            sworst = fmaxf(sworst, fabsf(ndc / ndc_ref - 1.0f));
+        }
+        CHECK(sworst < 0.01f, "kick: the screen motion differs by %.2f %% across Field of View", sworst * 100.0f);
+        CHECK(NEAR(fov_kick_scale(75.0f), 1.0f, 1e-6f), "kick scale 1 at the authored FOV");
+        printf("  sprint x (1 + w) on the tangent; fire punch the same zoom (%.4f) and kick the same screen motion (%.2f %%) at every Field of View\n", zref,
+               sworst * 100.0f);
     }
     // 6) Weapon Field of View.
     {

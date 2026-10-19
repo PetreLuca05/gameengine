@@ -16,7 +16,7 @@
 #define FOV_MAX 150.0f
 #define FOV_DEFAULT 80.0f              // the Field of View default and the Independent ADS base
 #define FOV_REF_ASPECT (16.0f / 9.0f)  // the settings' horizontal FOVs are at this aspect
-#define FOV_PUNCH_REF 75.0f            // fire FOV punch degrees are authored against this vertical FOV
+#define FOV_PUNCH_REF 75.0f            // the fire camera effects (kick degrees, FOV punch) are authored at this vertical FOV
 
 typedef enum FovAdsMode { FOV_ADS_INDEPENDENT, FOV_ADS_AFFECTED, FOV_ADS_MODES } FovAdsMode;
 typedef enum WeaponFov { WEAPON_FOV_NARROW, WEAPON_FOV_DEFAULT, WEAPON_FOV_WIDE, WEAPON_FOV_COUNT } WeaponFov;
@@ -44,9 +44,13 @@ float fov_ads(int ads_mode, float fov_h16, float sight_zoom);
 // The world FOV along the ADS progress t (0 hip .. 1 aimed, vertical deg): the magnification eases
 // in along smoothstep(t) (the hip -> ADS curve; exactly ads_v at t = 1).
 float fov_ads_blend(float hip_v, float ads_v, float t);
-// Sprint widening: the tangent x (1 + widen). The fire punch: fov x (1 - punch / FOV_PUNCH_REF).
+// Sprint widening: the tangent x (1 + widen). The fire punch: the zoom it gives at FOV_PUNCH_REF
+// (tan(37.5) / tan((75 - punch) / 2)) at any FOV, so it looks the same whatever the Field of View.
 float fov_sprint(float fov, float widen);
 float fov_punch(float fov, float punch_deg);
+// The fire camera kick's pitch / yaw at this vertical FOV for the same motion on screen as authored at
+// FOV_PUNCH_REF: degrees x tan(fov / 2) / tan(37.5) (roll turns the image alike at any FOV: unscaled).
+float fov_kick_scale(float fov);
 // The Weapon Field of View preset's arms FOV (horizontal deg at 16:9) from the presets
 // (narrow, default, wide).
 float fov_weapon(const float presets[WEAPON_FOV_COUNT], int weapon_fov);
