@@ -146,6 +146,9 @@ for every item**: `assets/weapons/sway_global.json` (`src/player/sway.c`, the `s
 profile).
 
 * Weapons, their `mass` / `moment` and their attachments never reach `sway_eval`.
+* The whole hip sway is x `hip_scale` (0.5) and the whole ADS sway x `ads_scale` (1/3): the
+  sway as it was before the fire animation, dimmed at the user's request (2026-10-19). Its springs
+  are sub-stepped at 120 Hz again, as they were then.
 * The only modifiers are global: the hip / ADS multipliers, the optic's own `sway_scale`
   (a property of the optic, the same on every gun), stance, low health, after-sprint wobble and
   hold breath.

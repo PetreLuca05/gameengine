@@ -26,6 +26,7 @@ typedef struct SwayProfile {
     float land_k, land_d, land_gain, land_max, land_pitch;
     // component multipliers at the hip and in ADS (blended with the ADS progress by the hold point)
     float hip[SWAY_COMPONENTS], ads[SWAY_COMPONENTS];
+    float hip_scale, ads_scale;       // the whole hip / ADS sway (the pre-fire-animation sway dimmed: 1/2, 1/3)
     float hold_breath_mult;           // ADS sway while holding the breath
     float crouch, prone;              // stance multipliers
     float lever;                      // ADS: translations become the rotation of this lever (m)

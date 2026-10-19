@@ -135,7 +135,7 @@ never the gameplay pose the bullets follow (docs/AIM.md "Hold aim"), and never t
 |---|---|---|
 | Anchor | the pivot socket (`sway.anchor.hip`) | the **reticle centre** (`sight` socket) |
 | Motion | rotation + translation | rotation about the sight only (translations become the equivalent rotation of a 0.35 m lever) |
-| Breathing / look lag / bob / landing | `sway.hip` (1 / 1 / 1 / 1) | `sway.ads` (0.35 / 0.25 / 0.15 / 0.5) |
+| Breathing / look lag / bob / landing | `sway.hip` (1 / 1 / 1 / 1) × `hip_scale` 0.5 | `sway.ads` (0.35 / 0.25 / 0.15 / 0.5) × `ads_scale` 1/3 |
 | Optic | – | × the optic's `sway_scale` (red dot 1.0, 4x 0.7, 8x 0.5) |
 | Hold breath (Shift while aimed) | – | × `hold_breath_mult` (0.1) for `hold_breath` seconds, then a short shaky overshoot |
 

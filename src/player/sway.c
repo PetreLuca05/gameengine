@@ -32,6 +32,8 @@ void sway_profile_defaults(SwayProfile *p) {
     p->ads[SWAY_LOOK_LAG] = 0.25f;
     p->ads[SWAY_BOB] = 0.15f;
     p->ads[SWAY_LANDING] = 0.5f;
+    p->hip_scale = 0.5f;
+    p->ads_scale = 1.0f / 3.0f;
     p->hold_breath_mult = 0.1f;
     p->crouch = 0.75f;
     p->prone = 0.55f;
@@ -75,6 +77,8 @@ void sway_profile_parse(SwayProfile *p, const cJSON *j) {
         p->hip[i] = jf(h, keys[i], p->hip[i]);
         p->ads[i] = jf(a, keys[i], p->ads[i]);
     }
+    p->hip_scale = jf(j, "hip_scale", p->hip_scale);
+    p->ads_scale = jf(j, "ads_scale", p->ads_scale);
     p->hold_breath_mult = jf(j, "hold_breath_mult", p->hold_breath_mult);
     const cJSON *st = jget(j, "stance");
     p->crouch = jf(st, "crouch", p->crouch);
@@ -117,9 +121,16 @@ static float wrap_pi(float a) {
     while (a < -DG_PI) a += 2.0f * DG_PI;
     return a;
 }
+// Semi-implicit Euler, sub-stepped at 120 Hz (the sway spring as it was before the fire animation:
+// one 1/60 s step lowered the landing dip ~10 % and the look lag's overshoot).
 static float spring1(float x, float *v, float target, float k, float d, float dt) {
-    *v += (k * (target - x) - d * *v) * dt;
-    return x + *v * dt;
+    int n = dt > 1.0f / 120.0f ? (int)ceilf(dt * 120.0f) : 1;
+    float h = dt / (float)n;
+    for (int i = 0; i < n; i++) {
+        *v += (k * (target - x) - d * *v) * h;
+        x += *v * h;
+    }
+    return x;
 }
 
 void sway_eval(SwayState *st, const SwayProfile *p, const SwayInput *in, SwayOut *out) {
@@ -171,10 +182,12 @@ void sway_eval(SwayState *st, const SwayProfile *p, const SwayInput *in, SwayOut
     vec3 lag_rot = v3(st->lag.x, st->lag.y, 0);
     vec3 lag_pos = v3(st->lag.y * p->lag_pos * 10.0f, st->lag.x * p->lag_pos * 10.0f, 0);
     // Hip: everything about the hip anchor (look lag x the user's wpn_look_lag).
-    const float *mh = p->hip;
     float am = in->ads_mult > 0 ? in->ads_mult : 1.0f;
-    float ma[SWAY_COMPONENTS];
-    for (int i = 0; i < SWAY_COMPONENTS; i++) ma[i] = p->ads[i] * am;
+    float mh[SWAY_COMPONENTS], ma[SWAY_COMPONENTS];
+    for (int i = 0; i < SWAY_COMPONENTS; i++) {
+        mh[i] = p->hip[i] * p->hip_scale;
+        ma[i] = p->ads[i] * am * p->ads_scale;
+    }
     float gl = in->look_lag_scale;
     out->hip_rot = v3_scale(v3_add(v3_add(v3_scale(breath_rot, mh[0]), v3_scale(lag_rot, mh[1] * gl)), v3_add(v3_scale(bob_rot, mh[2]), v3_scale(land_rot, mh[3]))), stance);
     out->hip_pos = v3_scale(v3_add(v3_add(v3_scale(breath_pos, mh[0]), v3_scale(lag_pos, mh[1] * gl)), v3_add(v3_scale(bob_pos, mh[2]), v3_scale(land_pos, mh[3]))), stance);
