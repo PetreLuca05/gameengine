@@ -319,7 +319,11 @@ World container saves migrate the same way (a three-drawer cabinet into its one 
   - A second render of the player character (`chars_preview`): a separate instance of the same
     model with the same cosmetics and the worn helmet / carrier / pack. It plays its own idle pose
     with empty hands, is lit by a fixed light rig, and sits on a transparent background over the
-    blur. It is framed head to mid-thigh, facing the camera.
+    blur. It is framed head to mid-thigh, facing the camera, large (2026-10-20): its image runs from
+    the top of the safe area to the screen's bottom edge (the body runs off it) with the head's
+    middle level with the primary slot's (`InvLayout.player_head_top`, the head taken as a fifth of
+    the head top .. image bottom height), and spans the gear column's width more on either side,
+    drawn first, so the arms pass behind the panels.
   - Drag on it to turn it; it eases back.
   - Dropping a weapon or gear on it equips it into its own slot.
   - The Discard zone sits along the bottom.

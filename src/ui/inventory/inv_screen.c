@@ -924,6 +924,7 @@ static void draw_character(void) {
         in.w = (int)lrintf(r.w);
         in.h = (int)lrintf(r.h);
         in.yaw = V.char_yaw;
+        in.head_top = L->player_head_top;   // the head's middle level with the primary slot's
         static const int worn[CWORN_COUNT] = { EQ_HEADWEAR, EQ_BODY_ARMOR, EQ_BACKPACK };
         for (int k = 0; k < CWORN_COUNT; k++) {
             const InvItem *it = inv_equipped_c(&p->inv.t, worn[k]);
@@ -1612,6 +1613,7 @@ bool inventory_draw(GuiRect area, bool as_modal) {
     memset(&li, 0, sizeof(li));
     LayoutParams lp = gui_layout_params();
     li.safe = gui_layout_safe_rect(&lp);
+    li.screen_h = (float)gui_h();
     li.scale = gui_scale();
     inv_grid_size(&p->inv.t, db, &li.grid_cols, &li.grid_rows);
     InvTree *lt = game_loot_tree();

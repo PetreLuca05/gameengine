@@ -211,6 +211,7 @@ typedef struct CharPreviewIn {
     u8 held_att[ATT_SLOTS];      // its attachments
     u16 worn[CWORN_COUNT];       // worn gear item defs (head = helmet, chest = plate carrier, back = backpack; 0 none)
     float yaw;                   // extra turn about the vertical axis (radians; the UI may drag-rotate)
+    float head_top;              // the image height above the head top (fraction; 0 = assets/ui/char_preview.json's framing)
 } CharPreviewIn;
 TextureId chars_preview(World *w, int player_slot, const CharPreviewIn *in);
 // Pelvis + head of a character's current (ragdoll / settled / animated) pose.

@@ -329,7 +329,8 @@ RGBA texture and returns it (0 until ready; nothing runs on frames without a cal
   level perspective camera maps heights at the character's plane linearly onto the image, so from the first
   idle pose's skeleton the head top (head-top bone + `crown_m` x scale) lands `head_top` of the image height
   from the top and the bottom edge cuts the legs `bottom_t` of the way from the hip joints to the knees.
-  The same camera for every skin; it scales with the character.
+  The same camera for every skin; it scales with the character. A caller can set its own `head_top`
+  (`CharPreviewIn.head_top`, 0 = the look's): the inventory puts the head by the primary slot.
 - **The look** (`assets/ui/char_preview.json`, reloaded by `char_preview_show`): `framing` (head_top 0.21,
   crown_m 0.05, bottom_t 0.7, fov_deg 28, turn_deg, square), `lights` in camera space (x right, y up, z towards
   the camera: key top-front-left, a cool fill, rim lights behind the shoulders, ambient), `output` (exposure

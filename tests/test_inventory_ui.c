@@ -43,6 +43,7 @@ static InvLayoutIn layout_in(float w, float h, float scale, float safe_aspect, i
     float sw = w - 2 * m;
     if (safe_aspect > 0) sw = fminf(sw, (h - 2 * m) * safe_aspect);
     in.safe = (GuiRect){ (w - sw) * 0.5f, m, sw, h - 2 * m };
+    in.screen_h = h;
     in.scale = scale;
     in.grid_cols = 10;
     in.grid_rows = rows;
@@ -75,7 +76,17 @@ static void test_layout(void) {
                 CHECK(!overlaps(L.panel, L.gear) && !overlaps(L.gear, L.center) && !overlaps(L.center, L.slots) && L.panel.x < L.gear.x && L.gear.x < L.center.x && L.center.x < L.slots.x,
                       "%s: grid panel, gear, centre, weapon slots apart, left to right", n);
                 CHECK(fabsf(L.panel.x - in.safe.x) < 0.5f && fabsf(L.slots.x + L.slots.w - (in.safe.x + in.safe.w)) < 0.5f, "%s: the grid panel on the left edge, the weapon slots on the right", n);
-                CHECK(L.player.w >= 280.0f * res[r].scale && fabsf(L.player.x - L.center.x) < 0.5f, "%s: the character between the panels (%.0f px)", n, L.player.w);
+                CHECK(L.player.w >= 280.0f * res[r].scale && fabsf(L.player.x + L.player.w * 0.5f - (L.center.x + L.center.w * 0.5f)) < 0.5f && L.player.w >= L.center.w,
+                      "%s: the character centred between the panels (%.0f px)", n, L.player.w);
+                // The character: down to the screen's bottom edge, its head's middle (a fifth of the head
+                // top .. bottom height) level with the primary slot's.
+                {
+                    float top = L.player.y + L.player.h * L.player_head_top, bot = L.player.y + L.player.h;
+                    float mid = top + 0.1f * (bot - top), pm = L.equip[EQ_PRIMARY].y + L.equip[EQ_PRIMARY].h * 0.5f;
+                    CHECK(fabsf(bot - res[r].h) < 0.5f && fabsf(L.player.y - in.safe.y) < 0.5f && L.player_head_top > 0.0f && L.player_head_top < 0.9f,
+                          "%s: the character from the safe top to the screen bottom (%.0f .. %.0f, head %.3f)", n, L.player.y, bot, L.player_head_top);
+                    CHECK(fabsf(mid - pm) < 1.0f, "%s: the head's middle %.0f px, the primary slot's %.0f", n, mid, pm);
+                }
                 // The header: the category bar above the divider (the header's bottom), right of the title or on a row of its own.
                 CHECK(inside(L.cats, L.header) && fabsf(L.header.x - in.safe.x) < 0.5f && fabsf(L.header.w - in.safe.w) < 0.5f, "%s: the category bar in the header", n);
                 CHECK(L.cats.x >= L.header.x + L.header.w * 0.5f + 60 * res[r].scale || L.cats.y >= L.header.y + 40 * res[r].scale, "%s: the category bar clear of the centred title", n);

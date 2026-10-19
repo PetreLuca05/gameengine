@@ -19,6 +19,7 @@
 
 typedef struct InvLayoutIn {
     GuiRect safe;              // the safe area (pixels)
+    float screen_h;            // the screen's height (px): the character's image runs to its bottom edge (0: the safe area's)
     float scale;               // DPI scale (design px -> px)
     int grid_cols, grid_rows;  // the player's grid (the worn backpack's)
     bool loot;                 // a world container is open
@@ -39,7 +40,11 @@ typedef struct InvLayout {
     GuiRect slots;             // right: the weapon slots
     GuiRect equip[EQ_COUNT];   // primary, secondary, holster in the slots column; the gear in the gear column
     GuiRect att_row[INV_UI_WEAPON_ROWS];   // under primary / secondary: ATT_SLOTS square chips (chip, chip_gap) across the slot's width
-    GuiRect player;            // centre: the character render (no backdrop of its own: the screen's blur)
+    GuiRect player;            // centre: the character render (no backdrop of its own: the screen's blur), from the
+                               // top of the safe area to the screen's bottom edge, centred on the column and wider
+                               // (drawn first: the arms pass behind the gear column / weapon slots)
+    float player_head_top;     // the head top in it (fraction of its height from the top): the head's middle level
+                               // with the primary slot's (CharPreviewIn.head_top)
     GuiRect discard;           // drop zone (bottom of the centre)
     GuiRect view;              // inside the grid panel: the scrolled area
     GuiRect loot;              // in view (unscrolled): the world container (title, equipment row, grid, Take all); loot open only

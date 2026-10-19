@@ -80,8 +80,18 @@ void inv_layout(const InvLayoutIn *in, InvLayout *o) {
     // The gear column: helmet, body armor, backpack, square, stacked from the top.
     static const int gs[3] = { EQ_HEADWEAR, EQ_BODY_ARMOR, EQ_BACKPACK };
     for (int i = 0; i < 3; i++) o->equip[gs[i]] = R(o->gear.x, by + (float)i * (gw + g), gw, gw);
-    // Centre: the character fills it; the discard zone along its bottom.
-    o->player = o->center;
+    // Centre: the character, large - its image from the top of the safe area to the screen's bottom edge
+    // (the body runs off it), the head's middle level with the primary slot's: the head is about a fifth
+    // of the head top .. image bottom height (the image bottom between the hips and the knees), so its
+    // top sits a tenth of that above. It is drawn first and spans the gear column's width more on
+    // either side, so the arms pass behind the panels instead of ending at the column's edges. The
+    // discard zone along the column's bottom.
+    float pb = in->screen_h > 0.0f ? in->screen_h : bottom;
+    GuiRect prim = o->equip[EQ_PRIMARY];
+    float head_top = (prim.y + prim.h * 0.5f - 0.1f * pb) / 0.9f;
+    float side = gw + g;
+    o->player = R(o->center.x - side, S.y, cw + 2.0f * side, pb - S.y);
+    o->player_head_top = clampf_((head_top - S.y) / fmaxf(o->player.h, 1.0f), 0.001f, 0.9f);
     float discard_h = 30 * s;
     o->discard = R(o->center.x + cw * 0.3f, o->center.y + bh - discard_h, cw * 0.4f, discard_h);
     // The grid panel: (scrolling) the world container above the player's grid.

@@ -214,7 +214,9 @@ TextureId chars_preview(World *w, int player_slot, const CharPreviewIn *in) {
     Xform root = pv_pose(w, in, yaw, &sock);
     if (!PV.framed) return 0;
     // The camera: level at chest height, straight in front (-Z), the image spanning the framing heights.
-    CharPreviewShot shot = char_preview_frame(rig, PV.head_y, PV.bottom_y);
+    CharPreviewRig fr = *rig;
+    if (in->head_top > 0.0f) fr.head_top = in->head_top;   // the caller's framing (the inventory: the head by the primary slot)
+    CharPreviewShot shot = char_preview_frame(&fr, PV.head_y, PV.bottom_y);
     vec3 look = v3(0, shot.cam_y, 0), cam = v3(0, shot.cam_y, -shot.dist);
     vec3 back = v3(0, 0, -1), right = v3(-1, 0, 0), up = v3(0, 1, 0);   // camera axes (it looks down +Z)
     // Draws: the parts (the preview view), the gear and the held item (captured: the preview's own list).
