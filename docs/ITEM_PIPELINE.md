@@ -107,7 +107,7 @@ an `emitter` socket (the flashlight item).
   (`laser_render`).
 
 Without one F does nothing (2026-10-20: it lit an eye-mounted lamp): `game_player_has_light` (the drawn
-gun's underbarrel `"emitter": "light"`, or the flashlight item in the hands) gates the toggle, and the
+gun's underbarrel `"emitter": "light"` or `"laser"`, or the flashlight item in the hands) gates the toggle, and the
 host only sets `EF_FLASHLIGHT` with it. Other players see an eye-mounted light (no protocol change).
 
 The flashlight item is `"kind": "misc"` with `"hands": true` (`items.json`). Misc items normally

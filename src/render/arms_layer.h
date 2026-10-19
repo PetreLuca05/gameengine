@@ -44,7 +44,9 @@ typedef struct ArmsItem {
     char id[32];
     bool set[HP_STATE_COUNT];
     ArmsPose state[HP_STATE_COUNT];
-    float screen_scale;               // the item's own screen size at the hip (0: the layer's screen.scale)
+    float screen_scale;               // the item's own screen size at the hip (0: the layer's screen.scale) ...
+    bool has_anchor;
+    vec2 screen_anchor;               // ... about its own point (screen_anchor [x, y]; none: the layer's)
 } ArmsItem;
 
 typedef struct ArmsLayerDef {
@@ -108,6 +110,7 @@ typedef struct ArmsLayerOut {
     float raise;                      // 0..1 how far the equip raise still has to go (1 = out of view)
     float cam_w;                      // the arms camera's weight this frame (1 at the hip, 0 aimed)
     float screen_scale;               // the layer's size on screen this frame (screen_scale at the hip, 1 aimed: by cam_w)
+    vec2 screen_anchor;               // about this point (the item's own, else the layer's)
     vec3 sight;                       // the presented sight (pose-eye space)
 } ArmsLayerOut;
 

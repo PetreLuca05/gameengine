@@ -244,14 +244,12 @@ void crosshair_draw(float dt) {
         }
     }
 
-    // Target tint: hitbox along the aim ray (enemies red, other players blue).
+    // Target tint: other players along the aim ray turn it blue (friendly); enemies leave it as it is
+    // (2026-10-20: no red tint).
     u32 base = st->colors[DG_CLAMP(CH.color->i, 0, st->color_count - 1)];
     if (CH.target_color->i) {
         EntityId t = weapon_trace_target(w, vs, g->view.eye, aim, gun ? fminf(wd->range, st->enemy_range) : 3.0f);
-        if (t && ent_valid(w, t)) {
-            int ti = (int)ENT_INDEX(t);
-            base = w->type[ti] == ET_PLAYER ? st->friendly : st->enemy;
-        }
+        if (t && ent_valid(w, t) && w->type[ENT_INDEX(t)] == ET_PLAYER) base = st->friendly;
     }
     float alpha = CH.opacity->f;
     u32 col = with_alpha(base, alpha);

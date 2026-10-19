@@ -763,14 +763,14 @@ static void cycle_weapon(const Player *p, int dir) {
     }
 }
 
-// A light to switch on (F): the drawn gun's underbarrel weapon light, or the flashlight in the hands.
+// A light to switch on (F): the drawn gun's underbarrel weapon light or laser, or the flashlight in the hands.
 // Without one F does nothing (the host checks it too: EF_FLASHLIGHT).
 bool game_player_has_light(World *w, int slot) {
     if (!w || slot < 0 || slot >= MAX_PLAYERS) return false;
     const Player *p = &w->players[slot];
     const InvSlot *eq = weapon_equipped(w, slot);
     const AttachmentDef *a = eq ? attach_def(w->items, eq->att[ATT_UNDERBARREL]) : NULL;
-    if (a && a->emitter == 1) return true;
+    if (a && (a->emitter == 1 || a->emitter == 2)) return true;   // a weapon light or a laser (the same F toggle)
     const InvSlot *hs = p->sim.wpn.slot == INV_SEL_HANDS ? inv_sel_c(&p->inv, INV_SEL_HANDS) : NULL;
     const ItemDef *d = hs && hs->item ? item_def(w->items, hs->item) : NULL;
     return d && !strcmp(d->id, "flashlight");
