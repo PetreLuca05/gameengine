@@ -135,7 +135,7 @@ static InvSlot *phone_slot(const World *w, int slot) {
 const InvSlot *weapon_equipped(const World *w, int slot) {
     const Player *p = &w->players[slot];
     if (p->sim.wpn.slot == WPN_SLOT_PHONE) return w->items->builtin_phone ? phone_slot(w, slot) : NULL;
-    const InvSlot *s = inv_hot_c(&p->inv, DG_CLAMP((int)p->sim.wpn.slot, 0, INV_HOTBAR - 1));
+    const InvSlot *s = inv_sel_c(&p->inv, DG_CLAMP((int)p->sim.wpn.slot, 0, INV_SEL_COUNT - 1));
     return s->item ? s : NULL;
 }
 
@@ -1146,7 +1146,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     bool local_view = p->local || slot == game_view_slot();   // the viewed player (local or spectated) predicts its effects
     if (sim->move.mode == MOVE_DEAD) return;
 
-    u8 want = (u8)DG_CLAMP((int)cmd->slot, 0, INV_HOTBAR - 1);
+    u8 want = (u8)DG_CLAMP((int)cmd->slot, 0, INV_SEL_COUNT - 1);
     if ((cmd->buttons & BTN_PHONE) && w->items->builtin_phone) want = WPN_SLOT_PHONE;   // the built-in phone, out over any slot
     bool equip_changed = want != ws->slot;
     if (equip_changed) {
@@ -1164,7 +1164,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     ws->equip_t += dt;
     ws->recoil_kick = fmaxf(0.0f, ws->recoil_kick - dt * 6.0f);
 
-    InvSlot *s = ws->slot == WPN_SLOT_PHONE ? phone_slot(w, slot) : inv_hot(&p->inv, ws->slot);   // the bound instance (docs/INVENTORY.md)
+    InvSlot *s = ws->slot == WPN_SLOT_PHONE ? phone_slot(w, slot) : inv_sel(&p->inv, ws->slot);   // the equipped weapon / the item in the hands (docs/INVENTORY.md)
     const ItemDef *idef = item_def(w->items, s->item);
     const WeaponDef *d = item_weapon(w->items, s->item);
     // Attachments: the host and the predicting client apply the same modifiers (same inventory).
@@ -1220,7 +1220,16 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     if (idef->kind == ITEM_CONSUMABLE && s->item) {
         if (attack && !busy) {
             if (ws->use_t < -50.0f) return;   // finished / interrupted: wait for the release
-            if (ws->use_t < 0) ws->use_t = 0;
+            if (ws->use_t < 0) {
+                // An armor plate needs room (docs/DAMAGE.md "Armor": 1 plate, 4 with a plate carrier).
+                const Health *hh = &w->health[ENT_INDEX(p->ent)];
+                if (idef->armor > 0 && idef->heal <= 0 && hh->armor >= hh->max_armor - 0.5f) {
+                    if (w->authority && first) ev_hint(w, slot, hh->max_armor < 2 * ARMOR_PER_PLATE ? "Armor full: a plate carrier holds 4 plates" : "Armor full");
+                    ws->use_t = -100.0f;
+                    return;
+                }
+                ws->use_t = 0;
+            }
             ws->use_t += dt;
             // Taking damage interrupts bandaging / medkits (host; the client gets the state back).
             if (idef->interrupt_on_damage && w->authority && ws->use_t > dt && w->health[ENT_INDEX(p->ent)].last_damage_time >= w->time - dt * 0.5f) {

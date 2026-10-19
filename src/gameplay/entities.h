@@ -21,9 +21,8 @@ int container_add(World *w, EntityId e, u16 item, int count);
 void container_set_root(World *w, EntityId e, const char *root_id);   // before the first item
 void container_send(World *w, EntityId e, int player);               // host: open it for player (any entity with a tree)
 EntityId spawn_pickup(World *w, vec3 pos, u16 item, int count, i16 ammo, float respawn);
-// A dropped item as one pickup (docs/INVENTORY.md): uid's subtree of t. The weapon keeps its
-// attachments; a container keeps its contents and their layout in the pickup's own tree, so it is
-// picked up whole (a full pool of world trees: the contents drop beside it as their own pickups).
+// A dropped item as one pickup (docs/INVENTORY.md): uid of t. The weapon keeps its attachments, a
+// plate carrier its plates (ammo); anything under it (never, in a valid tree) drops beside it.
 EntityId spawn_pickup_tree(World *w, vec3 pos, const struct InvTree *t, u16 uid);
 EntityId spawn_bench(World *w, vec3 pos, float yaw);   // weapon bench interaction (attachments UI)
 EntityId spawn_prop(World *w, vec3 pos, quat rot, VisShape shape, vec3 half, u32 color, float mass);

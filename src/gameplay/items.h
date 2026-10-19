@@ -29,11 +29,12 @@ typedef struct ItemModelRef {
     bool has_bounds;
     vec3 bmin, bmax;        // the mesh's rest-pose bounds (file header)
 } ItemModelRef;
-// Grid inventory (docs/INVENTORY.md): the equipment slots of a body tree.
-typedef enum InvEquipSlot {
-    EQ_PRIMARY, EQ_SECONDARY, EQ_HOLSTER, EQ_MELEE, EQ_HEADWEAR, EQ_EARPIECE, EQ_FACE_COVER, EQ_EYEWEAR,
-    EQ_BODY_ARMOR, EQ_RIG, EQ_BACKPACK, EQ_ARMBAND, EQ_SECURE, EQ_COUNT, EQ_NONE = 255
-} InvEquipSlot;
+// Grid inventory (docs/INVENTORY.md): the equipment slots of a body tree. The three weapon slots are
+// selections 1-3 (inventory.h); the worn backpack's grid is the body's only grid; the helmet and the
+// plate carrier protect (docs/DAMAGE.md "Armor").
+typedef enum InvEquipSlot { EQ_PRIMARY, EQ_SECONDARY, EQ_HOLSTER, EQ_BACKPACK, EQ_HEADWEAR, EQ_BODY_ARMOR, EQ_COUNT, EQ_NONE = 255 } InvEquipSlot;
+// The category bar (docs/INVENTORY.md "Categories"): "category" in the item JSON, else from the kind.
+typedef enum InvCategory { ICAT_WEAPONS, ICAT_ATTACHMENTS, ICAT_MEDICAL, ICAT_THROWABLES, ICAT_TOOLS, ICAT_MISC, ICAT_COUNT } InvCategory;
 typedef enum InvUseType { INV_USE_NONE, INV_USE_CONSUME, INV_USE_CHARGES } InvUseType;
 
 // A container's grids ("container" block in items.json, roots in data/containers.json).
@@ -47,8 +48,7 @@ typedef struct InvContainerDef {
     u16 allow_kinds, deny_kinds;   // ItemKind bit masks (allow 0 = any)
     u16 deny_items[8];
     int deny_count;
-    bool no_containers;            // holds no container items
-    bool equip;                    // a body: has the equipment slots (root containers only)
+    bool equip;                    // a body: has the equipment slots, no grid of its own (root containers only)
     u8 max_w, max_h;               // largest footprint it takes (0 = any)
     int capacity;                  // cells (sum of the compartments)
 } InvContainerDef;
@@ -81,16 +81,18 @@ typedef struct ItemDef {
     u8 attachment;         // ITEM_ATTACHMENT: the attachment id it mounts (II_MOUNT, gameplay/inventory/inv_intent.c)
     char icon[64];         // UI icon override (assets path, "icon" in the item JSON); empty = baked icon
     ItemModelRef model;    // "mesh" / "condition" (non-weapons; weapons and attachments carry their own)
-    // Grid inventory (docs/INVENTORY.md). weight is informational only (no gameplay effect).
+    // Grid inventory (docs/INVENTORY.md).
     u8 grid_w, grid_h;     // cells, unrotated ("grid"; 0 in the JSON = the class default)
     bool rotatable;
-    float inv_weight;      // kg ("weight"); never read by movement, stamina or physics (lint_inventory.py)
     u8 equip_slot;         // InvEquipSlot (EQ_NONE: not wearable)
+    u8 category;           // InvCategory
+    bool default_pack;     // "default": true: the backpack every body wears when it wears no other (never moves)
+    u8 plates;             // body armor: the armor plates it holds ("plates"; without one a body holds ARMOR_BASE_PLATES)
     u8 use_type;           // InvUseType
     u8 charges;            // INV_USE_CHARGES: uses per item
     u16 durability;        // max points (0 = none)
     u8 fold_dw;            // weapons: columns lost with the stock folded (0 = doesn't fold)
-    i16 container;         // index into ItemDB.containers, -1 = not a container
+    i16 container;         // index into ItemDB.containers, -1 = not a container (backpacks)
     char cell_image[64];   // grid image override (assets path); empty = baked / live
     u8 vehicle_use;        // VehicleUse: consumables used on a vehicle (docs/VEHICLES.md)
     float fuel;            // VUSE_FUEL: litres
@@ -98,7 +100,7 @@ typedef struct ItemDef {
     // for weapons (origin = grip_r, -Z = the lens direction, +Z = the screen side, +Y = top).
     bool camera;
     bool builtin;              // always carried, outside the inventory (taken out with its own key)
-    bool hotbar;               // "hotbar": true: goes to the hotbar like weapons / consumables (a tool held in the hands: the flashlight)
+    bool hands;                // "hands": true: a tool taken into the hands like a consumable (the flashlight)
     char hold_style_alt[16];   // "hold": { "style_landscape" }: two-handed landscape hold style
     struct {
         vec3 body_center, body_half;   // the phone body (box)
@@ -268,6 +270,7 @@ typedef struct ItemDB {
     AttachmentDef attachments[MAX_ATTACHMENTS + 1];   // [0] unused (id 0 = none)
     int attachment_count;                             // highest valid id
     u16 builtin_phone;     // the camera item every player always carries ("builtin": true), 0 = none
+    u16 default_backpack;  // the backpack every body wears when it wears no other ("default": true), 0 = none
     InvContainerDef containers[MAX_CONTAINER_DEFS];   // item grids + the roots (data/containers.json)
     int container_count;
 } ItemDB;
@@ -302,6 +305,8 @@ int container_find(const ItemDB *db, const char *id);
 const InvContainerDef *item_container(const ItemDB *db, u16 item);
 const char *equip_slot_name(int slot);   // "primary", ...
 int equip_slot_from_name(const char *s);  // EQ_NONE if unknown
+const char *inv_category_name(int cat);  // "weapons", ...
+int inv_category_from_name(const char *s);  // -1 if unknown
 // Palm frame from finger / back-of-hand directions (-Z = fingers, +Y = back), orthonormalized.
 quat item_palm_frame(vec3 fingers, vec3 back);
 

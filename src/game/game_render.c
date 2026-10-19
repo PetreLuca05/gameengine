@@ -271,48 +271,6 @@ static bool cam_sphere_cast(void *ctx, vec3 from, vec3 delta, float radius, floa
     return true;
 }
 
-// The inventory showcase camera (docs/INVENTORY.md "Screen"): 2.7 m in front of the chest, facing the
-// player. Collides: when a crate, a wall or a car is in the way it swings 30 / 60 / 90 deg to either
-// side for a clear view (facing a wall: along it), else takes the freest direction, pulled in to its
-// free distance (never closer than 0.4 m). A direction is clear only when the hips and knees are in
-// view too (a waist-high crate in front hides the legs: casts at hip and knee height); a low blocker
-// alone never pulls the camera in (it looks over it). Pulls in at once, eases back out (no pop when
-// the blocker is gone). open: the screen just opened (snap).
-static void showcase_camera(PhysicsWorld *phys, vec3 chest, float body_yaw, bool open, float dt, RenderCamera *cam) {
-    static float cur_off, cur_dist = 2.7f;
-    const float want = 2.7f, radius = 0.18f, near = 0.4f;
-    static const float offs[7] = { 0.0f, 0.5236f, -0.5236f, 1.0472f, -1.0472f, 1.5708f, -1.5708f };
-    static const float low[2] = { 0.35f, 0.68f };   // below the chest: the hips, the knees (radius 0.18: clear of the floor)
-    float best_off = 0, best_d = -1, best_score = -1;
-    for (int k = 0; k < 7; k++) {
-        vec3 dir = forward_from_yaw(body_yaw + offs[k]);
-        float f = 1.0f;
-        float d = cam_sphere_cast(phys, chest, v3_scale(dir, want), radius, &f) ? want * f : want;
-        float dl = want;
-        for (int j = 0; j < 2; j++) {
-            f = 1.0f;
-            if (cam_sphere_cast(phys, v3_sub(chest, v3(0, low[j], 0)), v3_scale(dir, want), radius, &f)) dl = fminf(dl, want * f);
-        }
-        if (d >= want * 0.98f && dl >= want * 0.98f) { best_off = offs[k], best_d = want, best_score = want; break; }   // clear: the first (straightest) wins
-        float score = fminf(d, dl);
-        if (score > best_score + 0.05f) best_off = offs[k], best_d = d, best_score = score;
-    }
-    float target = best_d >= want ? want : fmaxf(near, best_d - 0.05f);
-    if (open) cur_off = best_off, cur_dist = target;
-    float a = 1.0f - expf(-dt * 6.0f);
-    cur_off += (best_off - cur_off) * a;
-    // The distance along the current (eased) direction: in at once, out eased.
-    vec3 dir = forward_from_yaw(body_yaw + cur_off);
-    float f = 1.0f;
-    float free_d = cam_sphere_cast(phys, chest, v3_scale(dir, want), radius, &f) ? fmaxf(near, want * f - 0.05f) : want;
-    target = fminf(target, free_d);
-    cur_dist = target < cur_dist ? target : cur_dist + (target - cur_dist) * a;
-    cam->pos = v3_madd(chest, dir, cur_dist);
-    cam->yaw = body_yaw + cur_off + 3.14159265f;
-    cam->pitch = -0.06f;
-    cam->roll = 0;
-}
-
 MeshId game_capsule_mesh(float r, float hh) {
     for (int i = 0; i < GR->capsule_count; i++)
         if (fabsf(GR->capsules[i].r - r) < 1e-3f && fabsf(GR->capsules[i].hh - hh) < 1e-3f) return GR->capsules[i].mesh;
@@ -885,15 +843,6 @@ void game_render(void) {
         pcam = pcam || (!fcam && lp && lean_camera(w, &cam));   // leaning out of a window (game_lean.c): the body stays whole too
         // A dev scene's camera (src/game/scene.h): third person, the body drawn whole.
         bool scam = !fcam && !pcam && lp && scene_camera(w, &cam);
-        // The inventory screen (docs/INVENTORY.md): the camera turns to face the player, who stands
-        // in the middle of the screen between the grids and the hotbar (inv_showcase).
-        bool icam = !fcam && !pcam && !scam && lp && !dead && G->inventory_open && inventory_showcase() && lp->sim.move.mode != MOVE_SEATED;
-        static bool icam_was;
-        if (icam) {
-            showcase_camera(w->phys, v3_add(interp.pos, v3(0, 1.05f, 0)), lp->sim.move.body_yaw, !icam_was, fdt, &cam);
-            scam = true;
-        }
-        icam_was = icam;
         int vcam = lp && !scam && !fcam && !pcam ? vehicles_camera(w, &cam) : 0;
         if (fcam || pcam) {
             chars_set_thirdperson(true);   // free camera / door peek (the camera is on the far side of the door): the body stays whole

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Checks the two-client loot race (tools/tests/inv_net.sh, docs/INVENTORY.md "Networking"):
   * conservation: the crate + both players' inventories hold the same items after the race as
-    before it (nothing duplicated, nothing lost; rounds and attachments compared by item too);
+    before it (nothing duplicated, nothing lost; rounds and attachments compared by item too; the
+    default bag is made and dropped by the backpack rules: not counted);
   * convergence: each client's last dump of its own inventory equals the host's dump of it.
 Run: python3 tools/tests/inv_net_check.py <dir with inv_host.log, inv_a.log, inv_b.log>"""
 import collections, os, re, sys
@@ -31,7 +32,8 @@ def totals(*trees):
     t = collections.Counter()
     for tr in trees:
         for item, count, _ in tr.values():
-            t[item] += count
+            if item != "sling_bag":
+                t[item] += count
     return t
 
 

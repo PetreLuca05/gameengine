@@ -205,7 +205,7 @@ static void cl_repredict(void) {
     if (!w || !p) return;
     if (G->inv_base_valid) {
         p->inv.t = G->inv_base.t;
-        memcpy(p->inv.quick, G->inv_base.quick, sizeof(p->inv.quick));
+        p->inv.hands = G->inv_base.hands;
         p->inv.revision = G->inv_base.revision;
     }
     G->loot = G->loot_base;
@@ -239,11 +239,11 @@ int game_inv_pending(void) { return G ? G->inv_pending_count : 0; }
 
 // Client: the host's inventory (acknowledging intents up to ack_seq): keep it as the base, drop
 // the acknowledged intents and re-apply the rest on top (their predicted results).
-void game_cl_inventory(int slot, u32 revision, u32 ack_seq, const u16 *quick, const InvTree *tree) {
+void game_cl_inventory(int slot, u32 revision, u32 ack_seq, u16 hands, const InvTree *tree) {
     World *w = G ? G->world : NULL;
     if (!w || slot < 0 || slot >= MAX_PLAYERS) return;
     G->inv_base.t = *tree;
-    memcpy(G->inv_base.quick, quick, sizeof(G->inv_base.quick));
+    G->inv_base.hands = hands;
     G->inv_base.revision = revision;
     G->inv_base_valid = true;
     int n = 0;
@@ -358,21 +358,23 @@ static void spawn_dropped(World *w, int slot, const InvTree *t, u16 uid) {
     if (phys_raycast(w->phys, eye, v3_sub(at, eye), PL_MASK_WORLD, phys_character_inner_body(p->character), &rh))
         at = v3_madd(rh.point, rh.normal, 0.15f);
     u16 item = top->s.item;
-    spawn_pickup_tree(w, at, t, uid);   // a weapon keeps its attachments, a container its contents
+    spawn_pickup_tree(w, at, t, uid);   // a weapon keeps its attachments
     ev_hint(w, slot, "Dropped %s", item_def(w->items, item)->name);
 }
 
-// G tap (docs/UI_WHEELS_HUD.md "Throwables"): the held item, hotbar slot k, goes on the ground in
-// front of the player, whole (the stack; a weapon with its attachments). Host-applied as a discard,
-// so the client's tree follows by MSG_INVENTORY.
+// G tap (docs/UI_WHEELS_HUD.md "Throwables"): the held item, selection k (a weapon slot or the
+// hands), goes on the ground in front of the player, whole (the stack; a weapon with its
+// attachments). Host-applied as a discard, so the client's tree follows by MSG_INVENTORY.
 static void drop_held(int slot, int k) {
     Player *p = &G->world->players[slot];
-    if (k < 0 || k >= INV_HOTBAR || !p->inv.quick[k]) return;
+    const InvSlot *s = k >= 0 && k < INV_SEL_COUNT ? inv_sel_c(&p->inv, k) : NULL;
+    const InvItem *it = s && s->item ? inv_item_of(&p->inv, s) : NULL;
+    if (!it) return;
     InvIntent in;
     memset(&in, 0, sizeof(in));
     in.type = II_DISCARD;
     in.src_side = INV_SIDE_SELF;
-    in.src = p->inv.quick[k];
+    in.src = it->uid;
     game_sv_inv_intent_r(slot, &in);
 }
 

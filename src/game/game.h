@@ -44,7 +44,8 @@ typedef struct Game {
     // local view + command building
     ViewState view;
     CamHeadStab cam_stab;        // first-person head camera stabilizer (src/player/camera_fp.c)
-    u8 hotbar_slot;
+    u8 sel_slot;                 // selection (UserCmd.slot): INV_SEL_* (docs/INVENTORY.md "Selection")
+    u8 sel_weapon;               // the last weapon slot selected (the hands fall back to it)
     UserCmd last_cmd;
     vec2 frame_look;
     bool use_pressed_frame;
@@ -151,6 +152,7 @@ void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick);
 void game_cl_disconnected(const char *reason);
 void game_handle_event(const GameEvent *ev);   // client-side event handling
 void game_rpc(int type, int a, int b, int c);   // client -> host request (inventory, containers)
+void game_select(int sel);                      // the local selection (INV_SEL_*): keys 1-3, the wheels, `slot`
 const PingTypes *game_ping_types(void);         // assets/ui/wheels/ping.json (game_pings.c)
 void wheels_draw(void);                         // radial wheels + the HUD timed ring (game_wheels.c)
 void game_sv_handle_rpc(int slot, int type, int a, int b, int c);
@@ -191,7 +193,7 @@ const char *weather_event_name(WeatherEvent e);
 const char *weather_name(World *w);              // the current preset ("clear", "light_rain" ...; photo sidecars)
 
 enum RpcType {
-    RPC_INV_DROP = 1,      // a = hotbar slot: the held item on the ground (G tap); inventory changes are MSG_INV_INTENT
+    RPC_INV_DROP = 1,      // a = selection (INV_SEL_*): the held item on the ground (G tap); inventory changes are MSG_INV_INTENT
     RPC_CONTAINER_CLOSE,   // the inventory screen closed: the open world inventory too
     RPC_ATTACH,            // a = inventory slot, b = attachment slot, c = attachment id (bench)
     RPC_SET_PART,          // modular character part
@@ -207,7 +209,7 @@ enum RpcType {
 // inventory / loot tree the host sends.
 int game_inv_intent(InvIntent *in);   // returns the (predicted) InvResult; fills in->seq
 int game_inv_pending(void);           // client: intents not yet acknowledged
-void game_cl_inventory(int slot, u32 revision, u32 ack_seq, const u16 *quick, const InvTree *tree);
+void game_cl_inventory(int slot, u32 revision, u32 ack_seq, u16 hands, const InvTree *tree);
 void game_cl_loot(EntityId e, u32 revision, const InvTree *tree);   // tree NULL: closed
 // The open world inventory as this machine sees it (host: the real tree; client: the predicted
 // copy), NULL when none is open / not received yet.

@@ -1,8 +1,10 @@
 // Inventory screen, pure parts (docs/INVENTORY.md "Screen"): the layout at 16:9 / 21:9 / 4:3 /
-// 720p / 4K (everything inside the safe area, nothing overlapping, usable cells), the drag-and-drop
-// state machine for every source -> target pair (the intent it produces, or the rejection), click
-// gestures, rotation while dragging, the pad carry mode, and pad navigation reaching every target
-// at 16:9 and 21:9. Run from the build output directory (data/, assets/).
+// 720p / 4K / 3440x1440 with and without loot and for every backpack (everything inside the safe area,
+// nothing overlapping, usable cells; the cell size never shrinks for a taller grid: the right column
+// scrolls; the loot above the player's grid), the drag-and-drop state machine for every source ->
+// target pair (the intent it produces, or the rejection; the character as a drop target), click
+// gestures, rotation while dragging, the pad carry mode, the category bar (it only dims) and pad
+// navigation reaching every target at 16:9 and 21:9. Run from the build output directory.
 #include "ui/inventory/inv_ui.h"
 #include "gameplay/attachments.h"
 #include "core/engine.h"
@@ -34,60 +36,71 @@ static bool overlaps(GuiRect a, GuiRect b) {
 
 // ------------------------------------------------------------------ layout
 
+static InvLayoutIn layout_in(float w, float h, float scale, float safe_aspect, int rows, bool loot, int loot_cols, int loot_rows, bool body) {
+    InvLayoutIn in;
+    memset(&in, 0, sizeof(in));
+    float m = 0.035f * h;
+    float sw = w - 2 * m;
+    if (safe_aspect > 0) sw = fminf(sw, (h - 2 * m) * safe_aspect);
+    in.safe = (GuiRect){ (w - sw) * 0.5f, m, sw, h - 2 * m };
+    in.scale = scale;
+    in.grid_cols = 10;
+    in.grid_rows = rows;
+    in.loot = loot;
+    in.loot_body = body;
+    in.loot_cols = loot_cols;
+    in.loot_rows = loot_rows;
+    return in;
+}
+
 static void test_layout(void) {
     static const struct { float w, h, scale, safe_aspect; const char *name; } res[] = {
-        { 1920, 1080, 1.0f, 0, "16:9 1080p" }, { 2560, 1080, 1.0f, 2.37f, "21:9" }, { 1024, 768, 0.8f, 0, "4:3" },
-        { 1280, 720, 0.667f, 0, "16:9 720p" }, { 3840, 2160, 2.0f, 0, "16:9 4K" }, { 3440, 1440, 1.333f, 2.37f, "21:9 1440p" },
+        { 1920, 1080, 1.0f, 0, "16:9 1080p" }, { 2560, 1080, 1.0f, 2.39f, "21:9" }, { 1024, 768, 0.711f, 0, "4:3" },
+        { 1280, 720, 0.667f, 0, "16:9 720p" }, { 3840, 2160, 2.0f, 0, "16:9 4K" }, { 3440, 1440, 1.333f, 2.39f, "21:9 1440p" },
     };
+    static const int rows[3] = { 4, 6, 8 };   // the three backpacks
     for (int r = 0; r < (int)ARRAY_COUNT(res); r++) {
-        for (int loot = 0; loot < 2; loot++) {
-            InvLayoutIn in;
-            memset(&in, 0, sizeof(in));
-            float m = 0.03f * res[r].h;
-            float sw = res[r].w - 2 * m;
-            if (res[r].safe_aspect > 0) sw = fminf(sw, (res[r].h - 2 * m) * res[r].safe_aspect);
-            in.safe = (GuiRect){ (res[r].w - sw) * 0.5f, m, sw, res[r].h - 2 * m };
-            in.scale = res[r].scale;
-            in.loot = loot;
-            in.loot_cols = 8;
-            in.loot_rows = 5;
-            in.panel_n = 4;
-            in.panel[0].cols = 4; in.panel[0].rows = 1;   // pockets
-            in.panel[1].cols = 4; in.panel[1].rows = 4;   // rig
-            in.panel[2].cols = 5; in.panel[2].rows = 6;   // backpack
-            in.panel[3].cols = 2; in.panel[3].rows = 2;   // secure
-            InvLayout L;
-            inv_layout(&in, &L);
-            const char *n = res[r].name;
-            CHECK(L.cell >= 20.0f * res[r].scale, "%s: cells usable (%.1f px)", n, L.cell);
-            CHECK(inside(L.left, in.safe) && inside(L.center, in.safe) && inside(L.right, in.safe), "%s: columns in the safe area", n);
-            CHECK(!overlaps(L.left, L.center) && !overlaps(L.center, L.right), "%s: columns apart", n);
-            CHECK(L.player.w >= 120.0f * res[r].scale, "%s: room for the player (%.0f px)", n, L.player.w);
-            for (int i = 0; i < in.panel_n; i++) {
-                CHECK(L.panel[i].w >= in.panel[i].cols * L.cell, "%s: panel %d holds its grid", n, i);
-                CHECK(fabsf(L.panel[i].x - L.left.x) < 0.5f, "%s: panel %d in the left column", n, i);
+        float cell0 = -1;
+        for (int k = 0; k < 3; k++)
+            for (int loot = 0; loot < 3; loot++) {   // none, a trunk (8x5), a corpse (its equipment row + a 10x8 pack)
+                InvLayoutIn in = layout_in(res[r].w, res[r].h, res[r].scale, res[r].safe_aspect, rows[k], loot > 0, loot == 1 ? 8 : 10, loot == 1 ? 5 : 8, loot == 2);
+                InvLayout L;
+                inv_layout(&in, &L);
+                const char *n = res[r].name;
+                if (cell0 < 0) cell0 = L.cell;
+                CHECK(fabsf(L.cell - cell0) < 0.01f, "%s: one cell size for every pack and container (%.1f vs %.1f)", n, L.cell, cell0);
+                CHECK(L.cell >= 20.0f * res[r].scale, "%s: cells usable (%.1f px)", n, L.cell);
+                CHECK(inside(L.left, in.safe) && inside(L.center, in.safe) && inside(L.right, in.safe), "%s: columns in the safe area", n);
+                CHECK(!overlaps(L.left, L.center) && !overlaps(L.center, L.right) && L.left.x < L.center.x && L.center.x < L.right.x, "%s: left, centre, right apart", n);
+                CHECK(L.player.w >= 280.0f * res[r].scale && fabsf(L.player.x - L.center.x) < 0.5f, "%s: the character between the panels (%.0f px)", n, L.player.w);
+                for (int a = 0; a < EQ_COUNT; a++) {
+                    CHECK(inside(L.equip[a], L.left) && L.equip[a].w > 10 && L.equip[a].h > 10, "%s: %s in the left column", n, equip_slot_name(a));
+                    for (int b = a + 1; b < EQ_COUNT; b++) CHECK(!overlaps(L.equip[a], L.equip[b]), "%s: %s / %s apart", n, equip_slot_name(a), equip_slot_name(b));
+                    for (int c = 0; c < INV_UI_WEAPON_ROWS; c++) CHECK(!overlaps(L.equip[a], L.att_row[c]), "%s: %s clear of the chip rows", n, equip_slot_name(a));
+                }
+                for (int c = 0; c < INV_UI_WEAPON_ROWS; c++) {
+                    int slot = c == 0 ? EQ_PRIMARY : EQ_SECONDARY;
+                    CHECK(inside(L.att_row[c], L.left) && L.att_row[c].y >= L.equip[slot].y + L.equip[slot].h - 0.5f && L.att_row[c].h >= 20 * res[r].scale,
+                          "%s: the %s's chips right under it", n, equip_slot_name(slot));
+                }
+                CHECK(L.equip[EQ_HEADWEAR].y > L.equip[EQ_HOLSTER].y && fabsf(L.equip[EQ_HEADWEAR].y - L.equip[EQ_BACKPACK].y) < 0.5f &&
+                      fabsf(L.equip[EQ_BODY_ARMOR].y - L.equip[EQ_BACKPACK].y) < 0.5f, "%s: helmet, armor, backpack in one row under the weapons", n);
+                CHECK(inside(L.inspect, L.left) && L.inspect.y >= L.equip[EQ_BACKPACK].y + L.equip[EQ_BACKPACK].h, "%s: the inspect panel under the slots", n);
+                CHECK(inside(L.cats, L.right) && inside(L.view, L.right) && L.view.y >= L.cats.y + L.cats.h, "%s: the category bar above the scrolled column", n);
+                CHECK(L.grid.w >= 10 * L.cell + 2 * L.pad - 0.5f && L.grid.h >= L.title_h + rows[k] * L.cell, "%s: the player's grid fits its panel (%d rows)", n, rows[k]);
+                CHECK(fabsf(L.grid.x - L.right.x) < 0.5f && L.grid.y >= L.view.y - 0.5f, "%s: the grid in the right column", n);
+                if (loot) {
+                    CHECK(L.loot.w >= in.loot_cols * L.cell && L.loot.h >= L.title_h + in.loot_rows * L.cell, "%s: the loot grid fits", n);
+                    CHECK(L.loot.y + L.loot.h <= L.grid.y + 0.5f && fabsf(L.loot.y - L.view.y) < 0.5f, "%s: the world container above the player's grid", n);
+                }
+                CHECK(fabsf(L.content_h - (L.grid.y + L.grid.h - L.view.y)) < 0.5f, "%s: content height", n);
+                CHECK(inside(L.discard, L.center), "%s: discard zone", n);
             }
-            for (int a = 0; a < EQ_COUNT; a++) {
-                CHECK(inside(L.equip[a], L.center), "%s: equipment slot %s in the centre", n, equip_slot_name(a));
-                CHECK(!overlaps(L.equip[a], L.player) && L.equip[a].w > 10, "%s: %s beside the player", n, equip_slot_name(a));
-                for (int b = a + 1; b < EQ_COUNT; b++) CHECK(!overlaps(L.equip[a], L.equip[b]), "%s: %s / %s apart", n, equip_slot_name(a), equip_slot_name(b));
-            }
-            for (int i = 0; i < INV_HOTBAR; i++) {
-                CHECK(inside(L.hot[i], L.right), "%s: hotbar %d in the right column", n, i + 1);
-                CHECK(fabsf(L.hot[i].w - L.cell) < 0.5f && fabsf(L.hot[i].h - L.cell) < 0.5f, "%s: hotbar %d is one grid cell (%.0f x %.0f, cell %.0f)", n, i + 1,
-                      L.hot[i].w, L.hot[i].h, L.cell);
-                CHECK(fabsf(L.hot[i].y - L.hot[0].y) < 0.5f, "%s: hotbar %d in the row", n, i + 1);
-                for (int j = i + 1; j < INV_HOTBAR; j++) CHECK(!overlaps(L.hot[i], L.hot[j]), "%s: hotbar tiles apart", n);
-                if (loot) CHECK(!overlaps(L.hot[i], L.loot), "%s: hotbar above the loot", n);
-            }
-            if (loot) {
-                CHECK(inside(L.loot, L.right) && L.loot.w >= 8 * L.cell, "%s: the 8-wide trunk fits", n);
-                CHECK(L.loot.h >= L.title_h + 3 * L.cell, "%s: loot grid has height (%.0f)", n, L.loot.h);
-            } else {
-                CHECK(inside(L.hot_info, L.right) && L.hot_info.h > 0 && L.hot_info.y >= L.hot[0].y + L.hot[0].h, "%s: the binds listed under the hotbar row", n);
-            }
-            CHECK(inside(L.discard, L.center) && !overlaps(L.discard, L.equip[EQ_PRIMARY]), "%s: discard zone", n);
-        }
+        // A 10x12 stash over a 10x8 pack doesn't shrink the cells: the column scrolls.
+        InvLayoutIn big = layout_in(res[r].w, res[r].h, res[r].scale, res[r].safe_aspect, 8, true, 10, 12, false);
+        InvLayout L;
+        inv_layout(&big, &L);
+        CHECK(fabsf(L.cell - cell0) < 0.01f && L.content_h > L.view.h, "%s: a tall stash scrolls (content %.0f > view %.0f), cells unchanged", res[r].name, L.content_h, L.view.h);
     }
 }
 
@@ -95,30 +108,20 @@ static void test_layout(void) {
 static void test_nav(void) {
     float aspect[2] = { 16.0f / 9.0f, 2.37f };
     for (int a = 0; a < 2; a++) {
-        InvLayoutIn in;
-        memset(&in, 0, sizeof(in));
-        in.safe = (GuiRect){ 0, 0, 1080 * aspect[a], 1080 };
-        in.scale = 1;
-        in.loot = true;
-        in.loot_cols = 6;
-        in.loot_rows = 4;
-        in.panel_n = 2;
-        in.panel[0].cols = 4; in.panel[0].rows = 1;
-        in.panel[1].cols = 5; in.panel[1].rows = 6;
+        InvLayoutIn in = layout_in(1080 * aspect[a], 1080, 1, 0, 6, true, 6, 4, false);
         InvLayout L;
         inv_layout(&in, &L);
-        GuiRect t[256];
+        GuiRect t[512];
         int n = 0;
-        for (int p = 0; p < in.panel_n; p++)
-            for (int y = 0; y < in.panel[p].rows; y++)
-                for (int x = 0; x < in.panel[p].cols; x++)
-                    t[n++] = (GuiRect){ L.panel[p].x + L.pad + x * L.cell, L.panel[p].y + L.title_h + y * L.cell, L.cell, L.cell };
         for (int e = 0; e < EQ_COUNT; e++) t[n++] = L.equip[e];
-        for (int h = 0; h < INV_HOTBAR; h++) t[n++] = L.hot[h];
+        for (int c = 0; c < INV_UI_WEAPON_ROWS; c++)
+            for (int k = 0; k < 5; k++) t[n++] = (GuiRect){ L.att_row[c].x + k * (L.att_row[c].h + 6), L.att_row[c].y, L.att_row[c].h, L.att_row[c].h };
         for (int y = 0; y < in.loot_rows; y++)
             for (int x = 0; x < in.loot_cols; x++) t[n++] = (GuiRect){ L.loot.x + L.pad + x * L.cell, L.loot.y + L.title_h + y * L.cell, L.cell, L.cell };
-        bool seen[256] = { false };
-        int stack[256], sp = 0, reached = 0;
+        for (int y = 0; y < in.grid_rows; y++)
+            for (int x = 0; x < in.grid_cols; x++) t[n++] = (GuiRect){ L.grid.x + L.pad + x * L.cell, L.grid.y + L.title_h + y * L.cell, L.cell, L.cell };
+        bool seen[512] = { false };
+        int stack[512], sp = 0, reached = 0;
         stack[sp++] = 0;
         seen[0] = true;
         while (sp) {
@@ -153,7 +156,6 @@ static InvView view(void) {
     v.db = &g_db;
     v.tree[INV_SIDE_SELF] = &g_inv.t;
     v.tree[INV_SIDE_LOOT] = &g_loot;
-    v.quick = g_inv.quick;
     return v;
 }
 
@@ -170,7 +172,6 @@ static InvTarget equip(int slot) {
     t.uid = it ? it->uid : 0;
     return t;
 }
-static InvTarget hot(int k) { InvTarget t = { IT_HOT, 0, 0, (i8)k, 0, g_inv.quick[k], 0, 0 }; return t; }
 static InvTarget att(int side, u16 weapon, int slot) { InvTarget t = { IT_ATTACH, (u8)side, 0, (i8)slot, 0, weapon, 0, 0 }; return t; }
 static InvTarget simple(int kind) { InvTarget t = { (u8)kind, 0, 0, 0, 0, 0, 0, 0 }; return t; }
 
@@ -203,15 +204,18 @@ static void test_dragdrop(void) {
     inv_init(&g_inv, &g_db);
     inv_tree_init(&g_loot, container_find(&g_db, "crate"));
     InvSlot bp = { item_find(&g_db, "backpack_hiking"), 1, 0, { 0 }, 0 };
+    InvItem *old = inv_pack(&g_inv.t);
+    if (old) memset(old, 0, sizeof(*old));
     InvItem *pack = inv_alloc(&g_inv.t, &g_db, &bp);
     pack->loc = INV_LOC_EQUIP + EQ_BACKPACK;
     u16 pk = pack->uid;
     u16 rifle = put(&g_inv.t, "rifle", 1, pk, 0, 0, 0);
     u16 ammo = put(&g_inv.t, "ammo_rifle", 60, pk, 0, 0, 2);
-    u16 band = put(&g_inv.t, "bandage", 1, 0, 1, 0, 0);   // a pocket
-    g_inv.quick[2] = band;
+    u16 band = put(&g_inv.t, "bandage", 1, pk, 0, 9, 7);
+    u16 smg = put(&g_inv.t, "smg", 1, 0, INV_LOC_EQUIP + EQ_PRIMARY, 0, 0);
     u16 lpistol = put(&g_loot, "pistol", 1, 0, 0, 2, 1);
     u16 scope = put(&g_loot, "att_scope_4x", 1, 0, 0, 0, 3);
+    (void)smg;
     InvDDOut o;
     // CELL -> CELL: a move with the grab offset (grabbed at the rifle's 2nd column).
     InvTarget src = cell(0, pk, 0, 1, 0);
@@ -234,41 +238,56 @@ static void test_dragdrop(void) {
     o = drag(cell(1, 0, 0, 2, 1), equip(EQ_HOLSTER), false, false);
     CHECK(o.action == IDA_INTENT && o.in.type == II_EQUIP && o.in.aux == EQ_HOLSTER, "pistol -> holster: equip");
     o = drag(cell(1, 0, 0, 2, 1), equip(EQ_HEADWEAR), false, false);
-    CHECK(o.action == IDA_REJECT && o.reason == IIR_EQUIP, "pistol -> headwear: rejected");
-    // CELL -> HOT: bind (self) / reject (loot).
-    o = drag(src, hot(0), false, false);
-    CHECK(o.action == IDA_INTENT && o.in.type == II_BIND && o.in.src == rifle && o.in.aux == 0, "rifle -> hotbar 1: bind");
-    o = drag(cell(1, 0, 0, 2, 1), hot(1), false, false);
-    CHECK(o.action == IDA_REJECT && o.reason == IDR_TAKE_FIRST, "loot -> hotbar: take it first");
-    // HOT -> HOT (moves the bind) / HOT -> elsewhere (unbind).
-    o = drag(hot(2), hot(4), false, false);
-    CHECK(o.action == IDA_INTENT && o.in.type == II_BIND && o.in.src == band && o.in.aux == 4, "hotbar 3 -> 5: rebind");
-    o = drag(hot(2), simple(IT_OUTSIDE), false, false);
-    CHECK(o.action == IDA_INTENT && o.in.type == II_BIND && o.in.src == 0 && o.in.aux == 2, "hotbar tile off the bar: unbind");
+    CHECK(o.action == IDA_REJECT && o.reason == IIR_EQUIP, "pistol -> helmet slot: rejected");
+    o = drag(src, equip(EQ_BACKPACK), false, false);
+    CHECK(o.action == IDA_REJECT && o.reason == IIR_EQUIP, "rifle -> backpack slot: rejected");
+    // CELL -> the character: worn in its own slot; not wearable: rejected.
+    o = drag(src, simple(IT_CHAR), false, false);
+    CHECK(o.action == IDA_INTENT && o.in.type == II_EQUIP && o.in.aux == 255 && o.in.src == rifle, "rifle -> the character: equip into its slot");
+    o = drag(cell(1, 0, 0, 2, 1), simple(IT_CHAR), false, false);
+    CHECK(o.action == IDA_INTENT && o.in.type == II_EQUIP && o.in.src_side == INV_SIDE_LOOT, "loot pistol -> the character: equip");
+    o = drag(cell(0, pk, 0, 9, 7), simple(IT_CHAR), false, false);
+    CHECK(o.action == IDA_REJECT && o.reason == IIR_EQUIP, "bandage -> the character: not wearable");
+    o = drag(equip(EQ_PRIMARY), simple(IT_CHAR), false, false);
+    CHECK(o.action == IDA_CANCEL, "a worn weapon dropped back on the character: nothing");
     // CELL -> ATTACH: mount (compatible) / reject.
     o = drag(cell(1, 0, 0, 0, 3), att(0, rifle, ATT_OPTIC), false, false);
     CHECK(o.action == IDA_INTENT && o.in.type == II_MOUNT && o.in.src == scope && o.in.dst == rifle && o.in.dst_side == INV_SIDE_SELF, "scope -> rifle optic: mount");
     o = drag(cell(1, 0, 0, 0, 3), att(0, rifle, ATT_MUZZLE), false, false);
     CHECK(o.action == IDA_REJECT, "scope -> muzzle slot: rejected");
-    o = drag(cell(0, 0, 1, 0, 0), att(0, rifle, ATT_OPTIC), false, false);
+    o = drag(cell(0, pk, 0, 9, 7), att(0, rifle, ATT_OPTIC), false, false);
     CHECK(o.action == IDA_REJECT && o.reason == IIR_INVALID, "bandage -> optic: rejected (%s)", idd_reason_text(o.reason));
-    // ATTACH -> CELL (unmount there) / -> outside (first space).
+    // ATTACH -> CELL (unmount there) / -> outside (first space). An empty chip can't be picked up.
+    InvItem *ri = inv_get(&g_inv.t, rifle);
+    ri->s.att[ATT_OPTIC] = attach_find(&g_db, "red_dot");
     o = drag(att(0, rifle, ATT_OPTIC), cell(0, pk, 0, 4, 0), false, false);
     CHECK(o.action == IDA_INTENT && o.in.type == II_UNMOUNT && o.in.aux == ATT_OPTIC && o.in.dst == pk && o.in.x == 4, "chip -> cell: unmount there");
     o = drag(att(0, rifle, ATT_OPTIC), simple(IT_OUTSIDE), false, false);
     CHECK(o.action == IDA_INTENT && o.in.type == II_UNMOUNT && o.in.dst == INV_AUTO, "chip -> outside: unmount to the first space");
+    ri->s.att[ATT_OPTIC] = 0;
+    {
+        InvDrag d;
+        idd_reset(&d);
+        InvView v = view();
+        InvDDIn in;
+        memset(&in, 0, sizeof(in));
+        in.hover = att(0, rifle, ATT_OPTIC);
+        in.pressed = true;
+        idd_update(&d, &in, &v);
+        CHECK(d.state == IDD_IDLE, "an empty chip isn't picked up");
+    }
     // -> DISCARD / OUTSIDE: a weapon asks first, a stack doesn't.
     o = drag(src, simple(IT_DISCARD), false, false);
     CHECK(o.action == IDA_CONFIRM && o.in.type == II_DISCARD && o.in.src == rifle, "rifle -> discard: confirm");
     o = drag(cell(0, pk, 0, 0, 2), simple(IT_OUTSIDE), false, false);
     CHECK(o.action == IDA_INTENT && o.in.type == II_DISCARD, "ammo -> outside: discard");
-    // EQUIP -> CELL: unequip into a grid.
+    // EQUIP -> CELL: off the back into a crate.
     o = drag(equip(EQ_BACKPACK), cell(1, 0, 0, 0, 0), false, false);
     CHECK(o.action == IDA_INTENT && o.in.type == II_MOVE && o.in.src == pk && o.in.dst_side == INV_SIDE_LOOT, "backpack -> crate cell");
-    // -> PANEL / same place: nothing.
+    // -> PANEL: nothing.
     o = drag(src, simple(IT_PANEL), false, false);
     CHECK(o.action == IDA_CANCEL, "released over the panel: nothing");
-    // Clicks: select, Ctrl quick move, Alt equip, right click context, double click open.
+    // Clicks: select, Ctrl quick move, Alt equip, right click context, double click inspect.
     InvDrag d;
     idd_reset(&d);
     InvView v = view();
@@ -301,7 +320,7 @@ static void test_dragdrop(void) {
     in.hover = equip(EQ_BACKPACK);
     in.double_clicked = true;
     o = idd_update(&d, &in, &v);
-    CHECK(o.action == IDA_OPEN && o.at.uid == pk, "double click: open");
+    CHECK(o.action == IDA_OPEN && o.at.uid == pk, "double click: inspect");
     // Esc while dragging cancels.
     idd_reset(&d);
     memset(&in, 0, sizeof(in));
@@ -326,6 +345,23 @@ static void test_dragdrop(void) {
     CHECK(o.action == IDA_INTENT && o.in.type == II_MOVE && o.in.rot == 1 && !d.carry, "A: place rotated");
     o = idd_carry_accept(&d, cell(0, pk, 0, 4, 5), &v, false);
     CHECK(o.action == IDA_SELECT, "A on an empty cell: select");
+    (void)band;
+}
+
+// The category bar only dims: the item tree is untouched, the dims agree with the categories.
+static void test_categories(void) {
+    InvTree before = g_inv.t;
+    int lit[ICAT_COUNT + 1] = { 0 };
+    for (int cat = 0; cat <= ICAT_COUNT; cat++)
+        for (int i = 1; i < g_db.item_count; i++) {
+            const ItemDef *d = &g_db.items[i];
+            bool dim = inv_cat_dims(cat, d);
+            CHECK(dim == (cat > 0 && d->category != cat - 1), "%s under category %d", d->id, cat);
+            lit[cat] += !dim;
+        }
+    CHECK(lit[0] == g_db.item_count - 1, "All lights everything");
+    for (int c = 1; c <= ICAT_COUNT; c++) CHECK(lit[c] > 0, "category %s has items", inv_category_name(c - 1));
+    CHECK(!memcmp(&before, &g_inv.t, sizeof(before)), "highlighting never moves anything");
 }
 
 int main(void) {
@@ -333,6 +369,7 @@ int main(void) {
     test_layout();
     test_nav();
     test_dragdrop();
+    test_categories();
     printf("inventory_ui: %d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

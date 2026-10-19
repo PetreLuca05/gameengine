@@ -1,13 +1,16 @@
-// Grid inventory (docs/INVENTORY.md): definitions + class defaults, the fit / rotation / filter /
-// nesting matrix over every item and container, stacking, quick-move order, swaps, attachment
-// footprints, folding, the secure container on death, the corpse tree, the wire format, a fuzz of
-// random intents (the tree invariants always hold, nothing is created or lost), and two clients
-// looting one crate through a 150 ms host round trip with conflicting moves (no duplication or
-// loss, every copy converges); binds of what comes over inside a container (a corpse's rig, a dropped
-// rig picked up again); every stocked world container's loot fits its root (the arguments: level and
-// building-kit prefab files). Run from the build output directory (data/, assets/).
+// Grid inventory (docs/INVENTORY.md): the schema (exactly the six equipment slots, three backpacks,
+// the default bag), class defaults, the fit / rotation / filter matrix over every item and world
+// container, stacking, swaps, the backpack rules (a bigger pack takes the contents over, taking one
+// off puts them in the default bag, packs off a back are empty, nothing nests), the hands, Compact,
+// attachment footprints and the attachment matrix, folding, death into a corpse, the wire format,
+// format-1 save migration, a fuzz of random intents (the invariants and conservation always hold and
+// the grid's size changes only with the worn pack), two clients looting one crate through a 150 ms
+// host round trip with conflicting moves (no duplication or loss, every copy converges), and every
+// stocked world container's loot fits its root (the arguments: level and building-kit prefab
+// files). Run from the build output directory (data/, assets/).
 #include "gameplay/inventory.h"
 #include "gameplay/inventory/inv_wire.h"
+#include "gameplay/inventory/inv_migrate.h"
 #include "gameplay/attachments.h"
 #include "core/engine.h"
 #include "core/platform.h"
@@ -43,10 +46,13 @@ static u32 rnd(void) { g_rng = g_rng * 1664525u + 1013904223u; return g_rng >> 8
 
 // ------------------------------------------------------------------ invariants
 
-// Every live item lies inside its compartment, overlaps nothing, has a live container parent,
-// no cycles, counts within the stack size, equipment slots hold what they accept.
+// Every live item: a body holds only equipment at its root and the worn pack's contents; a world
+// container only its root grid; inside its grid, overlapping nothing, within its filter; counts within
+// the stack size; equipment slots hold what they accept; a pack off a back is empty.
 static bool tree_ok(const InvTree *t, const char *what) {
     bool ok = true;
+    const InvContainerDef *root = inv_root_def(t, &g_db);
+    u16 grid = inv_grid(t, &g_db);
     for (int i = 0; i < INV_MAX_ITEMS; i++) {
         const InvItem *a = &t->items[i];
         if (!inv_alive(a)) continue;
@@ -54,23 +60,25 @@ static bool tree_ok(const InvTree *t, const char *what) {
         if (a->s.count > DG_MAX(1, d->max_stack)) { printf("  %s: %s count %d > stack\n", what, d->id, a->s.count); ok = false; }
         for (int j = i + 1; j < INV_MAX_ITEMS; j++)
             if (inv_alive(&t->items[j]) && t->items[j].uid == a->uid) { printf("  %s: duplicate uid %d\n", what, a->uid); ok = false; }
+        if (item_container(&g_db, a->s.item) && a->uid != grid && inv_child_count(t, a->uid)) { printf("  %s: %s off a back holds items\n", what, d->id); ok = false; }
+        if (a->loc == INV_LOC_NONE) continue;   // a dev instance held outside the grid
         if (a->loc >= INV_LOC_EQUIP) {
             int slot = a->loc - INV_LOC_EQUIP;
-            if (a->parent || !inv_root_def(t, &g_db)->equip || !inv_equip_accepts(slot, d)) { printf("  %s: %s in slot %d\n", what, d->id, slot); ok = false; }
+            if (a->parent || !root->equip || !inv_equip_accepts(slot, d)) { printf("  %s: %s in slot %d\n", what, d->id, slot); ok = false; }
             for (int j = i + 1; j < INV_MAX_ITEMS; j++)
                 if (inv_alive(&t->items[j]) && !t->items[j].parent && t->items[j].loc == a->loc) { printf("  %s: two in slot %d\n", what, slot); ok = false; }
             continue;
         }
+        if (a->parent != grid) { printf("  %s: %s is outside the grid (parent %d, grid %d)\n", what, d->id, a->parent, grid); ok = false; continue; }
         const InvContainerDef *cd = inv_parent_def(t, &g_db, a->parent);
-        if (!cd || a->loc >= cd->comp_count) { printf("  %s: %s has no container (parent %d loc %d)\n", what, d->id, a->parent, a->loc); ok = false; continue; }
-        if (a->parent && inv_is_ancestor(t, a->uid, a->parent)) { printf("  %s: cycle at %d\n", what, a->uid); ok = false; }
+        if (!cd || a->loc >= cd->comp_count) { printf("  %s: %s has no compartment (parent %d loc %d)\n", what, d->id, a->parent, a->loc); ok = false; continue; }
         int w, h;
         inv_item_size(&g_db, a, &w, &h);
         if (a->x + w > cd->comp[a->loc].w || a->y + h > cd->comp[a->loc].h) { printf("  %s: %s out of bounds\n", what, d->id); ok = false; }
         if (inv_accepts(&g_db, cd, &a->s, w, h) != IIR_OK) { printf("  %s: %s breaks %s's filter\n", what, d->id, cd->id); ok = false; }
         for (int j = i + 1; j < INV_MAX_ITEMS; j++) {
             const InvItem *b = &t->items[j];
-            if (!inv_alive(b) || b->parent != a->parent || b->loc != a->loc) continue;
+            if (!inv_alive(b) || b->parent != a->parent || b->loc != a->loc || b->loc >= INV_LOC_EQUIP) continue;
             int bw, bh;
             inv_item_size(&g_db, b, &bw, &bh);
             if (a->x < b->x + bw && b->x < a->x + w && a->y < b->y + bh && b->y < a->y + h) {
@@ -82,9 +90,10 @@ static bool tree_ok(const InvTree *t, const char *what) {
     return ok;
 }
 
+// Item totals (the default bag is created and destroyed by the rules: not counted).
 static void totals(const InvTree *t, int *per_item) {
     for (int i = 0; i < INV_MAX_ITEMS; i++)
-        if (inv_alive(&t->items[i])) per_item[t->items[i].s.item] += t->items[i].s.count;
+        if (inv_alive(&t->items[i]) && t->items[i].s.item != g_db.default_backpack) per_item[t->items[i].s.item] += t->items[i].s.count;
 }
 
 static InvIntent intent(int type, int ss, u16 src, int ds, u16 dst, int loc, int x, int y, int rot) {
@@ -121,10 +130,67 @@ static void fresh(Inventory *inv) {
     inv_init(inv, &g_db);
 }
 
-// ------------------------------------------------------------------ definitions
+static u16 grid_of(const Inventory *inv) { return inv_grid(&inv->t, &g_db); }
+
+static void grid_dims(const InvTree *t, int *c, int *r) { inv_grid_size(t, &g_db, c, r); }
+
+// An item placed straight into the tree's grid at (x, y) (test setup; checked).
+static u16 put(InvTree *t, const char *id, int count, int x, int y) {
+    InvSlot s = { I(id), (u16)count, 0, { 0 }, 0 };
+    attach_defaults(item_weapon(&g_db, s.item), s.att);
+    InvItem *it = inv_alloc(t, &g_db, &s);
+    if (!it) return 0;
+    InvPlace p = { inv_grid(t, &g_db), 0, (u8)x, (u8)y, 0 };
+    it->loc = INV_LOC_NONE;
+    int r = inv_check_place(t, &g_db, it, p, 0, NULL);
+    CHECK(r == IIR_OK, "put %s at %d,%d: %s", id, x, y, inv_result_text(r));
+    it->parent = p.parent;
+    it->loc = 0;
+    it->x = (u8)x;
+    it->y = (u8)y;
+    return it->uid;
+}
+
+// ------------------------------------------------------------------ schema / definitions
+
+static void test_schema(void) {
+    // Exactly the six equipment slots (the deleted ones are gone from the enum and the names).
+    static const char *slots[] = { "primary", "secondary", "holster", "backpack", "headwear", "body_armor" };
+    CHECK(EQ_COUNT == (int)ARRAY_COUNT(slots), "%d equipment slots (want %d)", EQ_COUNT, (int)ARRAY_COUNT(slots));
+    for (int i = 0; i < EQ_COUNT && i < (int)ARRAY_COUNT(slots); i++) CHECK(!strcmp(equip_slot_name(i), slots[i]), "slot %d is %s", i, slots[i]);
+    static const char *gone[] = { "melee", "earpiece", "face_cover", "eyewear", "tactical_rig", "rig", "armband", "secure_container", "secure", "pockets" };
+    for (int i = 0; i < (int)ARRAY_COUNT(gone); i++) CHECK(equip_slot_from_name(gone[i]) == EQ_NONE, "no %s slot", gone[i]);
+    CHECK(INV_SEL_WEAPONS == 3 && INV_SEL_HANDS == 3 && INV_SEL_COUNT == 4 && EQ_PRIMARY == 0 && EQ_SECONDARY == 1 && EQ_HOLSTER == 2,
+          "selections 1-3 are the weapon slots, then the hands");
+    // The deleted items are gone.
+    static const char *deleted[] = { "rig_chest", "secure_alpha", "ammo_case", "med_case", "headset", "balaclava", "glasses", "armband" };
+    for (int i = 0; i < (int)ARRAY_COUNT(deleted); i++) CHECK(!item_find(&g_db, deleted[i]), "%s is deleted", deleted[i]);
+    // Three backpacks, growing, ten columns; the smallest is the default bag.
+    struct { const char *id; int cols, rows; bool def; } packs[] = { { "sling_bag", 10, 4, true }, { "backpack", 10, 6, false }, { "backpack_hiking", 10, 8, false } };
+    for (int i = 0; i < (int)ARRAY_COUNT(packs); i++) {
+        u16 it = I(packs[i].id);
+        const InvContainerDef *cd = item_container(&g_db, it);
+        int c = 0, r = 0;
+        if (cd) { c = cd->comp[0].w; r = cd->comp[0].h; }
+        CHECK(cd && cd->comp_count == 1 && c == packs[i].cols && r == packs[i].rows, "%s: one %dx%d grid (got %dx%d)", packs[i].id, packs[i].cols, packs[i].rows, c, r);
+        CHECK(item_def(&g_db, it)->equip_slot == EQ_BACKPACK && item_def(&g_db, it)->default_pack == packs[i].def, "%s is a backpack%s", packs[i].id, packs[i].def ? " (the default)" : "");
+    }
+    CHECK(g_db.default_backpack == I("sling_bag"), "the default bag is the sling bag");
+    int n_cont = 0;
+    for (int i = 1; i < g_db.item_count; i++) n_cont += g_db.items[i].container >= 0;
+    CHECK(n_cont == 3, "only the three backpacks have a grid (%d)", n_cont);
+    // The root containers: one grid each (no compartments, no dividers); the body none.
+    CHECK(container_find(&g_db, "body") == 0 && g_db.containers[0].equip && g_db.containers[0].comp_count == 0, "body: container 0, equipment only");
+    for (int c = 1; c < g_db.container_count; c++) {
+        const InvContainerDef *cd = &g_db.containers[c];
+        CHECK(cd->comp_count == 1 && cd->comp[0].at_x == 0 && cd->comp[0].at_y == 0, "%s: one grid", cd->id);
+    }
+    // The helmet and the plate carrier.
+    CHECK(item_def(&g_db, I("helmet"))->equip_slot == EQ_HEADWEAR && item_def(&g_db, I("helmet"))->durability > 0, "helmet: headwear with durability");
+    CHECK(item_def(&g_db, I("plate_carrier"))->equip_slot == EQ_BODY_ARMOR && item_def(&g_db, I("plate_carrier"))->plates == 4, "plate carrier: body armor, 4 plates");
+}
 
 static void test_defs(void) {
-    CHECK(container_find(&g_db, "body") == 0, "body is container 0 (a zeroed tree's root)");
     struct { const char *id; int w, h; } exp[] = {
         { "pistol", 2, 1 }, { "smg", 3, 2 }, { "rifle", 4, 2 }, { "lmg", 5, 2 }, { "sniper", 5, 2 }, { "medkit", 2, 2 }, { "bandage", 1, 1 },
         { "frag_grenade", 1, 1 }, { "fuel_can", 2, 3 }, { "phone", 1, 1 }, { "syringe", 1, 1 }, { "dna_sample", 1, 1 }, { "tire_repair", 2, 2 },
@@ -135,23 +201,31 @@ static void test_defs(void) {
     }
     for (int i = 1; i < g_db.item_count; i++) {
         const ItemDef *d = &g_db.items[i];
-        CHECK(d->grid_w >= 1 && d->grid_h >= 1 && d->inv_weight >= 0, "%s has a grid size and a weight", d->id);
-        if (d->kind == ITEM_WEAPON) CHECK(d->equip_slot != EQ_NONE, "weapon %s has an equipment slot", d->id);
+        CHECK(d->grid_w >= 1 && d->grid_h >= 1, "%s has a grid size", d->id);
+        CHECK(d->category < ICAT_COUNT, "%s has a category", d->id);
+        if (d->kind == ITEM_WEAPON) CHECK(d->equip_slot == EQ_PRIMARY || d->equip_slot == EQ_HOLSTER, "weapon %s goes in a weapon slot", d->id);
     }
-    CHECK(item_def(&g_db, I("pistol"))->equip_slot == EQ_HOLSTER && item_def(&g_db, I("knife"))->equip_slot == EQ_MELEE, "pistol -> holster, knife -> melee");
-    CHECK(item_container(&g_db, I("rig_chest")) && item_container(&g_db, I("rig_chest"))->comp_count == 6, "chest rig: six pouches");
+    CHECK(item_def(&g_db, I("pistol"))->equip_slot == EQ_HOLSTER && item_def(&g_db, I("knife"))->equip_slot == EQ_HOLSTER && item_def(&g_db, I("bat"))->equip_slot == EQ_PRIMARY,
+          "pistol, knife -> holster; bat -> a long-gun slot");
+    struct { const char *id; int cat; } cats[] = { { "rifle", ICAT_WEAPONS }, { "ammo_9mm", ICAT_WEAPONS }, { "att_red_dot", ICAT_ATTACHMENTS }, { "medkit", ICAT_MEDICAL },
+                                                   { "armor", ICAT_MEDICAL }, { "frag_grenade", ICAT_THROWABLES }, { "flashlight", ICAT_TOOLS }, { "fuel_can", ICAT_TOOLS },
+                                                   { "key_red", ICAT_TOOLS }, { "syringe", ICAT_TOOLS }, { "scrap", ICAT_MISC } };
+    for (int i = 0; i < (int)ARRAY_COUNT(cats); i++) CHECK(item_def(&g_db, I(cats[i].id))->category == cats[i].cat, "%s is in %s", cats[i].id, inv_category_name(cats[i].cat));
     u8 sup = attach_find(&g_db, "suppressor");
     CHECK(sup && g_db.attachments[sup].grid_dw == 1, "a suppressor adds a column");
 }
 
-// Every item into every container (empty, at 0,0 unrotated and rotated): the rule agrees with
-// an independent reading of the definitions.
+// Every item into every world container and into a fresh body's default bag (empty, at 0,0
+// unrotated and rotated): the rule agrees with an independent reading of the definitions.
 static void test_fit_matrix(void) {
     int pairs = 0;
-    for (int c = 0; c < g_db.container_count; c++) {
-        const InvContainerDef *cd = &g_db.containers[c];
+    for (int c = -1; c < g_db.container_count; c++) {
         InvTree t;
-        inv_tree_init(&t, c);
+        if (c < 0) { inv_tree_init(&t, 0); inv_ensure_pack(&t, &g_db); }
+        else if (g_db.containers[c].equip || !g_db.containers[c].comp_count) continue;
+        else inv_tree_init(&t, c);
+        u16 grid = inv_grid(&t, &g_db);
+        const InvContainerDef *cd = inv_parent_def(&t, &g_db, grid);
         for (int i = 1; i < g_db.item_count; i++) {
             const ItemDef *d = &g_db.items[i];
             for (int rot = 0; rot < 2; rot++) {
@@ -159,22 +233,33 @@ static void test_fit_matrix(void) {
                 memset(&it, 0, sizeof(it));
                 it.s.item = (u16)i;
                 it.s.count = 1;
-                InvPlace p = { 0, 0, 0, 0, (u8)rot };
+                InvPlace p = { grid, 0, 0, 0, (u8)rot };
                 int r = inv_check_place(&t, &g_db, &it, p, 0, NULL);
                 int w = rot ? d->grid_h : d->grid_w, h = rot ? d->grid_w : d->grid_h;
                 bool kind_ok = (!cd->allow_kinds || (cd->allow_kinds & (1u << d->kind))) && !(cd->deny_kinds & (1u << d->kind));
                 for (int k = 0; k < cd->deny_count; k++) kind_ok &= cd->deny_items[k] != i;
                 if (cd->max_w) kind_ok &= DG_MIN(w, h) <= DG_MIN(cd->max_w, cd->max_h) && DG_MAX(w, h) <= DG_MAX(cd->max_w, cd->max_h);
-                bool nest_ok = !(cd->no_containers && d->container >= 0);
                 bool fits = w <= cd->comp[0].w && h <= cd->comp[0].h;
                 bool rot_ok = !rot || d->rotatable;
-                bool expect = kind_ok && nest_ok && fits && rot_ok;
+                bool expect = kind_ok && fits && rot_ok;
                 CHECK((r == IIR_OK) == expect, "%s (rot %d) into %s: got %s", d->id, rot, cd->id, inv_result_text(r));
                 pairs++;
             }
         }
+        // Nothing nests: not into a pack lying in the grid, never into the body's root.
+        if (c < 0) {
+            InvItem it;
+            memset(&it, 0, sizeof(it));
+            it.s.item = I("bandage");
+            it.s.count = 1;
+            InvPlace root = { 0, 0, 0, 0, 0 };
+            CHECK(inv_check_place(&t, &g_db, &it, root, 0, NULL) == IIR_NESTING, "a body has no grid of its own");
+            u16 spare = put(&t, "backpack", 1, 0, 0);
+            InvPlace in_spare = { spare, 0, 0, 0, 0 };
+            CHECK(inv_check_place(&t, &g_db, &it, in_spare, 0, NULL) == IIR_NESTING, "nothing goes into a spare pack");
+        }
     }
-    printf("  fit matrix: %d item x container x rotation cases\n", pairs);
+    printf("  fit matrix: %d item x grid x rotation cases\n", pairs);
 }
 
 static void test_rotation_stack(void) {
@@ -200,13 +285,9 @@ static void test_rotation_stack(void) {
     u16 pu = pa->uid, bu = pb->uid;
     InvIntent rot = intent(II_ROTATE, INV_SIDE_LOOT, pu, 0, 0, 0, 0, 0, 0);
     CHECK(apply(&inv, &crate, rot) == IIR_NO_ROOM, "rotation blocked by the bandage below");
-    InvIntent mv = intent(II_MOVE, INV_SIDE_LOOT, bu, INV_SIDE_LOOT, 0, 0, 3, 2, 0);
-    CHECK(apply(&inv, &crate, mv) == IIR_OK, "bandage moved away");
-    CHECK(apply(&inv, &crate, rot) == IIR_OK, "rotation now fits");
-    CHECK(inv_get(&crate, pu)->flags & INVF_ROT, "rotated");
+    CHECK(apply(&inv, &crate, intent(II_MOVE, INV_SIDE_LOOT, bu, INV_SIDE_LOOT, 0, 0, 3, 2, 0)) == IIR_OK, "bandage moved away");
+    CHECK(apply(&inv, &crate, rot) == IIR_OK && (inv_get(&crate, pu)->flags & INVF_ROT), "rotation now fits");
     // Stacks: merge with a remainder; a split drag.
-    fresh(&inv);
-    give(&inv, "secure_alpha", 1);
     InvTree c2;
     inv_tree_init(&c2, container_find(&g_db, "crate"));
     InvSlot s1 = { I("ammo_9mm"), 50, 0, { 0 }, 0 }, s2 = { I("ammo_9mm"), 30, 0, { 0 }, 0 };
@@ -214,68 +295,134 @@ static void test_rotation_stack(void) {
     x2->x = 2;
     u16 u1 = x1->uid, u2 = x2->uid;
     CHECK(apply(&inv, &c2, intent(II_MOVE, INV_SIDE_LOOT, u2, INV_SIDE_LOOT, 0, 0, 0, 0, 0)) == IIR_OK, "merge onto a stack");
-    CHECK(inv_get(&c2, u1)->s.count == 60 && inv_get(&c2, u2)->s.count == 20, "60 / 20 remainder (%d / %d)", inv_get(&c2, u1)->s.count,
-          inv_get(&c2, u2) ? inv_get(&c2, u2)->s.count : -1);
+    CHECK(inv_get(&c2, u1)->s.count == 60 && inv_get(&c2, u2)->s.count == 20, "60 / 20 remainder");
     InvIntent sp = intent(II_MOVE, INV_SIDE_LOOT, u2, INV_SIDE_LOOT, 0, 0, 5, 3, 0);
     sp.count = 5;
-    CHECK(apply(&inv, &c2, sp) == IIR_OK && inv_get(&c2, u2)->s.count == 15 && inv_count(&inv, I("ammo_9mm")) == 0, "split drag: 5 off");
+    CHECK(apply(&inv, &c2, sp) == IIR_OK && inv_get(&c2, u2)->s.count == 15, "split drag: 5 off");
     int tot[MAX_ITEM_DEFS] = { 0 };
     totals(&c2, tot);
     CHECK(tot[I("ammo_9mm")] == 80, "no rounds created or lost (%d)", tot[I("ammo_9mm")]);
+    // A split into the backpack (II_SPLIT, auto).
+    u16 st = give(&inv, "ammo_rifle", 60);
+    InvIntent sa = intent(II_SPLIT, INV_SIDE_SELF, st, INV_SIDE_SELF, INV_AUTO, 0, 0, 0, 0);
+    sa.count = 25;
+    CHECK(apply(&inv, NULL, sa) == IIR_OK && inv_count(&inv, I("ammo_rifle")) == 60 && inv_get(&inv.t, st)->s.count == 35, "split 25 off into the grid");
+    CHECK(tree_ok(&inv.t, "split") && tree_ok(&c2, "stacks"), "invariants");
 }
 
-static void test_nesting(void) {
+// ------------------------------------------------------------------ backpacks
+
+static void test_backpacks(void) {
     Inventory inv;
     fresh(&inv);
+    int c, r;
+    grid_dims(&inv.t, &c, &r);
+    const InvItem *pk = inv_pack_c(&inv.t);
+    CHECK(pk && pk->s.item == I("sling_bag") && c == 10 && r == 4, "a fresh body wears the default bag: 10x4 (%dx%d)", c, r);
+    // Items in the bag, then a bigger pack picked up: worn over the default bag, the contents in their cells.
+    u16 med = put(&inv.t, "medkit", 1, 8, 2);
+    u16 tape = put(&inv.t, "duct_tape", 1, 3, 1);
+    u16 school = give(&inv, "backpack", 1);
+    pk = inv_pack_c(&inv.t);
+    grid_dims(&inv.t, &c, &r);
+    CHECK(pk && pk->uid == school && c == 10 && r == 6, "the school pack goes on over the default bag (10x6)");
+    CHECK(!inv_find(&inv, I("sling_bag")), "the default bag is gone (not an item to carry)");
+    const InvItem *m = inv_get_c(&inv.t, med), *t = inv_get_c(&inv.t, tape);
+    CHECK(m && m->parent == school && m->x == 8 && m->y == 2 && t && t->parent == school && t->x == 3 && t->y == 1, "the contents keep their cells");
+    // A second bigger pack picked up while one is worn: into the grid as an empty item.
     u16 hike = give(&inv, "backpack_hiking", 1);
-    CHECK(inv_equipped(&inv.t, EQ_BACKPACK) && inv_equipped(&inv.t, EQ_BACKPACK)->uid == hike, "a picked-up backpack is worn");
-    InvTree crate;
-    inv_tree_init(&crate, container_find(&g_db, "crate"));
-    InvSlot sch = { I("backpack"), 1, 0, { 0 }, 0 };
-    u16 school = inv_alloc(&crate, &g_db, &sch)->uid;
-    InvIntent in = intent(II_INSERT, INV_SIDE_LOOT, school, INV_SIDE_SELF, hike, 0, 0, 0, 0);
-    CHECK(apply(&inv, &crate, in) == IIR_OK, "school pack (16) into the hiking pack (30)");
-    InvItem *s = inv_find(&inv, I("backpack"));
-    CHECK(s && s->parent == hike, "inside");
-    // The hiking pack into the school pack inside it: a cycle and too large.
-    in = intent(II_INSERT, INV_SIDE_SELF, hike, INV_SIDE_SELF, s->uid, 0, 0, 0, 0);
-    CHECK(apply(&inv, NULL, in) == IIR_NESTING, "no cycles");
-    // Same size: a second hiking pack into the worn one.
-    InvSlot h2 = { I("backpack_hiking"), 1, 0, { 0 }, 0 };
-    InvItem *hi2 = inv_alloc(&crate, &g_db, &h2);
-    hi2->flags |= INVF_ROT;   // 5x4 in the 6x4 crate
-    hi2->y = 0;
-    u16 hu2 = hi2->uid;
-    in = intent(II_INSERT, INV_SIDE_LOOT, hu2, INV_SIDE_SELF, hike, 0, 0, 0, 0);
-    CHECK(apply(&inv, &crate, in) == IIR_NESTING, "a pack never holds one of its size");
-    // The secure container takes no containers; the ammo case only ammo.
-    u16 sec = give(&inv, "secure_alpha", 1);
-    InvSlot ac = { I("ammo_case"), 1, 0, { 0 }, 0 };
-    u16 acu = inv_alloc(&crate, &g_db, &ac)->uid;
-    CHECK(apply(&inv, &crate, intent(II_INSERT, INV_SIDE_LOOT, acu, INV_SIDE_SELF, sec, 0, 0, 0, 0)) == IIR_NESTING, "no cases in the secure container");
-    CHECK(apply(&inv, &crate, intent(II_INSERT, INV_SIDE_LOOT, acu, INV_SIDE_SELF, hike, 0, 0, 0, 0)) == IIR_OK, "the case into the pack");
-    u16 case_uid = inv_find(&inv, I("ammo_case"))->uid;
-    u16 band = give(&inv, "bandage", 1);
-    CHECK(apply(&inv, NULL, intent(II_INSERT, INV_SIDE_SELF, band, INV_SIDE_SELF, case_uid, 0, 0, 0, 0)) == IIR_FILTER, "no bandage in the ammo case");
-    CHECK(tree_ok(&inv.t, "nesting") && tree_ok(&crate, "nesting crate"), "invariants");
+    const InvItem *hk = inv_get_c(&inv.t, hike);
+    CHECK(hk && hk->parent == school && inv_pack_c(&inv.t)->uid == school, "the hiking pack lands in the grid");
+    // Equip it: the contents move over, the school pack goes where the hiking pack was... inside the
+    // old grid, so into the new one.
+    InvIntent eq = intent(II_EQUIP, INV_SIDE_SELF, hike, INV_SIDE_SELF, 0, 0, 0, 0, 0);
+    eq.aux = 255;
+    CHECK(apply(&inv, NULL, eq) == IIR_OK, "equip the hiking pack");
+    grid_dims(&inv.t, &c, &r);
+    m = inv_get_c(&inv.t, med);
+    const InvItem *sc = inv_get_c(&inv.t, school);
+    CHECK(inv_pack_c(&inv.t)->uid == hike && c == 10 && r == 8, "worn: 10x8");
+    CHECK(m && m->parent == hike && m->x == 8 && m->y == 2, "the medkit kept its cell");
+    CHECK(sc && sc->parent == hike && sc->loc == 0 && inv_child_count(&inv.t, school) == 0, "the school pack is an empty item in the new grid");
+    CHECK(tree_ok(&inv.t, "packs"), "invariants");
+    // The default bag never moves: discard, quick move, a drag to the grid.
+    Inventory d0;
+    fresh(&d0);
+    u16 sling = inv_pack_c(&d0.t)->uid;
+    CHECK(apply(&d0, NULL, intent(II_DISCARD, INV_SIDE_SELF, sling, 0, 0, 0, 0, 0, 0)) == IIR_DEFAULT_PACK, "the default bag can't be discarded");
+    CHECK(apply(&d0, NULL, intent(II_MOVE, INV_SIDE_SELF, sling, INV_SIDE_SELF, sling, 0, 0, 0, 0)) == IIR_DEFAULT_PACK, "nor dragged into its grid");
+    CHECK(inv_add(&d0, &g_db, I("sling_bag"), 1, 0) == 1, "a second default bag isn't taken");
+    // Taking the hiking pack off: the contents go into a new default bag (10x4), refused if they don't fit.
+    Inventory full;
+    fresh(&full);
+    u16 hp = give(&full, "backpack_hiking", 1);
+    for (int y = 0; y < 8; y += 2)
+        for (int x = 0; x < 10; x += 2) put(&full.t, "medkit", 1, x, y);   // 20 medkits: 80 cells
+    InvIntent off = intent(II_MOVE, INV_SIDE_SELF, hp, INV_SIDE_SELF, INV_AUTO, 0, 0, 0, 0);
+    CHECK(apply(&full, NULL, off) == IIR_NO_ROOM, "80 cells don't go into the 40-cell bag: refused");
+    CHECK(inv_pack_c(&full.t)->uid == hp && inv_live_count(&full.t) == 21, "nothing changed");
+    // Half of them: they fit (packed into free cells); the pack ends up in the bag's grid? No room
+    // (4x5 or 5x4 in a full 10x4 bag): refused too. Discard it instead: it drops empty.
+    Inventory half;
+    fresh(&half);
+    u16 hp2 = give(&half, "backpack_hiking", 1);
+    for (int i = 0; i < 6; i++) put(&half.t, "medkit", 1, (i % 5) * 2, 6 - (i / 5) * 2);   // rows 4..7 + row 6..7
+    InvEffect fx;
+    InvCtx ctx = inv_ctx(&half, &g_db, NULL);
+    InvIntent dis = intent(II_DISCARD, INV_SIDE_SELF, hp2, 0, 0, 0, 0, 0, 0);
+    int rr = inv_intent_apply(&ctx, &dis, &fx);
+    CHECK(rr == IIR_OK, "discard the worn hiking pack (%s)", inv_result_text(rr));
+    CHECK(inv_live_count(&fx.dropped) == 1 && inv_alive(&fx.dropped.items[0]) && fx.dropped.items[0].s.item == I("backpack_hiking"), "it drops empty, alone");
+    pk = inv_pack_c(&half.t);
+    CHECK(pk && pk->s.item == I("sling_bag") && inv_count(&half, I("medkit")) == 6, "the six medkits are in a new default bag");
+    CHECK(tree_ok(&half.t, "pack off"), "invariants");
+    // A corpse's full pack can't be taken; once emptied it can, and it goes on over the default bag.
+    Inventory me;
+    fresh(&me);
+    InvTree corpse;
+    inv_tree_init(&corpse, container_find(&g_db, "body"));
+    InvSlot cs = { I("backpack"), 1, 0, { 0 }, 0 };
+    InvItem *cp = inv_alloc(&corpse, &g_db, &cs);
+    cp->loc = INV_LOC_EQUIP + EQ_BACKPACK;
+    u16 cpu = cp->uid;
+    u16 cmed = put(&corpse, "medkit", 1, 0, 0);
+    CHECK(apply(&me, &corpse, intent(II_QUICK_MOVE, INV_SIDE_LOOT, cpu, 0, 0, 0, 0, 0, 0)) == IIR_NOT_EMPTY, "a corpse's full pack: empty it first");
+    CHECK(apply(&me, &corpse, intent(II_QUICK_MOVE, INV_SIDE_LOOT, cmed, 0, 0, 0, 0, 0, 0)) == IIR_OK, "its medkit taken");
+    CHECK(apply(&me, &corpse, intent(II_QUICK_MOVE, INV_SIDE_LOOT, cpu, 0, 0, 0, 0, 0, 0)) == IIR_OK, "the emptied pack taken");
+    pk = inv_pack_c(&me.t);
+    grid_dims(&me.t, &c, &r);
+    CHECK(pk && pk->s.item == I("backpack") && r == 6 && inv_count(&me, I("medkit")) == 1, "worn, the medkit moved into it");
+    CHECK(apply(&me, &corpse, intent(II_MOVE, INV_SIDE_SELF, give(&me, "bandage", 1), INV_SIDE_LOOT, 0, INV_LOC_EQUIP + EQ_BACKPACK, 0, 0, 0)) == IIR_EQUIP, "a corpse is looted, not dressed");
+    CHECK(tree_ok(&me.t, "corpse pack") && tree_ok(&corpse, "corpse"), "invariants");
 }
 
-static void test_quick_order_and_swap(void) {
+// ------------------------------------------------------------------ quick move, swaps, the hands
+
+static void test_quick_and_swap(void) {
     Inventory inv;
     fresh(&inv);
-    give(&inv, "rig_chest", 1);
-    give(&inv, "backpack", 1);
-    u16 tape = give(&inv, "duct_tape", 1);
-    InvItem *t = inv_get(&inv.t, tape);
-    CHECK(t && t->parent == inv_equipped(&inv.t, EQ_RIG)->uid, "pickups go to the rig first (default order)");
-    inv_set_order(inv_order_parse("backpack,rig,pockets"));
+    u16 r1 = give(&inv, "rifle", 1);
+    CHECK(inv_get(&inv.t, r1)->loc == INV_LOC_EQUIP + EQ_PRIMARY, "first rifle: primary");
+    u16 r2 = give(&inv, "smg", 1);
+    CHECK(inv_get(&inv.t, r2)->loc == INV_LOC_EQUIP + EQ_SECONDARY, "second long gun: secondary");
+    u16 r3 = give(&inv, "dmr", 1);
+    CHECK(inv_get(&inv.t, r3)->parent == grid_of(&inv), "third: the grid");
+    u16 kn = give(&inv, "knife", 1);
+    CHECK(inv_get(&inv.t, kn)->loc == INV_LOC_EQUIP + EQ_HOLSTER, "the knife: the holster");
+    InvIntent eq = intent(II_EQUIP, INV_SIDE_SELF, r3, INV_SIDE_SELF, 0, 0, 0, 0, 0);
+    eq.aux = EQ_PRIMARY;
+    CHECK(apply(&inv, NULL, eq) == IIR_OK, "equip swap");
+    CHECK(inv_get(&inv.t, r3)->loc == INV_LOC_EQUIP + EQ_PRIMARY && inv_get(&inv.t, r1)->parent == grid_of(&inv), "the old primary in the grid");
+    eq.aux = EQ_HOLSTER;
+    CHECK(apply(&inv, NULL, eq) == IIR_EQUIP, "a rifle doesn't go in the holster");
+    eq.aux = EQ_BACKPACK;
+    CHECK(apply(&inv, NULL, eq) == IIR_EQUIP, "nor on the back");
+    // Quick move without loot: a slot -> the grid, a grid weapon -> a free slot.
+    CHECK(apply(&inv, NULL, intent(II_QUICK_MOVE, INV_SIDE_SELF, kn, 0, 0, 0, 0, 0, 0)) == IIR_OK && inv_get(&inv.t, kn)->parent == grid_of(&inv), "the knife to the grid");
+    CHECK(apply(&inv, NULL, intent(II_QUICK_MOVE, INV_SIDE_SELF, kn, 0, 0, 0, 0, 0, 0)) == IIR_OK && inv_get(&inv.t, kn)->loc == INV_LOC_EQUIP + EQ_HOLSTER, "and back");
     u16 cloth = give(&inv, "cloth", 1);
-    CHECK(inv_get(&inv.t, cloth)->parent == inv_equipped(&inv.t, EQ_BACKPACK)->uid, "order backpack first");
-    // Quick move from the backpack: the next container in the order that doesn't hold it (rig).
-    CHECK(apply(&inv, NULL, intent(II_QUICK_MOVE, INV_SIDE_SELF, cloth, 0, 0, 0, 0, 0, 0)) == IIR_OK, "quick move");
-    CHECK(inv_get(&inv.t, cloth)->parent == inv_equipped(&inv.t, EQ_RIG)->uid, "into the rig");
-    inv_set_order(inv_order_default());
-    // Quick move with a crate open: across.
+    CHECK(apply(&inv, NULL, intent(II_QUICK_MOVE, INV_SIDE_SELF, cloth, 0, 0, 0, 0, 0, 0)) == IIR_NOOP, "cloth: nowhere to go without loot");
+    // With a crate open: across.
     InvTree crate;
     inv_tree_init(&crate, container_find(&g_db, "crate"));
     CHECK(apply(&inv, &crate, intent(II_QUICK_MOVE, INV_SIDE_SELF, cloth, 0, 0, 0, 0, 0, 0)) == IIR_OK && inv_live_count(&crate) == 1, "across to the crate");
@@ -284,83 +431,74 @@ static void test_quick_order_and_swap(void) {
     inv_tree_init(&c2, container_find(&g_db, "crate_small"));
     InvSlot ps = { I("pistol"), 1, 0, { 0 }, 0 }, bs = { I("bandage"), 1, 0, { 0 }, 0 };
     InvItem *pp = inv_alloc(&c2, &g_db, &ps), *bb = inv_alloc(&c2, &g_db, &bs);
-    pp->x = 0; pp->y = 0; bb->x = 3; bb->y = 2;
+    pp->x = 0; pp->y = 0; bb->x = 2; bb->y = 1;
     u16 pu = pp->uid, bu = bb->uid;
-    // Pistol onto the bandage's cell rotated: 1x2 at (3,1)? The target is the bandage's origin (3,2): a
-    // 2x1 can't start at x 3 of a 4-wide grid -> rotated tried -> 1x2 at (3,2) doesn't fit either.
-    CHECK(apply(&inv, &c2, intent(II_MOVE, INV_SIDE_LOOT, pu, INV_SIDE_LOOT, 0, 0, 3, 2, 0)) == IIR_NO_ROOM, "no room to swap there");
-    bb = inv_get(&c2, bu);
-    bb->x = 2; bb->y = 1;
     CHECK(apply(&inv, &c2, intent(II_MOVE, INV_SIDE_LOOT, pu, INV_SIDE_LOOT, 0, 0, 2, 1, 0)) == IIR_OK, "swap");
     CHECK(inv_get(&c2, pu)->x == 2 && inv_get(&c2, pu)->y == 1 && inv_get(&c2, bu)->x == 0 && inv_get(&c2, bu)->y == 0, "swapped places");
-    // Equip swap: a second rifle onto the primary slot.
-    fresh(&inv);
-    give(&inv, "backpack_hiking", 1);
-    u16 r1 = give(&inv, "rifle", 1);
-    CHECK(inv_get(&inv.t, r1)->loc == INV_LOC_EQUIP + EQ_PRIMARY, "first rifle: primary");
-    u16 r2 = give(&inv, "smg", 1);
-    CHECK(inv_get(&inv.t, r2)->loc == INV_LOC_EQUIP + EQ_SECONDARY, "second long gun: secondary");
-    u16 r3 = give(&inv, "dmr", 1);
-    CHECK(inv_get(&inv.t, r3)->parent == inv_equipped(&inv.t, EQ_BACKPACK)->uid, "third: the backpack");
-    InvIntent eq = intent(II_EQUIP, INV_SIDE_SELF, r3, INV_SIDE_SELF, 0, 0, 0, 0, 0);
-    eq.aux = EQ_PRIMARY;
-    CHECK(apply(&inv, NULL, eq) == IIR_OK, "equip swap");
-    CHECK(inv_get(&inv.t, r3)->loc == INV_LOC_EQUIP + EQ_PRIMARY && inv_get(&inv.t, r1)->parent == inv_equipped(&inv.t, EQ_BACKPACK)->uid, "the old primary in the pack");
-    // Hotbar binds follow the instance through the move.
-    CHECK(inv_hot_find(&inv, I("rifle")) >= 0, "rifle bound to the hotbar");
-    eq.aux = EQ_HOLSTER;
-    CHECK(apply(&inv, NULL, eq) == IIR_EQUIP, "a rifle doesn't go in the holster");
-    CHECK(tree_ok(&inv.t, "swap"), "invariants");
+    CHECK(tree_ok(&inv.t, "swap") && tree_ok(&c2, "swap crate"), "invariants");
 }
+
+static void test_hands(void) {
+    Inventory inv;
+    fresh(&inv);
+    u16 rifle = give(&inv, "rifle", 1);
+    u16 med = give(&inv, "medkit", 2);
+    u16 fl = give(&inv, "flashlight", 1);
+    CHECK(inv_sel_c(&inv, 0)->item == I("rifle") && inv_sel_c(&inv, INV_SEL_HANDS)->item == 0, "selection 1 is the primary; the hands are empty");
+    CHECK(apply(&inv, NULL, intent(II_HOLD, INV_SIDE_SELF, rifle, 0, 0, 0, 0, 0, 0)) == IIR_NOT_USABLE, "weapons are drawn from their slots, not held");
+    CHECK(apply(&inv, NULL, intent(II_HOLD, INV_SIDE_SELF, med, 0, 0, 0, 0, 0, 0)) == IIR_OK && inv.hands == med, "the medkit in the hands");
+    CHECK(inv_sel_c(&inv, INV_SEL_HANDS)->item == I("medkit") && inv_sel_find(&inv, I("medkit")) == INV_SEL_HANDS, "selection 4 reads it");
+    // It stays in the grid: moving it keeps it in the hands.
+    const InvItem *m = inv_get_c(&inv.t, med);
+    CHECK(m && m->parent == grid_of(&inv), "a held item keeps its cell");
+    CHECK(apply(&inv, NULL, intent(II_MOVE, INV_SIDE_SELF, med, INV_SIDE_SELF, grid_of(&inv), 0, 6, 2, 0)) == IIR_OK && inv.hands == med, "moved, still held");
+    CHECK(apply(&inv, NULL, intent(II_HOLD, INV_SIDE_SELF, fl, 0, 0, 0, 0, 0, 0)) == IIR_OK && inv.hands == fl, "the flashlight (a hand tool) instead");
+    // Leaving the tree clears the hands.
+    CHECK(apply(&inv, NULL, intent(II_DISCARD, INV_SIDE_SELF, fl, 0, 0, 0, 0, 0, 0)) == IIR_OK && inv.hands == 0, "discarded: the hands are empty");
+    CHECK(apply(&inv, NULL, intent(II_HOLD, INV_SIDE_SELF, 0, 0, 0, 0, 0, 0, 0)) == IIR_NOOP, "put away with nothing held");
+    // Removing by definition takes the stacks not in the hands first.
+    u16 b1 = give(&inv, "bandage", 5);
+    apply(&inv, NULL, intent(II_HOLD, INV_SIDE_SELF, b1, 0, 0, 0, 0, 0, 0));
+    u16 b2 = put(&inv.t, "bandage", 2, 9, 3);
+    CHECK(inv_remove(&inv, I("bandage"), 2) == 2 && !inv_get(&inv.t, b2) && inv_get(&inv.t, b1)->s.count == 5, "the held stack is used last");
+}
+
+// ------------------------------------------------------------------ attachments
 
 static void test_attachments_fold(void) {
     Inventory inv;
-    fresh(&inv);
-    u16 pack = give(&inv, "backpack", 1);   // 4x4
-    InvTree crate;
-    inv_tree_init(&crate, container_find(&g_db, "crate"));
-    InvSlot rs = { I("rifle"), 1, 30, { 0 }, 0 };
-    InvItem *r = inv_alloc(&crate, &g_db, &rs);
-    u16 ru = r->uid;
-    CHECK(apply(&inv, &crate, intent(II_MOVE, INV_SIDE_LOOT, ru, INV_SIDE_SELF, pack, 0, 0, 0, 0)) == IIR_OK, "bare rifle (4x2) into the 4x4 pack");
-    InvItem *rr = inv_find(&inv, I("rifle"));
-    u16 sup = item_for_attachment(&g_db, attach_find(&g_db, "suppressor"));
-    InvSlot ss = { sup, 1, 0, { 0 }, 0 };
-    u16 su = inv_alloc(&crate, &g_db, &ss)->uid;
-    InvIntent m = intent(II_MOUNT, INV_SIDE_LOOT, su, INV_SIDE_SELF, rr->uid, 0, 0, 0, 0);
-    CHECK(apply(&inv, &crate, m) == IIR_NO_ROOM, "suppressed (5x2) no longer fits the pack: rejected");
+    fresh(&inv);   // the 10x4 default bag
+    u16 rifle = put(&inv.t, "rifle", 1, 6, 0);   // cols 6..9: no room to grow right
+    u16 sup = give(&inv, "att_suppressor", 1);
+    InvIntent m = intent(II_MOUNT, INV_SIDE_SELF, sup, INV_SIDE_SELF, rifle, 0, 0, 0, 0);
+    CHECK(apply(&inv, NULL, m) == IIR_NO_ROOM, "suppressed (5x2) no longer fits at column 6: rejected");
     int w, h;
-    inv_item_size(&g_db, rr, &w, &h);
-    CHECK(w == 4 && h == 2, "unchanged after the rejection");
-    // In the hiking pack it fits.
-    fresh(&inv);
-    u16 hp = give(&inv, "backpack_hiking", 1);
-    CHECK(apply(&inv, &crate, intent(II_MOVE, INV_SIDE_LOOT, su, INV_SIDE_SELF, hp, 0, 4, 5, 0)) == IIR_OK, "suppressor into the pack");
-    InvSlot r2 = { I("rifle"), 1, 30, { 0 }, 0 };
-    u16 r2u = inv_alloc(&crate, &g_db, &r2)->uid;
-    CHECK(apply(&inv, &crate, intent(II_MOVE, INV_SIDE_LOOT, r2u, INV_SIDE_SELF, hp, 0, 0, 0, 0)) == IIR_OK, "rifle into the pack");
-    rr = inv_find(&inv, I("rifle"));
-    CHECK(apply(&inv, NULL, intent(II_MOUNT, INV_SIDE_SELF, inv_find(&inv, sup)->uid, INV_SIDE_SELF, rr->uid, 0, 0, 0, 0)) == IIR_OK, "mounted");
-    rr = inv_find(&inv, I("rifle"));
-    inv_item_size(&g_db, rr, &w, &h);
-    CHECK(w == 5 && h == 2 && !inv_find(&inv, sup), "5x2 with the suppressor; the item consumed");
-    InvIntent um = intent(II_UNMOUNT, INV_SIDE_SELF, rr->uid, INV_SIDE_SELF, INV_AUTO, 0, 0, 0, 0);
+    inv_item_size(&g_db, inv_get(&inv.t, rifle), &w, &h);
+    CHECK(w == 4 && h == 2 && inv_get(&inv.t, sup), "unchanged after the rejection");
+    CHECK(apply(&inv, NULL, intent(II_MOVE, INV_SIDE_SELF, rifle, INV_SIDE_SELF, grid_of(&inv), 0, 0, 2, 0)) == IIR_OK, "rifle moved to the left");
+    CHECK(apply(&inv, NULL, m) == IIR_OK, "now it mounts");
+    inv_item_size(&g_db, inv_get(&inv.t, rifle), &w, &h);
+    CHECK(w == 5 && h == 2 && !inv_find(&inv, I("att_suppressor")), "5x2 with the suppressor; the item consumed");
+    InvIntent um = intent(II_UNMOUNT, INV_SIDE_SELF, rifle, INV_SIDE_SELF, INV_AUTO, 0, 0, 0, 0);
     um.aux = ATT_MUZZLE;
-    CHECK(apply(&inv, NULL, um) == IIR_OK && inv_find(&inv, sup), "unmounted back into the pack");
-    rr = inv_find(&inv, I("rifle"));
-    inv_item_size(&g_db, rr, &w, &h);
+    CHECK(apply(&inv, NULL, um) == IIR_OK && inv_find(&inv, I("att_suppressor")), "unmounted back into the grid");
+    inv_item_size(&g_db, inv_get(&inv.t, rifle), &w, &h);
     CHECK(w == 4, "4x2 again");
-    CHECK(apply(&inv, NULL, intent(II_FOLD, INV_SIDE_SELF, rr->uid, 0, 0, 0, 0, 0, 0)) == IIR_OK, "fold");
-    inv_item_size(&g_db, inv_find(&inv, I("rifle")), &w, &h);
+    CHECK(apply(&inv, NULL, intent(II_FOLD, INV_SIDE_SELF, rifle, 0, 0, 0, 0, 0, 0)) == IIR_OK, "fold");
+    inv_item_size(&g_db, inv_get(&inv.t, rifle), &w, &h);
     CHECK(w == 3, "folded 3x2");
-    CHECK(apply(&inv, NULL, intent(II_UNLOAD, INV_SIDE_SELF, rr->uid, 0, 0, 0, 0, 0, 0)) == IIR_OK && inv_count(&inv, I("ammo_rifle")) == 30, "unloaded 30 rounds");
+    inv_get(&inv.t, rifle)->s.ammo = 30;
+    CHECK(apply(&inv, NULL, intent(II_UNLOAD, INV_SIDE_SELF, rifle, 0, 0, 0, 0, 0, 0)) == IIR_OK && inv_count(&inv, I("ammo_rifle")) == 30, "unloaded 30 rounds");
+    // An equipped weapon's attachments (the slot column's chips): mounting doesn't depend on room.
+    InvIntent eq = intent(II_EQUIP, INV_SIDE_SELF, rifle, INV_SIDE_SELF, 0, 0, 0, 0, 0);
+    eq.aux = EQ_PRIMARY;
+    CHECK(apply(&inv, NULL, eq) == IIR_OK && inv_get(&inv.t, rifle)->loc == INV_LOC_EQUIP + EQ_PRIMARY, "the rifle worn");
+    CHECK(apply(&inv, NULL, intent(II_MOUNT, INV_SIDE_SELF, inv_find(&inv, I("att_suppressor"))->uid, INV_SIDE_SELF, rifle, 0, 0, 0, 0)) == IIR_OK, "a suppressor onto the worn rifle");
     CHECK(tree_ok(&inv.t, "attachments"), "invariants");
 }
 
 // Every weapon x attachment: compatibility agrees with the definitions, and a mount / unmount
-// round trip in a tree works (the weapon in a slot, the attachment in a 30-cell pack). Swapping
-// optics brings the old one back where the new one lay; removing an extended magazine returns
-// the extra rounds as a stack.
+// round trip works (the weapon in a slot, the attachment in the grid).
 static void test_attachment_matrix(void) {
     int combos = 0, mismatch = 0;
     for (int w = 1; w < g_db.item_count; w++) {
@@ -385,8 +523,7 @@ static void test_attachment_matrix(void) {
             fresh(&inv);
             give(&inv, "backpack_hiking", 1);
             InvItem *wi = inv_alloc(&inv.t, &g_db, &ws);
-            wi->loc = INV_LOC_EQUIP + (wd->hold_style[0] && !strcmp(wd->hold_style, "pistol") ? EQ_HOLSTER : EQ_PRIMARY);
-            if (!inv_equip_accepts(wi->loc - INV_LOC_EQUIP, item_def(&g_db, (u16)w))) wi->loc = INV_LOC_EQUIP + item_def(&g_db, (u16)w)->equip_slot;
+            wi->loc = (u8)(INV_LOC_EQUIP + (item_def(&g_db, (u16)w)->equip_slot == EQ_HOLSTER ? EQ_HOLSTER : EQ_PRIMARY));
             u16 wu = wi->uid;
             u16 au = give(&inv, item_def(&g_db, ai)->id, 1);
             if (apply(&inv, NULL, intent(II_MOUNT, INV_SIDE_SELF, au, INV_SIDE_SELF, wu, 0, 0, 0, 0)) != IIR_OK || inv_get(&inv.t, wu)->s.att[ad->slot] != a ||
@@ -408,16 +545,11 @@ static void test_attachment_matrix(void) {
     InvItem *ri = inv_alloc(&inv.t, &g_db, &rs);
     ri->loc = INV_LOC_EQUIP + EQ_PRIMARY;
     u16 ru = ri->uid;
-    InvSlot ss = { item_for_attachment(&g_db, s4), 1, 0, { 0 }, 0 };
-    InvItem *si = inv_alloc(&inv.t, &g_db, &ss);
-    si->parent = pack;
-    si->x = 3;
-    si->y = 4;
-    CHECK(apply(&inv, NULL, intent(II_MOUNT, INV_SIDE_SELF, si->uid, INV_SIDE_SELF, ru, 0, 0, 0, 0)) == IIR_OK && inv_get(&inv.t, ru)->s.att[ATT_OPTIC] == s4,
+    u16 su = put(&inv.t, item_def(&g_db, item_for_attachment(&g_db, s4))->id, 1, 3, 4);
+    CHECK(apply(&inv, NULL, intent(II_MOUNT, INV_SIDE_SELF, su, INV_SIDE_SELF, ru, 0, 0, 0, 0)) == IIR_OK && inv_get(&inv.t, ru)->s.att[ATT_OPTIC] == s4,
           "scope mounted over the red dot");
     InvItem *back = inv_find(&inv, item_for_attachment(&g_db, rd));
     CHECK(back && back->parent == pack && back->x == 3 && back->y == 4, "the red dot comes back where the scope lay");
-    // Not a weapon / melee.
     u16 med = give(&inv, "medkit", 1);
     CHECK(apply(&inv, NULL, intent(II_MOUNT, INV_SIDE_SELF, back->uid, INV_SIDE_SELF, med, 0, 0, 0, 0)) == IIR_NOT_WEAPON, "onto a medkit: not a weapon");
     u16 knife = give(&inv, "knife", 1);
@@ -426,7 +558,6 @@ static void test_attachment_matrix(void) {
     u8 em = attach_find(&g_db, "extended_mag");
     if (em) {
         fresh(&inv);
-        give(&inv, "backpack_hiking", 1);
         InvSlot r2 = { I("rifle"), 1, 0, { 0 }, 0 };
         r2.att[ATT_MAGAZINE] = em;
         WeaponDef eff;
@@ -444,64 +575,65 @@ static void test_attachment_matrix(void) {
     }
 }
 
-static void test_sort(void) {
+// ------------------------------------------------------------------ compact, death, wire
+
+static void test_compact(void) {
     Inventory inv;
     fresh(&inv);
-    u16 pack = give(&inv, "backpack_hiking", 1);
-    InvTree crate;
-    inv_tree_init(&crate, container_find(&g_db, "crate"));
-    const char *ids[] = { "bandage", "rifle", "ammo_9mm", "medkit", "battery", "smg", "cloth" };
-    for (int i = 0; i < (int)ARRAY_COUNT(ids); i++) {
-        InvSlot s = { I(ids[i]), 1, 0, { 0 }, 0 };
-        inv_give_root(&crate, &g_db, &s);
-    }
-    for (int i = 0; i < INV_MAX_ITEMS; i++) {
-        InvItem *it = &crate.items[i];
-        if (!inv_alive(it)) continue;
-        apply(&inv, &crate, intent(II_INSERT, INV_SIDE_LOOT, it->uid, INV_SIDE_SELF, pack, 0, 0, 0, 0));
-    }
+    give(&inv, "backpack", 1);   // 10x6
+    put(&inv.t, "bandage", 1, 9, 5);
+    put(&inv.t, "rifle", 1, 5, 3);
+    put(&inv.t, "battery", 1, 0, 5);
+    put(&inv.t, "medkit", 1, 2, 2);
     int before[MAX_ITEM_DEFS] = { 0 }, after[MAX_ITEM_DEFS] = { 0 };
     totals(&inv.t, before);
-    InvIntent so = intent(II_SORT, 0, 0, INV_SIDE_SELF, pack, 0, 0, 0, 0);
-    so.aux = 2;   // size
-    CHECK(apply(&inv, NULL, so) == IIR_OK, "sort the pack by size");
+    int c0, r0;
+    grid_dims(&inv.t, &c0, &r0);
+    InvIntent co = intent(II_COMPACT, 0, 0, INV_SIDE_SELF, 0, 0, 0, 0, 0);
+    CHECK(apply(&inv, NULL, co) == IIR_OK, "compact");
     totals(&inv.t, after);
-    CHECK(!memcmp(before, after, sizeof(before)) && tree_ok(&inv.t, "sort"), "sorting keeps every item and the invariants");
-    InvItem *top = inv_at(&inv.t, &g_db, pack, 0, 0, 0);
-    int w, h;
-    if (top) inv_item_size(&g_db, top, &w, &h);
-    CHECK(top && w * h == 8, "the largest item (a 4x2 rifle) first (%s)", top ? item_def(&g_db, top->s.item)->id : "none");
-    so.aux = 0;
-    CHECK(apply(&inv, NULL, so) == IIR_OK && tree_ok(&inv.t, "sort type"), "sort by type");
+    int c1, r1;
+    grid_dims(&inv.t, &c1, &r1);
+    CHECK(!memcmp(before, after, sizeof(before)) && tree_ok(&inv.t, "compact") && c0 == c1 && r0 == r1, "compacting keeps every item, the invariants and the grid size");
+    InvItem *top = inv_at(&inv.t, &g_db, grid_of(&inv), 0, 0, 0);
+    CHECK(top && top->s.item == I("rifle"), "the largest item (the rifle) first (%s)", top ? item_def(&g_db, top->s.item)->id : "none");
+    CHECK(apply(&inv, NULL, co) == IIR_NOOP, "compacting a compact grid does nothing");
 }
 
 static void test_death_corpse(void) {
     Inventory inv;
     fresh(&inv);
-    give(&inv, "rig_chest", 1);
     give(&inv, "backpack_hiking", 1);
     give(&inv, "rifle", 1);
     give(&inv, "pistol", 1);
     give(&inv, "helmet", 1);
-    u16 sec = give(&inv, "secure_alpha", 1);
-    u16 dna = give(&inv, "dna_sample", 1);
+    give(&inv, "plate_carrier", 1);
+    u16 med = give(&inv, "medkit", 2);
     give(&inv, "ammo_rifle", 120);
-    CHECK(apply(&inv, NULL, intent(II_INSERT, INV_SIDE_SELF, dna, INV_SIDE_SELF, sec, 0, 0, 0, 0)) == IIR_OK, "DNA into the secure container");
+    apply(&inv, NULL, intent(II_HOLD, INV_SIDE_SELF, med, 0, 0, 0, 0, 0, 0));
     int before[MAX_ITEM_DEFS] = { 0 }, after[MAX_ITEM_DEFS] = { 0 };
     totals(&inv.t, before);
     InvTree corpse;
     inv_tree_init(&corpse, container_find(&g_db, "body"));
-    inv_strip_to_corpse(&inv.t, inv.quick, INV_HOTBAR, &corpse, &g_db);
-    CHECK(inv_count(&inv, I("dna_sample")) == 1 && inv_equipped(&inv.t, EQ_SECURE), "the secure container and its contents survive");
-    CHECK(inv_live_count(&inv.t) == 2, "nothing else stays on the body (%d)", inv_live_count(&inv.t));
-    CHECK(inv_equipped(&corpse, EQ_PRIMARY) && inv_equipped(&corpse, EQ_HOLSTER) && inv_equipped(&corpse, EQ_HEADWEAR) && inv_equipped(&corpse, EQ_RIG),
-          "the corpse shows the equipment in its slots");
-    CHECK(inv_hot_c(&inv, 0)->item == 0, "binds into what left are cleared");
+    inv_strip_to_corpse(&inv.t, &inv.hands, &corpse, &g_db);
+    const InvItem *pk = inv_pack_c(&inv.t);
+    CHECK(pk && pk->s.item == I("sling_bag") && inv_live_count(&inv.t) == 1, "the body keeps only a fresh default bag (%d)", inv_live_count(&inv.t));
+    CHECK(inv.hands == 0, "nothing in the hands");
+    CHECK(inv_equipped(&corpse, EQ_PRIMARY) && inv_equipped(&corpse, EQ_HOLSTER) && inv_equipped(&corpse, EQ_HEADWEAR) && inv_equipped(&corpse, EQ_BODY_ARMOR) &&
+          inv_equipped(&corpse, EQ_BACKPACK), "the corpse wears it all");
     totals(&inv.t, after);
     totals(&corpse, after);
-    bool same = !memcmp(before, after, sizeof(before));
-    CHECK(same, "body + corpse = what was carried");
+    CHECK(!memcmp(before, after, sizeof(before)), "body + corpse = what was carried");
     CHECK(tree_ok(&corpse, "corpse") && tree_ok(&inv.t, "body after death"), "invariants");
+    // Take all from the corpse: the pack's contents, the weapons and gear, then the emptied pack.
+    Inventory looter;
+    fresh(&looter);
+    InvIntent ta = intent(II_TAKE_ALL, INV_SIDE_LOOT, 0, INV_SIDE_LOOT, 0, 0, 0, 0, 0);
+    CHECK(apply(&looter, &corpse, ta) == IIR_OK, "take all");
+    pk = inv_pack_c(&looter.t);
+    CHECK(pk && pk->s.item == I("backpack_hiking"), "the corpse's pack, emptied, went on over the default bag");
+    CHECK(inv_count(&looter, I("medkit")) == 2 && inv_count(&looter, I("ammo_rifle")) == 120 && inv_equipped(&looter.t, EQ_PRIMARY), "its contents and weapons came over");
+    CHECK(tree_ok(&looter.t, "looter") && tree_ok(&corpse, "looted corpse"), "invariants");
 }
 
 static void test_wire(void) {
@@ -535,6 +667,65 @@ static void test_wire(void) {
     CHECK(inv_wire_read_tree(&back, buf, 3) == 0, "a truncated tree is rejected");
 }
 
+// ------------------------------------------------------------------ format-1 saves
+
+static void test_migrate(void) {
+    // A format-1 body: hiking pack worn (old slot 10) holding a medkit at (1,1); a chest rig (9) with
+    // rounds; the secure container (12) with a DNA sample; a bat in the old melee slot (3); a helmet
+    // (4); a rifle (0); a balaclava (6, deleted); a backpack in the old backpack's grid.
+    InvV1Entry e[16];
+    int n = 0;
+    memset(e, 0, sizeof(e));
+    // old item indices: 1-based in the old items.json order (inv_migrate.c)
+    static const char *order[] = { "ammo_9mm", "ammo_rifle", "ammo_shell", "ammo_bolt", "ammo_762", "medkit", "bandage", "armor", "painkillers", "frag_grenade",
+        "flare", "molotov", "canned_food", "water_bottle", "pistol", "rifle", "smg", "lmg", "dmr", "sniper", "shotgun", "crossbow",
+        "bat", "knife", "key_red", "key_blue", "scrap", "battery", "cloth", "duct_tape", "mech_parts", "seeds", "syringe",
+        "dna_sample", "fishing_kit", "phone", "fuel_can", "tire_repair", "spare_tire", "energy_bar", "backpack", "backpack_hiking",
+        "sling_bag", "rig_chest", "plate_carrier", "helmet", "headset", "balaclava", "glasses", "armband", "secure_alpha",
+        "ammo_case", "med_case", "flashlight" };
+    struct { const char *id; int count, uid, parent, loc, x, y; } spec[] = {
+        { "backpack_hiking", 1, 1, 0, 64 + 10, 0, 0 },
+        { "medkit", 2, 2, 1, 0, 1, 1 },
+        { "rig_chest", 1, 3, 0, 64 + 9, 0, 0 },
+        { "ammo_rifle", 60, 4, 3, 0, 0, 0 },
+        { "secure_alpha", 1, 5, 0, 64 + 12, 0, 0 },
+        { "dna_sample", 1, 6, 5, 0, 0, 0 },
+        { "bat", 1, 7, 0, 64 + 3, 0, 0 },
+        { "helmet", 1, 8, 0, 64 + 4, 0, 0 },
+        { "rifle", 1, 9, 0, 64 + 0, 0, 0 },
+        { "balaclava", 1, 10, 0, 64 + 6, 0, 0 },
+        { "backpack", 1, 11, 1, 0, 5, 0 },
+        { "scrap", 3, 12, 0, 1, 0, 0 },   // a pocket
+    };
+    for (int i = 0; i < (int)ARRAY_COUNT(spec); i++) {
+        int oi = 0;
+        for (int k = 0; k < (int)ARRAY_COUNT(order); k++) if (!strcmp(order[k], spec[i].id)) oi = k + 1;
+        e[n++] = (InvV1Entry){ oi, spec[i].count, 0, spec[i].uid, spec[i].parent, spec[i].loc, spec[i].x, spec[i].y, 0, 0, { 0 } };
+    }
+    CHECK(inv_v1_item(&g_db, 6) == I("medkit") && inv_v1_item(&g_db, 48) == 0, "format-1 indices: medkit kept, balaclava deleted");
+    InvTree t;
+    int dropped = inv_migrate_v1(&t, &g_db, 0, e, n);
+    Inventory inv;
+    memset(&inv, 0, sizeof(inv));
+    inv.t = t;
+    const InvItem *pk = inv_pack_c(&t);
+    CHECK(pk && pk->s.item == I("backpack_hiking"), "the worn hiking pack stays worn");
+    const InvItem *m = inv_find(&inv, I("medkit"));
+    CHECK(m && m->parent == pk->uid && m->x == 1 && m->y == 1, "its medkit keeps its cell");
+    CHECK(inv_equipped(&t, EQ_PRIMARY) && inv_equipped(&t, EQ_PRIMARY)->s.item == I("rifle"), "rifle: primary");
+    CHECK(inv_equipped(&t, EQ_SECONDARY) && inv_equipped(&t, EQ_SECONDARY)->s.item == I("bat"), "the bat from the melee slot: secondary");
+    CHECK(inv_equipped(&t, EQ_HEADWEAR) && inv_equipped(&t, EQ_HEADWEAR)->s.item == I("helmet"), "helmet: headwear");
+    CHECK(inv_count(&inv, I("ammo_rifle")) == 60 && inv_count(&inv, I("dna_sample")) == 1 && inv_count(&inv, I("scrap")) == 3, "the rig's, secure container's and pockets' contents moved into the grid");
+    CHECK(inv_count(&inv, I("backpack")) == 1, "the spare backpack is an item in the grid");
+    CHECK(dropped == 3, "the rig, the secure container and the balaclava were dropped (%d)", dropped);
+    CHECK(tree_ok(&t, "migrated"), "invariants");
+    // A format-1 cabinet (three 4x2 drawers): everything into the one 4x6 grid.
+    InvV1Entry ce[3] = { { 15, 1, 0, 1, 0, 0, 0, 0, 0, 0, { 0 } }, { 6, 1, 0, 2, 0, 1, 0, 0, 0, 0, { 0 } }, { 7, 3, 0, 3, 0, 2, 2, 0, 0, 0, { 0 } } };
+    InvTree cab;
+    int cd = inv_migrate_v1(&cab, &g_db, container_find(&g_db, "cabinet"), ce, 3);
+    CHECK(cd == 0 && inv_live_count(&cab) == 3 && tree_ok(&cab, "cabinet"), "a format-1 cabinet: all three drawers' items in the one grid");
+}
+
 // ------------------------------------------------------------------ fuzz
 
 static u16 pick_uid(const InvTree *t) {
@@ -552,12 +743,13 @@ static InvIntent random_intent(const Inventory *inv, const InvTree *loot) {
     in.dst_side = (u8)(rnd() % 2);
     in.src = pick_uid(in.src_side ? loot : &inv->t);
     int r = rnd() % 4;
-    in.dst = r == 0 ? 0 : r == 1 ? INV_AUTO : pick_uid(in.dst_side ? loot : &inv->t);
-    in.loc = (u8)(rnd() % 3 == 0 ? INV_LOC_EQUIP + rnd() % EQ_COUNT : rnd() % 6);
-    in.x = (u8)(rnd() % 7);
-    in.y = (u8)(rnd() % 7);
+    const InvTree *dt = in.dst_side ? loot : &inv->t;
+    in.dst = r == 0 ? inv_grid(dt, &g_db) : r == 1 ? INV_AUTO : pick_uid(dt);
+    in.loc = (u8)(rnd() % 3 == 0 ? INV_LOC_EQUIP + rnd() % EQ_COUNT : rnd() % 2);
+    in.x = (u8)(rnd() % 10);
+    in.y = (u8)(rnd() % 8);
     in.rot = (u8)(rnd() % 2);
-    in.aux = (u8)(rnd() % 3 == 0 ? 255 : rnd() % 13);
+    in.aux = (u8)(rnd() % 3 == 0 ? 255 : rnd() % 7);
     in.count = (u16)(rnd() % 3 ? 0 : rnd() % 40);
     if (rnd() % 64 == 0) in.type = (u8)(rnd() % 255);   // garbage
     return in;
@@ -568,10 +760,9 @@ static void test_fuzz(void) {
     fresh(&inv);
     InvTree crate;
     inv_tree_init(&crate, container_find(&g_db, "crate"));
-    const char *loadout[] = { "rig_chest", "backpack_hiking", "rifle", "pistol", "helmet", "secure_alpha", "medkit", "ammo_rifle", "ammo_9mm", "bandage", "backpack",
-                              "ammo_case", "frag_grenade", "fuel_can", "knife" };
+    const char *loadout[] = { "rifle", "pistol", "helmet", "plate_carrier", "medkit", "ammo_rifle", "ammo_9mm", "bandage", "frag_grenade", "fuel_can", "knife", "flashlight" };
     for (int i = 0; i < (int)ARRAY_COUNT(loadout); i++) inv_add(&inv, &g_db, I(loadout[i]), 3, 10);
-    const char *loot[] = { "smg", "sling_bag", "med_case", "ammo_shell", "water_bottle", "scope_4x", "att_suppressor", "att_red_dot", "helmet", "dmr" };
+    const char *loot[] = { "smg", "backpack", "backpack_hiking", "ammo_shell", "water_bottle", "att_scope_4x", "att_suppressor", "att_red_dot", "helmet", "dmr" };
     for (int i = 0; i < (int)ARRAY_COUNT(loot); i++) {
         u16 it = item_find(&g_db, loot[i]);
         if (!it) continue;
@@ -582,9 +773,15 @@ static void test_fuzz(void) {
     int tot0[MAX_ITEM_DEFS] = { 0 };
     totals(&inv.t, tot0);
     totals(&crate, tot0);
-    int dropped[MAX_ITEM_DEFS] = { 0 }, used[MAX_ITEM_DEFS] = { 0 };
-    int ok_n = 0, bad = 0, iters = 20000;
+    int dropped[MAX_ITEM_DEFS] = { 0 };
+    int ok_n = 0, bad = 0, iters = 20000, swaps = 0;
+    int crate_c, crate_r;
+    grid_dims(&crate, &crate_c, &crate_r);
     for (int k = 0; k < iters && !bad; k++) {
+        const InvItem *pk = inv_pack_c(&inv.t);
+        u16 pack_item = pk ? pk->s.item : 0, pack_uid = pk ? pk->uid : 0;
+        int c0, r0;
+        grid_dims(&inv.t, &c0, &r0);
         InvIntent in = random_intent(&inv, &crate);
         InvCtx c = inv_ctx(&inv, &g_db, &crate);
         InvEffect fx;
@@ -592,12 +789,24 @@ static void test_fuzz(void) {
         if (r == IIR_OK) {
             ok_n++;
             for (int d = 0; d < INV_MAX_ITEMS; d++)
-                if (inv_alive(&fx.dropped.items[d])) dropped[fx.dropped.items[d].s.item] += fx.dropped.items[d].s.count;
-            if (fx.used_item) used[fx.used_item]++;
+                if (inv_alive(&fx.dropped.items[d]) && fx.dropped.items[d].s.item != g_db.default_backpack) dropped[fx.dropped.items[d].s.item] += fx.dropped.items[d].s.count;
         }
         if (!tree_ok(&inv.t, "fuzz self") || !tree_ok(&crate, "fuzz crate")) { bad = 1; printf("  after %s (#%d)\n", inv_intent_name(in.type), k); }
-        for (int q = 0; q < INV_HOTBAR; q++)
-            if (inv.quick[q] && !inv_get(&inv.t, inv.quick[q])) { bad = 1; printf("  stale bind after %s\n", inv_intent_name(in.type)); }
+        if (inv.hands && !inv_get(&inv.t, inv.hands)) { bad = 1; printf("  stale hands after %s\n", inv_intent_name(in.type)); }
+        // The grid never changes size except when the worn pack changes (moves, splits, equips of
+        // anything else leave it alone); the crate's never changes.
+        pk = inv_pack_c(&inv.t);
+        int c1, r1;
+        grid_dims(&inv.t, &c1, &r1);
+        bool pack_changed = !pk || pk->s.item != pack_item || pk->uid != pack_uid;
+        if (pack_changed) swaps++;
+        if (!pk) { bad = 1; printf("  no backpack after %s\n", inv_intent_name(in.type)); }
+        if (!pack_changed && (c1 != c0 || r1 != r0)) { bad = 1; printf("  grid %dx%d -> %dx%d after %s\n", c0, r0, c1, r1, inv_intent_name(in.type)); }
+        const InvContainerDef *pcd = pk ? item_container(&g_db, pk->s.item) : NULL;
+        if (pcd && (c1 != pcd->comp[0].w || r1 != pcd->comp[0].h)) { bad = 1; printf("  grid %dx%d isn't the pack's\n", c1, r1); }
+        int cc, cr;
+        grid_dims(&crate, &cc, &cr);
+        if (cc != crate_c || cr != crate_r) { bad = 1; printf("  the crate's grid changed\n"); }
         // Conservation (ammo changes form: loaded rounds <-> stacks; attachments: mounted <-> items).
         if (k % 97 == 0) {
             int tot[MAX_ITEM_DEFS] = { 0 };
@@ -605,7 +814,7 @@ static void test_fuzz(void) {
             totals(&crate, tot);
             for (int i = 1; i < g_db.item_count && !bad; i++) {
                 const ItemDef *d = &g_db.items[i];
-                if (d->kind == ITEM_AMMO || d->kind == ITEM_ATTACHMENT || d->kind == ITEM_CONSUMABLE) continue;
+                if (d->kind == ITEM_AMMO || d->kind == ITEM_ATTACHMENT || d->kind == ITEM_CONSUMABLE || d->default_pack) continue;
                 if (tot[i] + dropped[i] != tot0[i]) { bad = 1; printf("  %s: %d + %d dropped != %d\n", d->id, tot[i], dropped[i], tot0[i]); }
             }
         }
@@ -620,10 +829,10 @@ static void test_fuzz(void) {
             }
         }
     }
-    (void)used;
-    CHECK(!bad, "fuzz: the invariants and conservation hold over %d random intents", iters);
+    CHECK(!bad, "fuzz: the invariants, conservation and the fixed grid hold over %d random intents", iters);
     CHECK(ok_n > iters / 50, "fuzz: enough intents applied to mean something (%d)", ok_n);
-    printf("  fuzz: %d / %d random intents applied\n", ok_n, iters);
+    CHECK(swaps > 0, "fuzz: the worn pack changed at least once (%d)", swaps);
+    printf("  fuzz: %d / %d random intents applied, %d pack changes\n", ok_n, iters, swaps);
 }
 
 // ------------------------------------------------------------------ two clients, one crate
@@ -668,7 +877,6 @@ static void test_two_clients(void) {
     g_qn = 0;
     int rejected = 0, applied = 0, conflicts = 0;
     for (int tick = 0; tick < 2400; tick++) {
-        // Clients: an intent now and then (both mostly grab from the crate, the same items).
         for (int c = 0; c < 2 && tick < 2000; c++) {
             if (rnd() % 5) continue;
             Client *C = &cl[c];
@@ -690,7 +898,6 @@ static void test_two_clients(void) {
             m->who = c;
             m->in = in;
         }
-        // Deliver due messages in order.
         for (int i = 0; i < g_qn; i++) {
             Msg *m = &g_q[i % 4096];
             if (m->at != tick) continue;
@@ -701,7 +908,6 @@ static void test_two_clients(void) {
                 if (r == IIR_OK) applied++;
                 else { rejected++; if (r == IIR_GONE || r == IIR_NO_ROOM) conflicts++; }
                 acked[m->who] = m->in.seq;
-                // State to both (the crate changed for both; each its own inventory).
                 for (int c = 0; c < 2; c++) {
                     Msg *s = &g_q[g_qn++ % 4096];
                     memset(s, 0, sizeof(*s));
@@ -713,7 +919,6 @@ static void test_two_clients(void) {
                     s->ack = acked[c];
                 }
             } else {
-                // Reconcile: take the host's state, drop acknowledged intents, re-apply the rest.
                 Client *C = &cl[m->who];
                 C->inv = m->inv;
                 C->crate = m->crate;
@@ -728,7 +933,6 @@ static void test_two_clients(void) {
         }
         CHECK(g_qn < 4000, "queue");
         if (g_qn >= 4000) break;
-        // Compact the queue: drop delivered messages.
         int w = 0;
         for (int i = 0; i < g_qn; i++) if (g_q[i].at > tick) g_q[w++] = g_q[i];
         g_qn = w;
@@ -740,14 +944,13 @@ static void test_two_clients(void) {
     bool same = true;
     for (int i = 1; i < g_db.item_count; i++) {
         const ItemDef *d = &g_db.items[i];
-        if (d->kind == ITEM_AMMO || d->kind == ITEM_ATTACHMENT) continue;   // rounds / attachments change form (unload, mount)
+        if (d->kind == ITEM_AMMO || d->kind == ITEM_ATTACHMENT || d->default_pack) continue;
         if (tot[i] != tot0[i]) { same = false; printf("  %s: %d != %d\n", d->id, tot[i], tot0[i]); }
     }
     CHECK(same, "two clients, one crate, 150 ms: nothing duplicated or lost");
     for (int c = 0; c < 2; c++) {
         CHECK(cl[c].pending_n == 0, "client %d: every intent acknowledged", c);
-        CHECK(!memcmp(&cl[c].inv.t, &host_inv[c].t, sizeof(InvTree)) && !memcmp(cl[c].inv.quick, host_inv[c].quick, sizeof(host_inv[c].quick)),
-              "client %d converged on its inventory", c);
+        CHECK(!memcmp(&cl[c].inv.t, &host_inv[c].t, sizeof(InvTree)) && cl[c].inv.hands == host_inv[c].hands, "client %d converged on its inventory", c);
         CHECK(!memcmp(&cl[c].crate, &host_crate, sizeof(InvTree)), "client %d converged on the crate", c);
     }
     CHECK(tree_ok(&host_crate, "race crate") && tree_ok(&host_inv[0].t, "race 0") && tree_ok(&host_inv[1].t, "race 1"), "invariants");
@@ -755,257 +958,12 @@ static void test_two_clients(void) {
     printf("  two clients: %d applied, %d rejected (%d conflicts)\n", applied, rejected, conflicts);
 }
 
-static void test_weight(void) {
-    Inventory inv;
-    fresh(&inv);
-    give(&inv, "backpack_hiking", 1);
-    give(&inv, "ammo_rifle", 90);
-    float expect = item_def(&g_db, I("backpack_hiking"))->inv_weight + 90 * item_def(&g_db, I("ammo_rifle"))->inv_weight;
-    CHECK(fabsf(inv_tree_weight(&inv.t, &g_db) - expect) < 1e-3f, "total weight %.3f == %.3f", inv_tree_weight(&inv.t, &g_db), expect);
-    const InvItem *bp = inv_equipped_c(&inv.t, EQ_BACKPACK);
-    CHECK(fabsf(inv_item_weight(&inv.t, &g_db, bp) - inv_tree_weight(&inv.t, &g_db)) < 1e-3f || inv_find(&inv, I("ammo_rifle"))->parent != bp->uid,
-          "a container weighs its contents");
-}
+// ------------------------------------------------------------------ world loot
 
-// The hotbar takes only what is used from the hands: no worn container, not the built-in phone; a
-// "hotbar": true tool (the flashlight) binds like a weapon.
-static void test_binds(void) {
-    Inventory inv;
-    fresh(&inv);
-    u16 bp = give(&inv, "backpack_hiking", 1);
-    u16 rig = give(&inv, "rig_chest", 1);
-    InvIntent b = intent(II_BIND, INV_SIDE_SELF, bp, 0, 0, 0, 0, 0, 0);
-    b.aux = 0;
-    CHECK(apply(&inv, NULL, b) == IIR_NOT_USABLE && !inv.quick[0], "a worn backpack can't be bound");
-    b.src = rig;
-    CHECK(apply(&inv, NULL, b) == IIR_NOT_USABLE && !inv.quick[0], "a worn rig can't be bound");
-    u16 phone = item_find(&g_db, "phone");
-    if (phone && item_def(&g_db, phone)->builtin) {
-        inv_add(&inv, &g_db, phone, 1, 0);
-        CHECK(inv_hot_find(&inv, phone) < 0, "give phone: the built-in phone is never bound to a hotbar slot");
-        InvItem *pi = inv_find(&inv, phone);
-        if (pi) {
-            b.src = pi->uid;
-            CHECK(apply(&inv, NULL, b) == IIR_NOT_USABLE, "nor by hand");
-        }
-    }
-    u16 fl = item_find(&g_db, "flashlight");
-    if (fl) {
-        inv_add(&inv, &g_db, fl, 1, 0);
-        CHECK(inv_hot_find(&inv, fl) >= 0, "the flashlight (\"hotbar\": true) binds like a weapon");
-    }
-    u16 med = give(&inv, "medkit", 1);
-    b.src = med;
-    b.aux = 5;
-    CHECK(apply(&inv, NULL, b) == IIR_OK && inv.quick[5] == med, "a consumable binds by hand");
-}
-
-// Weapons / consumables / throwables taken from a world container bind like a pickup, by every path:
-// quick move, take all, onto an equipment slot, a drag into a grid.
-static void test_loot_binds(void) {
-    Inventory inv;
-    fresh(&inv);
-    give(&inv, "backpack_hiking", 1);
-    InvTree crate;
-    inv_tree_init(&crate, container_find(&g_db, "crate"));
-    const char *loot[] = { "rifle", "medkit", "frag_grenade", "pistol", "bandage" };
-    u16 lu[5];
-    for (int i = 0; i < 5; i++) {
-        InvSlot s = { I(loot[i]), 1, 0, { 0 }, 0 };
-        attach_defaults(item_weapon(&g_db, s.item), s.att);
-        inv_give_root(&crate, &g_db, &s);
-        lu[i] = 0;
-        for (int k = 0; k < INV_MAX_ITEMS; k++)
-            if (inv_alive(&crate.items[k]) && crate.items[k].s.item == s.item) lu[i] = crate.items[k].uid;
-    }
-    CHECK(apply(&inv, &crate, intent(II_QUICK_MOVE, INV_SIDE_LOOT, lu[0], 0, 0, 0, 0, 0, 0)) == IIR_OK, "rifle: quick move out of the crate");
-    CHECK(inv_hot_find(&inv, I("rifle")) >= 0, "a looted rifle (Ctrl+click) is bound, so it can be drawn");
-    InvIntent eq = intent(II_EQUIP, INV_SIDE_LOOT, lu[3], 0, 0, 0, 0, 0, 0);
-    eq.aux = 255;
-    CHECK(apply(&inv, &crate, eq) == IIR_OK && inv_equipped(&inv.t, EQ_HOLSTER), "pistol: dragged onto the holster");
-    CHECK(inv_hot_find(&inv, I("pistol")) >= 0, "a pistol dragged onto its slot is bound");
-    InvIntent mv = intent(II_MOVE, INV_SIDE_LOOT, lu[4], INV_SIDE_SELF, inv_equipped(&inv.t, EQ_BACKPACK)->uid, 0, 4, 5, 0);
-    CHECK(apply(&inv, &crate, mv) == IIR_OK && inv_hot_find(&inv, I("bandage")) >= 0, "a bandage dragged into the backpack is bound");
-    InvIntent ta = intent(II_TAKE_ALL, INV_SIDE_LOOT, 0, INV_SIDE_SELF, 0, 0, 0, 0, 0);
-    CHECK(apply(&inv, &crate, ta) == IIR_OK && inv_hot_find(&inv, I("medkit")) >= 0 && inv_hot_find(&inv, I("frag_grenade")) >= 0, "take all binds the medkit and the grenade");
-    for (int k = 0; k < INV_HOTBAR; k++) CHECK(!inv.quick[k] || inv_get(&inv.t, inv.quick[k]), "binds stay valid");
-    // A full hotbar: the next looted weapon is carried unbound (as a pickup).
-    InvSlot s = { I("smg"), 1, 0, { 0 }, 0 };
-    inv_give_root(&crate, &g_db, &s);
-    InvItem *sm = NULL;
-    for (int k = 0; k < INV_MAX_ITEMS; k++) if (inv_alive(&crate.items[k]) && crate.items[k].s.item == s.item) sm = &crate.items[k];
-    bool full = true;
-    for (int k = 0; k < INV_HOTBAR; k++) full &= inv.quick[k] != 0;
-    if (sm && full) CHECK(apply(&inv, &crate, intent(II_QUICK_MOVE, INV_SIDE_LOOT, sm->uid, 0, 0, 0, 0, 0, 0)) == IIR_OK && inv_hot_find(&inv, s.item) < 0, "hotbar full: taken, not bound");
-    CHECK(tree_ok(&inv.t, "loot binds"), "invariants");
-}
-
-// The pickup's tree of a dropped container (entities.c spawn_pickup_tree): the container item's grid
-// is its root, its contents under it as they lay.
-static void pickup_tree(const InvTree *dropped, u16 top, InvTree *pk) {
-    inv_tree_init(pk, item_def(&g_db, inv_get_c(dropped, top)->s.item)->container);
-    int idx[INV_MAX_ITEMS];
-    int n = inv_subtree(dropped, top, idx, INV_MAX_ITEMS);
-    u16 ou[INV_MAX_ITEMS], nu[INV_MAX_ITEMS];
-    for (int k = 1; k < n; k++) {
-        const InvItem *src = &dropped->items[idx[k]];
-        InvItem *dst = inv_alloc(pk, &g_db, &src->s);
-        dst->flags = src->flags, dst->loc = src->loc, dst->x = src->x, dst->y = src->y, dst->parent = 0;
-        for (int j = 1; j < k; j++) if (ou[j] == src->parent) dst->parent = nu[j];
-        ou[k] = src->uid, nu[k] = dst->uid;
-    }
-}
-
-// A new instance of id x count inside container uid parent of t, at its first free space.
-static u16 put_in(InvTree *t, u16 parent, const char *id, int count) {
-    InvSlot s = { I(id), (u16)count, 0, { 0 }, 0 };
-    InvItem probe;
-    memset(&probe, 0, sizeof(probe));
-    probe.s = s;
-    InvPlace p;
-    if (!inv_find_space(t, &g_db, &probe, parent, &p)) { CHECK(false, "no room for %s", id); return 0; }
-    InvItem *it = inv_alloc(t, &g_db, &s);
-    it->parent = p.parent, it->loc = p.loc, it->x = p.x, it->y = p.y;
-    if (p.rot) it->flags |= INVF_ROT;
-    return it->uid;
-}
-
-// A discarded container keeps everything in it (more entries than the old 32-drop limit) as one
-// subtree, and picked up again (the pickup's tree) it comes back with the same layout.
-static void test_container_drop(void) {
-    Inventory inv;
-    fresh(&inv);
-    u16 bp = give(&inv, "backpack_hiking", 1);
-    const InvContainerDef *bc = item_container(&g_db, I("backpack_hiking"));
-    u16 arm = I("armband"), gl = I("glasses"), sling = I("sling_bag");
-    InvSlot ss = { sling, 1, 0, { 0 }, 0 };
-    InvItem *sb = inv_alloc(&inv.t, &g_db, &ss);
-    sb->parent = bp, sb->loc = 0, sb->x = 0, sb->y = 0;
-    u16 sbu = sb->uid;
-    int placed = 0;
-    for (int y = 0; y < bc->comp[0].h; y++)
-        for (int x = 0; x < bc->comp[0].w; x++) {
-            if (x < 2 && y < 2) continue;   // the sling bag
-            InvSlot a = { arm, 1, 0, { 0 }, 0 };
-            InvItem *it = inv_alloc(&inv.t, &g_db, &a);
-            it->parent = bp, it->loc = 0, it->x = (u8)x, it->y = (u8)y;
-            placed++;
-        }
-    const InvContainerDef *sc = item_container(&g_db, sling);
-    for (int y = 0; y < sc->comp[0].h; y++)
-        for (int x = 0; x < sc->comp[0].w; x++) {
-            InvSlot g = { gl, 1, 0, { 0 }, 0 };
-            InvItem *it = inv_alloc(&inv.t, &g_db, &g);
-            it->parent = sbu, it->loc = 0, it->x = (u8)x, it->y = (u8)y;
-            placed++;
-        }
-    CHECK(tree_ok(&inv.t, "full pack") && placed + 1 > 32, "a backpack with %d entries in it", placed + 1);
-    int before[MAX_ITEM_DEFS] = { 0 };
-    totals(&inv.t, before);
-    InvCtx c = inv_ctx(&inv, &g_db, NULL);
-    InvEffect fx;
-    InvIntent d = intent(II_DISCARD, INV_SIDE_SELF, bp, 0, 0, 0, 0, 0, 0);
-    CHECK(inv_intent_apply(&c, &d, &fx) == IIR_OK, "discard the full backpack");
-    CHECK(inv_live_count(&inv.t) == 0, "nothing of it stays on the body");
-    CHECK(inv_live_count(&fx.dropped) == placed + 2, "every entry is in the drop (%d of %d)", inv_live_count(&fx.dropped), placed + 2);
-    int tops = 0;
-    u16 top = 0;
-    for (int i = 0; i < INV_MAX_ITEMS; i++)
-        if (inv_alive(&fx.dropped.items[i]) && !fx.dropped.items[i].parent) tops++, top = fx.dropped.items[i].uid;
-    CHECK(tops == 1 && inv_get(&fx.dropped, top)->s.item == I("backpack_hiking"), "one pickup: the backpack, its contents under it");
-    InvTree pk;
-    pickup_tree(&fx.dropped, top, &pk);
-    CHECK(tree_ok(&pk, "pickup tree"), "the pickup's tree is a valid backpack grid");
-    Inventory other;
-    fresh(&other);
-    InvSlot top_s = inv_get(&fx.dropped, top)->s;
-    CHECK(inv_add_with(&other, &g_db, &top_s, &pk) == 0, "picked up whole");
-    int after[MAX_ITEM_DEFS] = { 0 };
-    totals(&other.t, after);
-    CHECK(!memcmp(before, after, sizeof(before)), "the same items");
-    const InvItem *nb = inv_equipped_c(&other.t, EQ_BACKPACK);
-    CHECK(nb && inv_cells_used(&other.t, &g_db, nb->uid) == bc->capacity, "worn, full");
-    const InvItem *corner = nb ? inv_at(&other.t, &g_db, nb->uid, 0, bc->comp[0].w - 1, bc->comp[0].h - 1) : NULL;
-    CHECK(corner && corner->s.item == arm, "the layout kept (an armband in the last cell)");
-    const InvItem *nsb = nb ? inv_at(&other.t, &g_db, nb->uid, 0, 0, 0) : NULL;
-    CHECK(nsb && nsb->s.item == sling && inv_cells_used(&other.t, &g_db, nsb->uid) == sc->capacity, "the sling bag inside, still full");
-    CHECK(tree_ok(&other.t, "picked up"), "invariants");
-    // All or nothing: a second one doesn't fit anywhere.
-    Inventory keep = other;
-    CHECK(inv_add_with(&other, &g_db, &top_s, &pk) == 1 && !memcmp(&keep.t, &other.t, sizeof(keep.t)), "no room: nothing changes");
-}
-
-// Take all: a corpse's backpack that can't come over (the player wears one of its size) is emptied.
-static void test_take_all_contents(void) {
-    Inventory inv;
-    fresh(&inv);
-    give(&inv, "backpack_hiking", 1);
-    InvTree corpse;
-    inv_tree_init(&corpse, container_find(&g_db, "body"));
-    InvSlot bs = { I("backpack_hiking"), 1, 0, { 0 }, 0 };
-    InvItem *cb = inv_alloc(&corpse, &g_db, &bs);
-    cb->loc = INV_LOC_EQUIP + EQ_BACKPACK;
-    u16 cbu = cb->uid;
-    InvSlot ms = { I("medkit"), 1, 0, { 0 }, 0 }, as = { I("ammo_rifle"), 30, 0, { 0 }, 0 };
-    InvItem *m = inv_alloc(&corpse, &g_db, &ms);
-    m->parent = cbu, m->x = 0, m->y = 0;
-    InvItem *a = inv_alloc(&corpse, &g_db, &as);
-    a->parent = cbu, a->x = 3, a->y = 0;
-    CHECK(tree_ok(&corpse, "corpse"), "a corpse wearing a full-size pack");
-    CHECK(apply(&inv, &corpse, intent(II_TAKE_ALL, INV_SIDE_LOOT, 0, INV_SIDE_SELF, 0, 0, 0, 0, 0)) == IIR_OK, "take all");
-    CHECK(inv_count(&inv, I("medkit")) == 1 && inv_count(&inv, I("ammo_rifle")) == 30, "its contents came over");
-    CHECK(inv_get(&corpse, cbu) && inv_live_count(&corpse) == 1, "the pack itself stays, empty");
-}
-
-// Binds of a container's contents: a fresh player taking all from a corpse wearing a rig gets the
-// rifle and the medkits / grenades / bandages in the rig bound (not only the rig); the rig dropped
-// (discarded) and picked up again comes back with its consumables bound.
-static void test_container_binds(void) {
-    static const char *meds[] = { "medkit", "frag_grenade", "bandage" };
-    Inventory inv;
-    fresh(&inv);
-    InvTree corpse;
-    inv_tree_init(&corpse, container_find(&g_db, "body"));
-    InvSlot rs = { I("rifle"), 1, 0, { 0 }, 0 };
-    attach_defaults(item_weapon(&g_db, rs.item), rs.att);
-    InvItem *rf = inv_alloc(&corpse, &g_db, &rs);
-    rf->loc = INV_LOC_EQUIP + EQ_PRIMARY;
-    InvSlot gs = { I("rig_chest"), 1, 0, { 0 }, 0 };
-    InvItem *rig = inv_alloc(&corpse, &g_db, &gs);
-    rig->loc = INV_LOC_EQUIP + EQ_RIG;
-    u16 ru = rig->uid;
-    put_in(&corpse, ru, "medkit", 2);
-    put_in(&corpse, ru, "frag_grenade", 2);
-    put_in(&corpse, ru, "bandage", 3);
-    CHECK(tree_ok(&corpse, "corpse rig"), "a corpse wearing a rifle and a stocked rig");
-    CHECK(apply(&inv, &corpse, intent(II_TAKE_ALL, INV_SIDE_LOOT, 0, INV_SIDE_SELF, 0, 0, 0, 0, 0)) == IIR_OK, "take all from the corpse");
-    CHECK(inv_live_count(&corpse) == 0 && inv_equipped(&inv.t, EQ_RIG), "the rig came over whole, worn");
-    CHECK(inv_hot_find(&inv, I("rifle")) >= 0, "the rifle is bound");
-    for (int i = 0; i < 3; i++) CHECK(inv_hot_find(&inv, I(meds[i])) >= 0, "the %s in the rig is bound", meds[i]);
-    CHECK(inv_hot_find(&inv, I("rig_chest")) < 0, "the worn rig itself never binds");
-    // Drop the rig (G / Discard) and pick it up again: the consumables in it are bound again.
-    InvCtx c = inv_ctx(&inv, &g_db, NULL);
-    InvEffect fx;
-    InvIntent d = intent(II_DISCARD, INV_SIDE_SELF, inv_equipped(&inv.t, EQ_RIG)->uid, 0, 0, 0, 0, 0, 0);
-    CHECK(inv_intent_apply(&c, &d, &fx) == IIR_OK, "discard the rig");
-    for (int i = 0; i < 3; i++) CHECK(inv_hot_find(&inv, I(meds[i])) < 0, "%s left with the rig: unbound", meds[i]);
-    u16 top = 0;
-    for (int i = 0; i < INV_MAX_ITEMS; i++) if (inv_alive(&fx.dropped.items[i]) && !fx.dropped.items[i].parent) top = fx.dropped.items[i].uid;
-    InvTree pk;
-    pickup_tree(&fx.dropped, top, &pk);
-    InvSlot top_s = inv_get(&fx.dropped, top)->s;
-    CHECK(inv_add_with(&inv, &g_db, &top_s, &pk) == 0, "the rig picked up whole");
-    for (int i = 0; i < 3; i++) CHECK(inv_hot_find(&inv, I(meds[i])) >= 0, "the %s in the picked-up rig is bound again", meds[i]);
-    CHECK(inv_hot_find(&inv, I("rifle")) >= 0, "the rifle keeps its bind");
-    for (int k = 0; k < INV_HOTBAR; k++) CHECK(!inv.quick[k] || inv_get(&inv.t, inv.quick[k]), "binds stay valid");
-    CHECK(tree_ok(&inv.t, "rig binds"), "invariants");
-}
-
-// Every stocked world container (level "container" entities, building-kit furniture with "loot")
-// holds its loot: the root it names ("grid"; furniture "cabinet", a level container "crate") takes
-// every entry the way the loader adds it (container_add: loaded weapons, default attachments). A
-// 3x3 backpack in three 4x2 drawers was silently dropped by the loader. Files: the arguments
-// (CMake passes data/levels/*.json and the building kit's prefabs).
+// Every stocked world container of the levels and the building kit's prefabs holds its loot: the
+// root it names ("grid"; furniture "cabinet", a level container "crate") takes every entry the way
+// the loader adds it (loaded weapons, default attachments). Files: the arguments (CMake passes
+// data/levels/*.json and the building kit's prefabs).
 static int g_loot_n;
 static void loot_walk(const cJSON *j, const char *file, bool kit) {
     if (cJSON_IsArray(j) || cJSON_IsObject(j)) {
@@ -1026,6 +984,7 @@ static void loot_walk(const cJSON *j, const char *file, bool kit) {
                 u16 item = id ? item_find(&g_db, id) : 0;
                 CHECK(item, "%s: %s: unknown loot item '%s'", file, name ? name : "?", id ? id : "?");
                 if (!item) continue;
+                CHECK(!item_def(&g_db, item)->default_pack, "%s: %s: the default bag is never loot", file, name ? name : "?");
                 int count = cJSON_GetArraySize(e) > 1 ? cJSON_GetArrayItem(e, 1)->valueint : 1;
                 const WeaponDef *wd = item_weapon(&g_db, item);
                 InvSlot s = { item, (u16)count, wd ? (i16)wd->mag_size : 0, { 0 }, 0 };
@@ -1056,49 +1015,22 @@ static void test_world_loot(int argc, char **argv) {
     if (argc > 1) printf("world loot: %d stocked containers checked\n", g_loot_n);
 }
 
-// Mounted attachments weigh: a red dot moved onto the rifle still counts in the totals.
-static void test_attachment_weight(void) {
-    Inventory inv;
-    fresh(&inv);
-    give(&inv, "backpack_hiking", 1);
-    u16 rifle = give(&inv, "rifle", 1);
-    u16 rd = give(&inv, "att_red_dot", 1);
-    float before = inv_tree_weight(&inv.t, &g_db);
-    InvIntent m = intent(II_MOUNT, INV_SIDE_SELF, rd, INV_SIDE_SELF, rifle, 0, 0, 0, 0);
-    int r = apply(&inv, NULL, m);
-    CHECK(r == IIR_OK && item_def(&g_db, I("att_red_dot"))->inv_weight > 0, "red dot onto the rifle (%s)", inv_result_text(r));
-    if (r == IIR_OK) {
-        CHECK(fabsf(inv_tree_weight(&inv.t, &g_db) - before) < 1e-3f, "the total keeps the red dot's weight (%.3f vs %.3f)", inv_tree_weight(&inv.t, &g_db), before);
-        const InvItem *w = inv_get_c(&inv.t, rifle);
-        float expect = item_def(&g_db, I("rifle"))->inv_weight + item_def(&g_db, I("att_red_dot"))->inv_weight;
-        for (int k = 0; k < ATT_SLOTS; k++) {
-            u16 ai = w->s.att[k] ? item_for_attachment(&g_db, w->s.att[k]) : 0;
-            if (ai && ai != I("att_red_dot")) expect += item_def(&g_db, ai)->inv_weight;
-        }
-        CHECK(fabsf(inv_item_weight(&inv.t, &g_db, w) - expect) < 1e-3f, "the rifle weighs its attachments (%.3f vs %.3f)", inv_item_weight(&inv.t, &g_db, w), expect);
-    }
-}
-
 int main(int argc, char **argv) {
     CHECK(items_load(&g_db, "data/items.json", "data/weapons"), "items load");
+    test_schema();
     test_defs();
     test_fit_matrix();
     test_rotation_stack();
-    test_nesting();
-    test_quick_order_and_swap();
+    test_backpacks();
+    test_quick_and_swap();
+    test_hands();
     test_attachments_fold();
     test_attachment_matrix();
-    test_sort();
+    test_compact();
     test_death_corpse();
     test_wire();
-    test_weight();
-    test_binds();
-    test_loot_binds();
-    test_container_drop();
-    test_take_all_contents();
-    test_container_binds();
+    test_migrate();
     test_world_loot(argc, argv);
-    test_attachment_weight();
     test_fuzz();
     test_two_clients();
     printf("inventory: %d checks, %d failed\n", g_checks, g_fail);

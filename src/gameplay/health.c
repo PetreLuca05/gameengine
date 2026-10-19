@@ -4,13 +4,14 @@
 #include "net/spectate.h"
 #include "kill_stats.h"
 #include "revive/revive.h"
+#include <math.h>
 #include <stdio.h>
 
 void health_init(Health *h, float hp, float armor) {
     memset(h, 0, sizeof(*h));
     h->hp = h->max_hp = hp;
     h->armor = armor;
-    h->max_armor = 100.0f;
+    h->max_armor = ARMOR_BASE_PLATES * ARMOR_PER_PLATE;
     for (int i = 0; i < DMG_COUNT; i++) h->resist[i] = 1.0f;
 }
 
@@ -34,6 +35,18 @@ float apply_damage_ex(World *w, EntityId target, float amount, DamageType type, 
     Health *h = &w->health[i];
     float dmg = amount * h->resist[type];
     if (dmg <= 0) return 0;
+    int victim_player = world_player_by_ent(w, target);
+    // A helmet takes a share of a head hit while its durability lasts (docs/DAMAGE.md "Armor").
+    if (part == BP_HEAD && victim_player >= 0) {
+        Player *vp = &w->players[victim_player];
+        InvItem *hm = inv_equipped(&vp->inv.t, EQ_HEADWEAR);
+        if (hm && hm->dur > 0) {
+            float soak = fminf((float)hm->dur, dmg * HELMET_ABSORB);
+            hm->dur = (u16)DG_MAX(0, (int)hm->dur - (int)ceilf(soak));
+            dmg -= soak;
+            vp->inv.revision++;
+        }
+    }
     // Armor soaks a share of the damage until it runs out.
     if (h->armor > 0 && type != DMG_FALL && type != DMG_DROWN) {
         float soak = fminf(h->armor, dmg * ARMOR_ABSORB);
@@ -46,7 +59,6 @@ float apply_damage_ex(World *w, EntityId target, float amount, DamageType type, 
     float dealt = before - h->hp;
     bool killed = h->hp <= 0.0f;
 
-    int victim_player = world_player_by_ent(w, target);
     int attacker_player = world_player_by_ent(w, attacker);
     if (victim_player >= 0 && dealt > 0) weapon_flinch(w, victim_player, dealt);
     if (victim_player >= 0 && dealt > 0) revive_sv_on_damage(w, victim_player);   // interrupts timed actions
@@ -133,6 +145,27 @@ void heal(World *w, EntityId target, float hp, float armor) {
     Health *h = &w->health[ENT_INDEX(target)];
     h->hp = fminf(h->max_hp, h->hp + hp);
     h->armor = fminf(h->max_armor, h->armor + armor);
+}
+
+void health_sync_armor(World *w, int slot) {
+    Player *p = &w->players[slot];
+    if (!p->active || !ent_valid(w, p->ent)) return;
+    Health *h = &w->health[ENT_INDEX(p->ent)];
+    InvItem *c = inv_equipped(&p->inv.t, EQ_BODY_ARMOR);
+    int plates = c ? DG_MAX(ARMOR_BASE_PLATES, (int)item_def(w->items, c->s.item)->plates) : ARMOR_BASE_PLATES;
+    float base = ARMOR_BASE_PLATES * ARMOR_PER_PLATE, cap = (float)plates * ARMOR_PER_PLATE;
+    u16 cu = c ? c->uid : 0;
+    if (cu != p->armor_carrier) {
+        // Put on: its plates join the base one. Taken off: the plates above the base went with it.
+        h->armor = c ? fminf(cap, fminf(h->armor, base) + (float)DG_MAX(0, c->s.ammo)) : fminf(h->armor, base);
+        p->armor_carrier = cu;
+    }
+    h->max_armor = cap;
+    h->armor = fminf(h->armor, cap);
+    if (c) {
+        i16 keep = (i16)ceilf(fmaxf(0.0f, h->armor - base));
+        if (c->s.ammo != keep) { c->s.ammo = keep; p->inv.revision++; }
+    }
 }
 
 void health_tick_dummy(World *w, EntityId e, float dt) {

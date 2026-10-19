@@ -146,6 +146,8 @@ void game_respawn_player_at(World *w, int slot, vec3 pos, float yaw, float hp) {
     int i = (int)ENT_INDEX(p->ent);
     health_init(&w->health[i], 100.0f, 0.0f);
     w->health[i].hp = fminf(hp, w->health[i].max_hp);
+    p->armor_carrier = 0;                     // a worn carrier's plates come back (health_sync_armor)
+    inv_ensure_pack(&p->inv.t, w->items);     // everyone wears at least the default bag
     w->flags[i] &= ~(u32)(EF_DEAD | EF_HIDDEN);   // hidden: joined dead (sv_join_dead)
     revive_sv_on_respawn(w, slot);
     ent_set_pos(w, p->ent, pos, quat_yaw(yaw), true);
@@ -321,6 +323,7 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
         }
     }
     if (w->authority) interact_tick(w, slot, &c, pressed, dt);
+    if (w->authority) health_sync_armor(w, slot);   // the plate cap from the worn carrier (docs/DAMAGE.md "Armor")
     p->last_cmd = c;
 
     // Mirror onto the player entity (replicated to others).
@@ -558,7 +561,7 @@ static UserCmd build_cmd(void) {
     }
     if (G->magdump_ticks > 0) magdump_cmd(&c);
     water_test_cmd(&c);   // water_test swim drives the local player
-    c.slot = G->hotbar_slot;
+    c.slot = G->sel_slot;
     c.use_target = G->focus;
     c.view_tick = net_client_view_tick256();
     phone_fill_cmd(&c);
@@ -718,19 +721,47 @@ static void update_focus(void) {
 
 // ------------------------------------------------------------------ frame
 
-static void handle_hotbar(void) {
+// Selection (docs/INVENTORY.md "Selection"): keys 1-3 draw the primary / secondary / holster weapon;
+// the wheel cycles through the ones that hold a weapon. The wheels put a grid item into the hands
+// (INV_SEL_HANDS); when it is used up or leaves the grid, the last weapon comes back.
+void game_select(int sel) {
+    G->sel_slot = (u8)DG_CLAMP(sel, 0, INV_SEL_COUNT - 1);
+    if (G->sel_slot < INV_SEL_WEAPONS) G->sel_weapon = G->sel_slot;
+    G->phone_out = false;
+}
+
+static void cycle_weapon(const Player *p, int dir) {
+    int cur = G->sel_slot < INV_SEL_WEAPONS ? G->sel_slot : G->sel_weapon;
+    for (int k = 1; k <= INV_SEL_WEAPONS; k++) {
+        int s = ((cur + dir * k) % INV_SEL_WEAPONS + INV_SEL_WEAPONS) % INV_SEL_WEAPONS;
+        if (inv_sel_c(&p->inv, s)->item || k == INV_SEL_WEAPONS) {
+            if (inv_sel_c(&p->inv, s)->item) game_select(s);
+            return;
+        }
+    }
+}
+
+static void handle_selection(void) {
     Player *p = game_local_player();
     if (!p) return;
+    if (G->sel_slot == INV_SEL_HANDS && !inv_sel_c(&p->inv, INV_SEL_HANDS)->item) game_select(G->sel_weapon);
+    // A weapon newly in a slot is drawn when nothing is in hand (the first gun picked up, a looted rifle).
+    static u16 last[INV_SEL_WEAPONS];
+    for (int k = 0; k < INV_SEL_WEAPONS; k++) {
+        u16 cur = inv_sel_c(&p->inv, k)->item;
+        if (cur && cur != last[k] && !inv_sel_c(&p->inv, G->sel_slot)->item && !G->phone_out) game_select(k);
+        last[k] = cur;
+    }
     if (phone_ui_blocks_game()) return;   // the gamepad drives the phone panel (phonenav held)
     vehicles_input();   // F / 1-4 / V / H while seated or looking at a vehicle
-    // The built-in phone (docs/PHONE.md): X takes it out over whatever slot is selected and puts it
-    // away again; choosing a slot puts it away too.
+    // The built-in phone (docs/PHONE.md): X takes it out over whatever is selected and puts it away
+    // again; choosing a weapon puts it away too.
     if (input_consume_press(ACT_PHONE)) G->phone_out = !G->phone_out;
-    for (int i = 0; i < INV_HOTBAR; i++)
-        if (input_consume_press((Action)(ACT_SLOT1 + i))) { G->hotbar_slot = (u8)i; G->phone_out = false; }
-    // Phone camera mode: the wheel zooms instead of switching items.
-    if (input_consume_press(ACT_NEXT_ITEM) && !phone_wheel(-1)) { G->hotbar_slot = (u8)((G->hotbar_slot + 1) % INV_HOTBAR); G->phone_out = false; }
-    if (input_consume_press(ACT_PREV_ITEM) && !phone_wheel(1)) { G->hotbar_slot = (u8)((G->hotbar_slot + INV_HOTBAR - 1) % INV_HOTBAR); G->phone_out = false; }
+    for (int i = 0; i < INV_SEL_WEAPONS; i++)
+        if (input_consume_press((Action)(ACT_SLOT1 + i))) game_select(i);
+    // Phone camera mode: the wheel zooms instead of switching weapons.
+    if (input_consume_press(ACT_NEXT_ITEM) && !phone_wheel(-1)) cycle_weapon(p, 1);
+    if (input_consume_press(ACT_PREV_ITEM) && !phone_wheel(1)) cycle_weapon(p, -1);
     // Drop (G) is a tap of the throwables wheel key (game_wheels.c).
     if (input_consume_press(ACT_FLASHLIGHT)) {
         G->flashlight = !G->flashlight;
@@ -764,7 +795,7 @@ void game_frame(float dt) {
         Player *lp = game_local_player();
         if (lp && lp->sim.move.mode == MOVE_HANG) G->view.yaw = player_hang_clamp_yaw(&lp->sim.move, G->view.yaw);
     }
-    if (!ui_blocking && !spectator_controls_input()) handle_hotbar();
+    if (!ui_blocking && !spectator_controls_input()) handle_selection();
     spectator_frame(dt);   // spectator controls, death camera -> spectate, free camera
     G->use_pressed_frame = !ui_blocking && input_peek_press(ACT_USE);
     // The interaction may finish inside this frame's tick (pickups vanish): remember its target
@@ -883,7 +914,7 @@ bool game_host_ex(const char *map, u32 flags) {
     G->local_slot = 0;
     G->client_seq = 0;
     G->accumulator = 0;
-    G->hotbar_slot = 0;
+    G->sel_slot = G->sel_weapon = 0;
     memset(&G->view, 0, sizeof(G->view));
     game_spawn_player(G->world, 0, G->cl_name->str, true, -1);
     G->view.yaw = G->world->players[0].sim.move.yaw;
@@ -1075,11 +1106,11 @@ static void cmd_give_list(int argc, const char **argv) {
 }
 
 // give_all [player slot]: one of every item (a full stack of stackables) while there is room, in an
-// order that ends with a usable loadout: the worn gear first, the roomiest container of each slot
-// (a smaller one whose slot is taken is skipped: a sling bag would only fill the hiking pack), then
-// the weapons, each with a stack of its ammo (the guns take the first hotbar slots), then the
-// consumables and throwables, then the rest (materials, attachments, cases, the other ammo). Never a
-// key or the built-in phone. give_ammo [player slot]: a full stack of every ammo type.
+// order that ends with a usable loadout: the roomiest backpack first (it goes on over the default
+// bag; the smaller ones are skipped), then the weapons, each with a stack of its ammo (the guns take
+// the weapon slots), then the consumables and throwables, then the rest (materials, attachments, the
+// other ammo). Never a key, the built-in phone or the default bag. give_ammo [player slot]: a full
+// stack of every ammo type.
 static int give_one(Player *p, u16 item, int *given, int *full) {
     const ItemDef *d = &G->items.items[item];
     int count = d->max_stack > 1 ? d->max_stack : 1;
@@ -1107,20 +1138,21 @@ static void give_kinds(int argc, const char **argv, bool ammo_only) {
     memset(done, 0, sizeof(done));
     for (int i = 1; i < G->items.item_count; i++) {
         const ItemDef *d = &G->items.items[i];
-        if (ammo_only ? d->kind != ITEM_AMMO : (d->kind == ITEM_KEY || d->builtin)) done[i] = true;
+        if (ammo_only ? d->kind != ITEM_AMMO : (d->kind == ITEM_KEY || d->builtin || d->default_pack)) done[i] = true;
     }
     if (!ammo_only) {
-        // 1. Worn gear, the roomiest first; skipped when its slot is taken already.
+        // 1. The roomiest backpack (over the default bag); the smaller ones are skipped.
         static u16 gear[MAX_ITEM_DEFS];
         int gn = 0;
         for (int i = 1; i < G->items.item_count; i++) {
             const ItemDef *d = &G->items.items[i];
-            if (!done[i] && d->kind != ITEM_WEAPON && d->equip_slot != EQ_NONE) gear[gn++] = (u16)i;
+            if (!done[i] && d->equip_slot == EQ_BACKPACK) gear[gn++] = (u16)i;
         }
         qsort(gear, (size_t)gn, sizeof(gear[0]), capacity_cmp);
         for (int k = 0; k < gn; k++) {
             done[gear[k]] = true;
-            if (inv_equipped(&p->inv.t, G->items.items[gear[k]].equip_slot)) continue;
+            const InvItem *pk = inv_pack_c(&p->inv.t);
+            if (pk && pk->s.item != G->items.default_backpack) continue;
             give_one(p, gear[k], &given, &full);
         }
         // 2. Weapons, each with its ammo.
@@ -1152,26 +1184,27 @@ static void give_kinds(int argc, const char **argv, bool ammo_only) {
 }
 static void cmd_give_all(int argc, const char **argv) { give_kinds(argc, argv, false); }
 
-// inv_clear [player slot]: empties the inventory (host; tests that cycle more weapons than the
-// hotbar holds).
+// inv_clear [player slot]: empties the inventory down to the default bag (host; tests that cycle
+// more weapons than the slots hold).
 static void cmd_inv_clear(int argc, const char **argv) {
     World *w = G->world;
     if (!w || G->mode != GM_HOST) { log_info("inv_clear: host only"); return; }
     int target = argc > 1 ? atoi(argv[1]) : G->local_slot;
     if (target < 0 || target >= MAX_PLAYERS || !w->players[target].active) { log_warn("inv_clear: no player in slot %d", target); return; }
     inv_clear(&w->players[target].inv);
+    inv_ensure_pack(&w->players[target].inv.t, w->items);
     w->players[target].inv.revision++;
 }
 static void cmd_give_ammo(int argc, const char **argv) { give_kinds(argc, argv, true); }
 
 // Host: put attachment id `att` (0 = remove) into attachment slot `aslot` of the weapon in
-// hotbar slot `inv_slot` of player `slot`. Validated against the weapon's slots and, for a weapon
+// selection `inv_slot` of player `slot`. Validated against the weapon's slots and, for a weapon
 // lying in a grid, its new footprint (docs/INVENTORY.md).
 bool game_sv_attach(World *w, int slot, int inv_slot, int aslot, int att) {
     if (!w || slot < 0 || slot >= MAX_PLAYERS || !w->players[slot].active) return false;
     Player *p = &w->players[slot];
-    if (inv_slot < 0 || inv_slot >= INV_HOTBAR || aslot < 0 || aslot >= ATT_SLOTS) return false;
-    InvSlot *s = inv_hot(&p->inv, inv_slot);
+    if (inv_slot < 0 || inv_slot >= INV_SEL_COUNT || aslot < 0 || aslot >= ATT_SLOTS) return false;
+    InvSlot *s = inv_sel(&p->inv, inv_slot);
     const WeaponDef *wd = item_weapon(w->items, s->item);
     if (!wd || !wd->att_slots[aslot].present) { ev_hint(w, slot, "No %s slot on this weapon", attach_slot_name(aslot)); return false; }
     const AttachmentDef *a = attach_def(w->items, (u8)att);
@@ -1206,8 +1239,8 @@ static void cmd_attach(int argc, const char **argv) {
     World *w = G->world;
     Player *p = game_local_player();
     if (!w || !p) return;
-    int inv_slot = DG_CLAMP((int)p->sim.wpn.slot, 0, INV_HOTBAR - 1);
-    const InvSlot *s = inv_hot_c(&p->inv, inv_slot);
+    int inv_slot = DG_CLAMP((int)p->sim.wpn.slot, 0, INV_SEL_COUNT - 1);
+    const InvSlot *s = inv_sel_c(&p->inv, inv_slot);
     const WeaponDef *wd = item_weapon(&G->items, s->item);
     if (argc < 3) {
         log_info("usage: attach <optic|muzzle|underbarrel|magazine|stock> <attachment id|none>");
@@ -1295,7 +1328,41 @@ static void cmd_setang(int argc, const char **argv) {
 }
 
 static void cmd_slot(int argc, const char **argv) {
-    if (argc > 1) { G->hotbar_slot = (u8)DG_CLAMP(atoi(argv[1]) - 1, 0, INV_HOTBAR - 1); G->phone_out = false; }
+    if (argc > 1) game_select(DG_CLAMP(atoi(argv[1]) - 1, 0, INV_SEL_COUNT - 1));
+}
+
+// wield <item id>: take a carried item in hand (tests, docs/INVENTORY.md "Selection"): a weapon is
+// equipped into its slot when it isn't (a long gun with both slots taken: the primary, the old one
+// into the grid) and selected; a consumable / throwable / hand tool goes into the hands.
+static void cmd_wield(int argc, const char **argv) {
+    Player *p = game_local_player();
+    if (!p || argc < 2) { log_info("usage: wield <item id>"); return; }
+    u16 item = item_find(&G->items, argv[1]);
+    const ItemDef *d = item ? item_def(&G->items, item) : NULL;
+    InvItem *it = item ? inv_find(&p->inv, item) : NULL;
+    if (!it) { log_warn("wield: no %s carried", argv[1]); return; }
+    int at = inv_sel_find(&p->inv, item);
+    if (at < 0 || at == INV_SEL_HANDS) {
+        InvIntent in;
+        memset(&in, 0, sizeof(in));
+        in.src_side = in.dst_side = INV_SIDE_SELF;
+        in.src = it->uid;
+        if (inv_holdable(d)) {
+            in.type = II_HOLD;
+            at = INV_SEL_HANDS;
+        } else if (d->equip_slot == EQ_PRIMARY || d->equip_slot == EQ_HOLSTER) {
+            in.type = II_EQUIP;
+            in.aux = 255;
+            if (d->equip_slot == EQ_PRIMARY && inv_equipped(&p->inv.t, EQ_PRIMARY) && inv_equipped(&p->inv.t, EQ_SECONDARY)) in.aux = EQ_PRIMARY;
+        } else {
+            log_warn("wield: %s can't be taken in hand", argv[1]);
+            return;
+        }
+        int r = game_inv_intent(&in);
+        if (r != IIR_OK && r != IIR_NOOP) { log_warn("wield %s: %s", argv[1], inv_result_text(r)); return; }
+        if (at != INV_SEL_HANDS) at = inv_sel_find(&p->inv, item);
+    }
+    if (at >= 0) game_select(at);
 }
 
 static void cmd_phone_out(int argc, const char **argv) {
@@ -1305,14 +1372,18 @@ static void cmd_phone_out(int argc, const char **argv) {
 static void cmd_inv(int argc, const char **argv) {
     Player *p = game_local_player();
     if (!p) return;
-    for (int i = 0; i < INV_HOTBAR; i++) {
-        const InvSlot *s = inv_hot_c(&p->inv, i);
-        if (s->item) log_info("  hotbar %d: %-14s x%d ammo %d", i + 1, item_def(&G->items, s->item)->id, s->count, s->ammo);
+    static const char *sel_name[INV_SEL_COUNT] = { "primary", "secondary", "holster", "hands" };
+    for (int i = 0; i < INV_SEL_COUNT; i++) {
+        const InvSlot *s = inv_sel_c(&p->inv, i);
+        if (s->item) log_info("  %-9s %-14s x%d ammo %d", sel_name[i], item_def(&G->items, s->item)->id, s->count, s->ammo);
     }
-    log_info("  %d items in the tree, %.1f kg (inv_dump: the tree)", inv_live_count(&p->inv.t), inv_tree_weight(&p->inv.t, &G->items));
+    const InvItem *pk = inv_pack_c(&p->inv.t);
+    int gc, gr;
+    inv_grid_size(&p->inv.t, &G->items, &gc, &gr);
+    log_info("  %d items in the tree, backpack %s %dx%d (inv_dump: the tree)", inv_live_count(&p->inv.t), pk ? item_def(&G->items, pk->s.item)->id : "none", gc, gr);
     log_info("  equipped mag (predicted) %d", p->sim.wpn.mag);
     Health *h = &G->world->health[ENT_INDEX(p->ent)];
-    log_info("  hp %.0f armor %.0f, hotbar %d, focus %u", h->hp, h->armor, G->hotbar_slot + 1, G->focus);
+    log_info("  hp %.0f armor %.0f, selection %d, focus %u", h->hp, h->armor, G->sel_slot + 1, G->focus);
 }
 
 static void cmd_lookat(int argc, const char **argv) {
@@ -1341,15 +1412,15 @@ static void cmd_magdump(int argc, const char **argv) {
         u16 item = item_find(&G->items, argv[1]);
         const WeaponDef *wd = item ? item_weapon(&G->items, item) : NULL;
         if (!wd || wd->kind == WPN_MELEE) { log_warn("wpn_magdump: %s is not a gun", argv[1]); return; }
-        int at = inv_hot_find(&p->inv, item);
+        int at = inv_sel_find(&p->inv, item);
         if (at < 0) {
             inv_add(&p->inv, &G->items, item, 1, (i16)wd->mag_size);
-            at = inv_hot_find(&p->inv, item);
+            at = inv_sel_find(&p->inv, item);
         }
-        if (at < 0) { log_warn("wpn_magdump: no free hotbar slot"); return; }
-        G->hotbar_slot = (u8)at;
+        if (at < 0) { log_warn("wpn_magdump: no free weapon slot"); return; }
+        game_select(at);
     }
-    InvSlot *s = inv_hot(&p->inv, G->hotbar_slot);
+    InvSlot *s = inv_sel(&p->inv, G->sel_slot);
     const WeaponDef *wd = item_weapon(&G->items, s->item);
     if (!wd || wd->kind == WPN_MELEE) { log_warn("wpn_magdump: equip a gun first"); return; }
     s->ammo = (i16)wd->mag_size;
@@ -1770,7 +1841,8 @@ void game_init(void) {
     cmd_register("setpos", cmd_setpos, "teleport: setpos x y z [yaw] [pitch]");
     cmd_register("getpos", cmd_getpos, "print position");
     cmd_register("setang", cmd_setang, "set view angles: setang yaw pitch");
-    cmd_register("slot", cmd_slot, "select hotbar slot 1-6");
+    cmd_register("slot", cmd_slot, "select a weapon slot 1-3 (4: the item in the hands)");
+    cmd_register("wield", cmd_wield, "wield <item id>: take a carried item in hand (a weapon into its slot and drawn, anything else into the hands)");
     cmd_register("phone_out", cmd_phone_out, "phone_out [0|1]: take the built-in phone out / put it away (key X)");
     cmd_register("status", cmd_status, "print game status");
     cmd_register("inv", cmd_inv, "print local inventory");

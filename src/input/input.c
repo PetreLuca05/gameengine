@@ -42,7 +42,7 @@ static const char *k_action_names[ACT_COUNT] = {
 static const char *k_action_labels[ACT_COUNT] = {
     "Move Forward", "Move Back", "Strafe Left", "Strafe Right", "Jump / Mantle", "Crouch", "Sprint", "Walk",
     "Use / Interact", "Attack / Fire", "Aim Down Sights", "Reload", "Drop Item", "Inventory", "Net Stats",
-    "Hotbar 1", "Hotbar 2", "Hotbar 3", "Hotbar 4", "Hotbar 5", "Hotbar 6",   // the hotbar has 6 slots (INV_HOTBAR); 7-9 pick wheel options / seats
+    "Primary Weapon / Seat 1", "Secondary Weapon / Seat 2", "Holster / Seat 3", "Wheel Option / Seat 4", "Wheel Option / Seat 5", "Wheel Option / Seat 6",   // 1-3: the weapon slots (INV_SEL_WEAPONS); 1-9 pick wheel options / seats
     "Wheel Option / Seat 7", "Wheel Option / Seat 8", "Wheel Option / Seat 9",
     "Next Item", "Previous Item", "Fire Mode", "Flashlight / Enter Vehicle", "Vehicle Camera", "Headlights", "Horn",
     "Phone: Use Screen (cursor)", "Phone: Gallery", "Phone: Take Out / Put Away", "Phone: Front / Back Camera", "Phone: Navigate Screen (hold)",

@@ -25,60 +25,62 @@ void inv_layout(const InvLayoutIn *in, InvLayout *o) {
     o->header = R(S.x, S.y, S.w, 44 * s);
     o->footer = R(S.x, S.y + S.h - 24 * s, S.w, 24 * s);
     float by = o->header.y + o->header.h + g, bh = o->footer.y - g - by;
-    // Columns: the grids and the hotbar take ~30 % each, the player the middle (at least 300 px).
-    float side = clampf_(S.w * 0.3f, 260 * s, 560 * s);
-    float center_w = S.w - 2 * side - 2 * g;
-    if (center_w < 300 * s) {
-        side = (S.w - 2 * g - 300 * s) * 0.5f;
-        center_w = 300 * s;
+    // Columns: the slots ~24 %, the grids ~30 % (ten cells), the character the middle (at least 300 px).
+    float lw = clampf_(S.w * 0.24f, 280 * s, 460 * s), rw = clampf_(S.w * 0.30f, 320 * s, 600 * s);
+    float cw = S.w - lw - rw - 2 * g;
+    if (cw < 300 * s) {
+        float k = (S.w - 2 * g - 300 * s) / (lw + rw);
+        lw *= k;
+        rw *= k;
+        cw = 300 * s;
     }
-    o->left = R(S.x, by, side, bh);
-    o->right = R(S.x + S.w - side, by, side, bh);
-    o->center = R(S.x + side + g, by, center_w, bh);
-    // One cell size everywhere: the widest player grid fits the left column, the loot grid the right.
-    int cols = 6;
-    for (int i = 0; i < in->panel_n && i < INV_UI_MAX_PANELS; i++) cols = DG_MAX(cols, in->panel[i].cols);
-    float cell = DG_MIN(58 * s, (side - 2 * o->pad) / (float)cols);
-    if (in->loot) cell = DG_MIN(cell, (side - 2 * o->pad) / (float)DG_MAX(4, in->loot_cols));
-    o->cell = cell;
-    // Left: the player's grids stacked; the column scrolls when they don't fit.
-    float y = o->left.y;
-    for (int i = 0; i < in->panel_n && i < INV_UI_MAX_PANELS; i++) {
-        float h = o->title_h + (float)in->panel[i].rows * cell + o->pad;
-        o->panel[i] = R(o->left.x, y, side, h);
-        y += h + g;
+    o->left = R(S.x, by, lw, bh);
+    o->right = R(S.x + S.w - rw, by, rw, bh);
+    o->center = R(S.x + lw + g, by, cw, bh);
+    // One cell size everywhere: ten cells (or the widest grid) across the right column. Tall grids
+    // scroll; the cells never shrink to fit the height.
+    int cols = DG_MAX(INV_UI_GRID_COLS, DG_MAX(in->grid_cols, in->loot ? in->loot_cols : 0));
+    o->cell = DG_MIN(58 * s, (rw - 2 * o->pad) / (float)cols);
+    float cell = o->cell;
+    // Left: primary + its chips, secondary + its chips, holster, the gear row, the inspect panel.
+    float x = o->left.x, w = o->left.w, y = o->left.y;
+    float weap_h = clampf_(1.9f * cell, 56 * s, 112 * s), chip = clampf_(0.82f * cell, 30 * s, 48 * s);
+    static const int ws[3] = { EQ_PRIMARY, EQ_SECONDARY, EQ_HOLSTER };
+    for (int i = 0; i < 3; i++) {
+        float h = i == 2 ? weap_h * 0.8f : weap_h;
+        o->equip[ws[i]] = R(x, y, w, h);
+        y += h + g * 0.5f;
+        if (i < INV_UI_WEAPON_ROWS) {
+            o->att_row[i] = R(x, y, w, chip);
+            y += chip + g;
+        } else {
+            y += g * 0.5f;
+        }
     }
-    o->left_content_h = in->panel_n ? y - g - o->left.y : 0;
-    // Centre: the discard zone at the bottom, the weapon slots above it, the flanks around the player.
+    float q = DG_MIN((w - 2 * g) / 3.0f, 2.2f * cell);
+    static const int gs[3] = { EQ_HEADWEAR, EQ_BODY_ARMOR, EQ_BACKPACK };
+    for (int i = 0; i < 3; i++) o->equip[gs[i]] = R(x + (float)i * (q + g), y, q, q);
+    y += q + g;
+    o->inspect = R(x, y, w, DG_MAX(0.0f, o->left.y + o->left.h - y));
+    // Centre: the character fills it; the discard zone along its bottom.
+    o->player = o->center;
     float discard_h = 30 * s;
-    o->discard = R(o->center.x + center_w * 0.3f, o->center.y + bh - discard_h, center_w * 0.4f, discard_h);
-    float weap_h = clampf_(1.9f * cell, 48 * s, 120 * s);
-    float wy = o->discard.y - g - weap_h;
-    static const float wt[4] = { 4.0f, 4.0f, 2.2f, 1.6f };
-    static const int ws[4] = { EQ_PRIMARY, EQ_SECONDARY, EQ_HOLSTER, EQ_MELEE };
-    float wsum = wt[0] + wt[1] + wt[2] + wt[3], x = o->center.x, avail = center_w - 3 * g;
-    for (int i = 0; i < 4; i++) {
-        float w = avail * wt[i] / wsum;
-        o->equip[ws[i]] = R(x, wy, w, weap_h);
-        x += w + g;
+    o->discard = R(o->center.x + cw * 0.3f, o->center.y + bh - discard_h, cw * 0.4f, discard_h);
+    // Right: the category bar, then (scrolling) the world container above the player's grid.
+    o->cats = R(o->right.x, o->right.y, rw, 2 * 24 * s + g * 0.5f);
+    float vy = o->cats.y + o->cats.h + g;
+    o->view = R(o->right.x, vy, rw, o->right.y + o->right.h - vy);
+    float cy = o->view.y;
+    if (in->loot) {
+        float eq = in->loot_body ? 1.6f * cell + g : 0.0f;
+        int lr = DG_MAX(in->loot_rows, 1);
+        float th = o->title_h + eq + (float)lr * cell + o->pad + 34 * s;   // title, equipment, grid, Take all
+        o->loot = R(o->right.x, cy, rw, th);
+        cy += th + g;
     }
-    float top = o->center.y, ph = wy - g - top;
-    float q = DG_MIN(2.1f * cell, (ph - 4 * g) / 5.0f);
-    q = DG_MIN(q, (center_w - 2 * g) * 0.22f);
-    static const int lf[5] = { EQ_HEADWEAR, EQ_EARPIECE, EQ_FACE_COVER, EQ_EYEWEAR, EQ_ARMBAND };
-    static const int rf[4] = { EQ_BODY_ARMOR, EQ_RIG, EQ_BACKPACK, EQ_SECURE };
-    for (int i = 0; i < 5; i++) o->equip[lf[i]] = R(o->center.x, top + (float)i * (q + g), q, q);
-    for (int i = 0; i < 4; i++) o->equip[rf[i]] = R(o->center.x + center_w - q, top + (float)i * (q + g), q, q);
-    o->player = R(o->center.x + q + g, top, center_w - 2 * (q + g), ph);
-    // Right: the hotbar, one row of INV_HOTBAR tiles of one grid cell each (the backpack's cell size),
-    // aligned with the grids' cells; below it the binds (name, rounds), or the loot grid (crate,
-    // corpse, trunk) when a world container is open.
-    float hy = o->right.y + o->title_h;
-    float hg = clampf_((side - 2 * o->pad - (float)INV_HOTBAR * cell) / (float)(INV_HOTBAR - 1), 0.0f, 4 * s);
-    for (int i = 0; i < INV_HOTBAR; i++) o->hot[i] = R(o->right.x + o->pad + (float)i * (cell + hg), hy, cell, cell);
-    float ly = hy + cell + 1.5f * g;
-    if (in->loot) o->loot = R(o->right.x, ly, side, o->right.y + o->right.h - ly);
-    else o->hot_info = R(o->right.x, ly, side, DG_MIN(o->right.y + o->right.h - ly, (float)INV_HOTBAR * 26 * s));
+    o->grid = R(o->right.x, cy, rw, o->title_h + (float)DG_MAX(in->grid_rows, 1) * cell + o->pad);
+    cy += o->grid.h;
+    o->content_h = cy - o->view.y;
 }
 
 int inv_nav_step(const GuiRect *rects, int n, int cur, int dir) {

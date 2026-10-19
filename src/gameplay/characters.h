@@ -351,4 +351,16 @@ extern VehiclePoseHooks g_vehicle_pose;
 extern bool g_chars_force_phys_step;   // client: step physics this tick (vehicle prediction)
 extern bool g_chars_frozen;            // host: the world is frozen (hand pose editor): zombies / NPCs don't simulate
 
+// TEMPORARY (branch inv-simple): the API of branch char-preview, stubbed until it is merged.
+typedef enum CharWornSlot { CWORN_HEAD, CWORN_CHEST, CWORN_BACK, CWORN_COUNT } CharWornSlot;
+void chars_set_worn(World *w, int player_slot, const u16 worn[CWORN_COUNT]);
+typedef struct CharPreviewIn {
+    int w, h;
+    u16 held_item;
+    u8 held_att[ATT_SLOTS];
+    u16 worn[CWORN_COUNT];
+    float yaw;
+} CharPreviewIn;
+TextureId chars_preview(World *w, int player_slot, const CharPreviewIn *in);
+
 #endif

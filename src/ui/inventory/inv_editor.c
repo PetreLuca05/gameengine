@@ -21,7 +21,7 @@ static struct {
     char filter[32];
     char line[96];
     u16 fit;                  // fit map item
-    int target;               // fill target: 0 pockets, 1 rig, 2 backpack, 3 secure, 4 loot
+    int target;               // fill target: 0 the backpack, 1 loot
     GuiScroll scroll;
     vec2 pos;
     bool dragging;
@@ -42,7 +42,7 @@ static bool host_player(Player **p, World **w) {
     return true;
 }
 
-// The tree and parent behind a fill target name (pockets, rig, backpack, secure, loot, or a uid).
+// The tree and parent behind a fill target name (backpack / grid: the worn backpack's grid, loot).
 static bool resolve_target(const char *name, InvTree **t, u16 *parent, int *side) {
     Player *p = game_local_player();
     if (!p) return false;
@@ -54,14 +54,9 @@ static bool resolve_target(const char *name, InvTree **t, u16 *parent, int *side
         *side = INV_SIDE_LOOT;
         return *t != NULL;
     }
-    InvQuickTarget q = !strcmp(name, "pockets") ? IQ_POCKETS : !strcmp(name, "rig") ? IQ_RIG : !strcmp(name, "backpack") ? IQ_BACKPACK
-                     : !strcmp(name, "secure") ? IQ_SECURE : IQ_COUNT;
-    if (q != IQ_COUNT) return inv_quick_parent(*t, q, parent);
-    u16 uid = (u16)atoi(name);
-    const InvItem *it = inv_get_c(*t, uid);
-    if (!it || !item_container(items(), it->s.item)) return false;
-    *parent = uid;
-    return true;
+    if (strcmp(name, "backpack") && strcmp(name, "grid")) return false;
+    *parent = inv_grid(*t, items());
+    return *parent != INV_NO_GRID;
 }
 
 // Fills free cells of one container with item (up to count stacks; 0 = until full). Host.
@@ -72,7 +67,7 @@ static int fill(const char *target, u16 item, int count) {
     InvTree *t;
     u16 parent;
     int side;
-    if (!resolve_target(target, &t, &parent, &side)) { log_warn("inv_fill: no container '%s' (pockets, rig, backpack, secure, loot, or a uid)", target); return 0; }
+    if (!resolve_target(target, &t, &parent, &side)) { log_warn("inv_fill: no grid '%s' (backpack, loot)", target); return 0; }
     const ItemDef *d = item_def(w->items, item);
     const WeaponDef *wd = item_weapon(w->items, item);
     int n = 0;
@@ -101,7 +96,7 @@ static int fill(const char *target, u16 item, int count) {
 static void cmd_inv_give(int argc, const char **argv) {
     Player *p;
     World *w;
-    if (argc < 2) { log_info("usage: inv_give <item> [count]  (the pickup rule: stacks, free equipment slot, containers in inv_quick_order)"); return; }
+    if (argc < 2) { log_info("usage: inv_give <item> [count]  (the pickup rule: stacks, a free equipment slot, the backpack's grid)"); return; }
     if (!host_player(&p, &w)) return;
     u16 item = item_find(w->items, argv[1]);
     if (!item) { log_warn("inv_give: unknown item '%s'", argv[1]); return; }
@@ -115,7 +110,7 @@ static void cmd_inv_give(int argc, const char **argv) {
 }
 
 static void cmd_inv_fill(int argc, const char **argv) {
-    if (argc < 3) { log_info("usage: inv_fill <pockets|rig|backpack|secure|loot|uid> <item> [stacks]"); return; }
+    if (argc < 3) { log_info("usage: inv_fill <backpack|loot> <item> [stacks]"); return; }
     const ItemDB *db = items();
     u16 item = db ? item_find(db, argv[2]) : 0;
     if (!item) { log_warn("inv_fill: unknown item '%s'", argv[2]); return; }
@@ -124,7 +119,7 @@ static void cmd_inv_fill(int argc, const char **argv) {
 }
 
 static void dump_tree(const InvTree *t, const ItemDB *db, const char *what) {
-    log_info("%s: root %s, %d items, %.2f kg, next uid %d", what, inv_root_def(t, db)->id, inv_live_count(t), inv_tree_weight(t, db), t->next_uid);
+    log_info("%s: root %s, %d items, next uid %d", what, inv_root_def(t, db)->id, inv_live_count(t), t->next_uid);
     for (int i = 0; i < INV_MAX_ITEMS; i++) {
         const InvItem *it = &t->items[i];
         if (!inv_alive(it)) continue;
@@ -163,13 +158,9 @@ static void cmd_inv_dump(int argc, const char **argv) {
         p = &w->players[slot];
     }
     dump_tree(&p->inv.t, db, "inventory");
-    char hb[96] = "";
-    for (int k = 0; k < INV_HOTBAR; k++) {
-        char e[16];
-        snprintf(e, sizeof(e), " %d:%d", k + 1, p->inv.quick[k]);
-        strncat(hb, e, sizeof(hb) - strlen(hb) - 1);
-    }
-    log_info("  hotbar%s  (pending %d)", hb, game_inv_pending());
+    int gc, gr;
+    inv_grid_size(&p->inv.t, db, &gc, &gr);
+    log_info("  grid %dx%d  hands %d  (pending %d)", gc, gr, p->inv.hands, game_inv_pending());
 }
 
 // inv_intent <name> <self|loot> <src uid> [<self|loot> <dst uid|auto> [loc x y rot [count [aux]]]]
@@ -199,7 +190,7 @@ static bool parse_intent(int argc, const char **argv, InvIntent *in) {
 static void cmd_inv_intent(int argc, const char **argv) {
     InvIntent in;
     if (!parse_intent(argc, argv, &in)) {
-        log_info("usage: inv_intent <move|insert|rotate|equip|quick_move|split|discard|use|mount|unmount|fold|unload|bind|take_all|sort> <self|loot> <src uid> "
+        log_info("usage: inv_intent <move|rotate|equip|quick_move|split|discard|use|mount|unmount|fold|unload|hold|take_all|compact> <self|loot> <src uid> "
                  "[<self|loot> <dst uid|auto> [loc|slot x y rot [count [aux]]]]");
         return;
     }
@@ -262,7 +253,7 @@ void inv_editor_init(void) {
     memset(&E, 0, sizeof(E));
     E.target = 2;
     cmd_register("inv_give", cmd_inv_give, "inv_give <item> [count]: add through the pickup rule (host)");
-    cmd_register("inv_fill", cmd_inv_fill, "inv_fill <pockets|rig|backpack|secure|loot|uid> <item> [stacks]: fill a container's free cells (host)");
+    cmd_register("inv_fill", cmd_inv_fill, "inv_fill <backpack|loot> <item> [stacks]: fill a grid's free cells (host)");
     cmd_register("inv_dump", cmd_inv_dump, "inv_dump [loot|player slot]: log the inventory tree (the open container's; host: another player's)");
     cmd_register("inv_intent", cmd_inv_intent, "inv_intent <type> <self|loot> <src> [...]: run an inventory intent (docs/INVENTORY.md)");
     cmd_register("inv_open", cmd_inv_open, "inv_open [entity id|name] [player slot]: open a world container / corpse / trunk (host; default: the focused entity, for you)");
@@ -289,14 +280,14 @@ void inv_editor_draw(void) {
     gw_label_caps(gui_rect(r.x + gui_s(12), r.y + gui_s(6), r.w, gui_s(18)), "Inventory editor", gui_s(TH->t_label), TH->text, GUI_LEFT);
     GuiCursor c = gc_make(gui_rect(r.x + gui_s(12), r.y + gui_s(32), r.w - gui_s(24), h - gui_s(40)), gui_s(4));
     gw_textfield(gui_id("inv_ed_filter"), gc_row(&c, gui_s(28)), E.filter, sizeof(E.filter), "Filter items");
-    static const char *targets[5] = { "Pockets", "Rig", "Backpack", "Secure", "Loot" };
+    static const char *targets[2] = { "Backpack", "Loot" };
     GuiRect tr = gc_row(&c, gui_s(28));
     GuiRect a, b;
     gui_split_h(tr, 0.5f, gui_s(6), &a, &b);
-    gw_dropdown(gui_id("inv_ed_target"), a, targets, 5, &E.target);
+    gw_dropdown(gui_id("inv_ed_target"), a, targets, 2, &E.target);
     bool fill_btn = gw_button(gui_id("inv_ed_fill"), b, E.fit ? "Fill with the fit item" : "Fill (pick a fit item)", GB_SECONDARY, E.fit != 0);
     if (fill_btn && E.fit) {
-        static const char *names[5] = { "pockets", "rig", "backpack", "secure", "loot" };
+        static const char *names[2] = { "backpack", "loot" };
         int n = fill(names[E.target], E.fit, 0);
         log_info("inv_editor: %d x %s into %s", n, item_def(db, E.fit)->id, names[E.target]);
     }
@@ -325,7 +316,7 @@ void inv_editor_draw(void) {
         GuiInteract in = gui_interact(gui_idi("inv_ed_item", i), ir, 0);
         if (in.hot || E.fit == i) gd_round(ir, gui_s(TH->radius), E.fit == i ? gui_rgba_mul(TH->accent, 0.3f) : TH->hover);
         char lab[96];
-        snprintf(lab, sizeof(lab), "%s  %dx%d  %.2f kg%s", d->name, d->grid_w, d->grid_h, d->inv_weight, d->container >= 0 ? "  [container]" : "");
+        snprintf(lab, sizeof(lab), "%s  %dx%d%s", d->name, d->grid_w, d->grid_h, d->container >= 0 ? "  [backpack]" : "");
         gw_label(gui_rect(ir.x + gui_s(6), ir.y, ir.w, ir.h), lab, gui_s(TH->t_small), GW_REGULAR, in.hot ? TH->text : TH->text_dim, GUI_LEFT);
         if (in.clicked) {
             const char *argv[3] = { "inv_give", d->id, "1" };

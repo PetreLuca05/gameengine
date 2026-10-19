@@ -232,6 +232,7 @@ typedef struct Player {
     float respawn_timer;
     u32 spawn_index;
     EntityId open_container;
+    u16 armor_carrier;        // host: the plate carrier worn last tick (uid; health_sync_armor)
     EntityId loot_sent_ent;   // host: the world container last sent (MSG_LOOT) and its revision
     u32 loot_sent_rev;
 } Player;

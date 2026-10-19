@@ -1,5 +1,4 @@
 #include "inv_tree.h"
-#include <math.h>
 #include <string.h>
 
 void inv_tree_init(InvTree *t, int root_def) {
@@ -51,15 +50,36 @@ InvItem *inv_alloc(InvTree *t, const ItemDB *db, const InvSlot *s) {
 const InvContainerDef *inv_root_def(const InvTree *t, const ItemDB *db) {
     static InvContainerDef body;
     if (t->root >= 0 && t->root < db->container_count) return &db->containers[t->root];
-    if (!body.comp_count) {   // no data/containers.json: a body with four 1x1 pockets
+    if (!body.equip) {   // no data/containers.json: a body (equipment slots, no grid of its own)
         dg_strcpy(body.id, sizeof(body.id), "body");
-        for (int i = 0; i < 4; i++) { body.comp[i].w = body.comp[i].h = 1; body.comp[i].at_x = (u8)i; }
-        body.comp_count = 4;
-        body.capacity = 4;
         body.equip = true;
-        body.no_containers = true;
     }
     return &body;
+}
+
+InvItem *inv_pack(InvTree *t) { return inv_equipped(t, EQ_BACKPACK); }
+const InvItem *inv_pack_c(const InvTree *t) { return inv_equipped_c(t, EQ_BACKPACK); }
+
+u16 inv_grid(const InvTree *t, const ItemDB *db) {
+    if (!inv_root_def(t, db)->equip) return 0;
+    const InvItem *pk = inv_pack_c(t);
+    return pk ? pk->uid : INV_NO_GRID;
+}
+
+void inv_grid_size(const InvTree *t, const ItemDB *db, int *cols, int *rows) {
+    *cols = *rows = 0;
+    u16 g = inv_grid(t, db);
+    const InvContainerDef *cd = g == INV_NO_GRID ? NULL : inv_parent_def(t, db, g);
+    for (int i = 0; cd && i < cd->comp_count; i++) {
+        *cols = DG_MAX(*cols, cd->comp[i].at_x + cd->comp[i].w);
+        *rows = DG_MAX(*rows, cd->comp[i].at_y + cd->comp[i].h);
+    }
+}
+
+int inv_child_count(const InvTree *t, u16 uid) {
+    int n = 0;
+    for (int i = 0; uid && i < INV_MAX_ITEMS; i++) n += inv_alive(&t->items[i]) && t->items[i].parent == uid;
+    return n;
 }
 
 const InvContainerDef *inv_parent_def(const InvTree *t, const ItemDB *db, u16 parent) {
@@ -124,54 +144,15 @@ void inv_free_subtree(InvTree *t, u16 uid) {
 void inv_normalize(InvTree *t, const ItemDB *db) {
     for (int i = 0; i < INV_MAX_ITEMS; i++)
         if (!inv_alive(&t->items[i])) memset(&t->items[i], 0, sizeof(InvItem));
-    // Orphans (repeat: a removed container orphans its contents, which orphan theirs).
-    for (bool changed = true; changed;) {
-        changed = false;
-        for (int i = 0; i < INV_MAX_ITEMS; i++) {
-            InvItem *it = &t->items[i];
-            if (!inv_alive(it) || !it->parent) continue;
-            const InvItem *p = inv_get_c(t, it->parent);
-            if (!p || !item_container(db, p->s.item)) { memset(it, 0, sizeof(*it)); changed = true; }
-        }
-    }
-}
-
-// ------------------------------------------------------------------ weight / space
-
-// One entry: the def's weight x count plus the attachments mounted on it (a mounted red dot still weighs).
-static float slot_weight(const ItemDB *db, const InvSlot *s) {
-    float kg = fmaxf(0.0f, item_def(db, s->item)->inv_weight);
-    for (int k = 0; k < ATT_SLOTS; k++) {
-        u16 ai = s->att[k] ? item_for_attachment(db, s->att[k]) : 0;
-        if (ai) kg += fmaxf(0.0f, item_def(db, ai)->inv_weight);
-    }
-    return kg * (float)s->count;
-}
-
-float inv_item_weight(const InvTree *t, const ItemDB *db, const InvItem *it) {
-    int idx[INV_MAX_ITEMS];
-    int n = inv_subtree(t, it->uid, idx, INV_MAX_ITEMS);
-    float kg = 0;
-    for (int k = 0; k < n; k++) kg += slot_weight(db, &t->items[idx[k]].s);
-    return kg;
-}
-
-float inv_tree_weight(const InvTree *t, const ItemDB *db) {
-    float kg = 0;
-    for (int i = 0; i < INV_MAX_ITEMS; i++)
-        if (inv_alive(&t->items[i])) kg += slot_weight(db, &t->items[i].s);
-    return kg;
-}
-
-float inv_parent_weight(const InvTree *t, const ItemDB *db, u16 parent) {
-    float kg = 0;
+    // Orphans: only the tree's grid (the worn backpack) holds items.
+    u16 g = inv_grid(t, db);
     for (int i = 0; i < INV_MAX_ITEMS; i++) {
-        const InvItem *it = &t->items[i];
-        if (!inv_alive(it) || it->parent != parent || (!parent && it->loc >= INV_LOC_EQUIP)) continue;
-        kg += inv_item_weight(t, db, it);
+        InvItem *it = &t->items[i];
+        if (inv_alive(it) && it->parent && it->parent != g) memset(it, 0, sizeof(*it));
     }
-    return kg;
 }
+
+// ------------------------------------------------------------------ space
 
 int inv_cells_used(const InvTree *t, const ItemDB *db, u16 parent) {
     int used = 0;

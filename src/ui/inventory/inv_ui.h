@@ -1,7 +1,8 @@
-// Inventory screen (docs/INVENTORY.md "Screen"): the pure parts. Layout (left: the player's grids,
-// centre: the player with the equipment slots around it, right: the hotbar, the loot grid below
-// it when a world container is open) and the drag-and-drop state machine that turns pointer /
-// pad input into intents (gameplay/inventory/inv_intent.h). No renderer, no SDL
+// Inventory screen (docs/INVENTORY.md "Screen"): the pure parts. Layout (left: the weapon slots with
+// their attachment chips, the gear row (helmet, plate carrier, backpack) and the inspect panel;
+// centre: the player character, rendered alone; right: the category bar, an open world container's
+// grid above the player's grid, scrolling when they don't fit) and the drag-and-drop state machine
+// that turns pointer / pad input into intents (gameplay/inventory/inv_intent.h). No renderer, no SDL
 // (tests/test_inventory_ui.c).
 #ifndef DG_INV_UI_H
 #define DG_INV_UI_H
@@ -12,15 +13,16 @@
 
 // ------------------------------------------------------------------ layout
 
-#define INV_UI_MAX_PANELS 8
+#define INV_UI_GRID_COLS 10   // the column is sized for this many cells (every backpack is 10 wide)
+#define INV_UI_WEAPON_ROWS 2  // primary and secondary show their attachment chips
 
 typedef struct InvLayoutIn {
     GuiRect safe;              // the safe area (pixels)
     float scale;               // DPI scale (design px -> px)
+    int grid_cols, grid_rows;  // the player's grid (the worn backpack's)
     bool loot;                 // a world container is open
-    int loot_cols, loot_rows;  // its root grid's bounding box (cells)
-    int panel_n;               // the player's grids, in the left column (top to bottom)
-    struct { int cols, rows; } panel[INV_UI_MAX_PANELS];
+    bool loot_body;            // it is a body (a corpse): its equipment row above its grid
+    int loot_cols, loot_rows;  // its grid (cells; 0 x 0: none yet)
 } InvLayoutIn;
 
 typedef struct InvLayout {
@@ -28,14 +30,16 @@ typedef struct InvLayout {
     float pad, gap, title_h;   // panel padding, gaps, panel title height
     GuiRect header, footer;
     GuiRect left, center, right;
-    GuiRect panel[INV_UI_MAX_PANELS];   // left column panels, unscrolled (y from left.y)
-    float left_content_h;      // > left.h: the column scrolls
-    GuiRect player;            // the live player (no backdrop)
-    GuiRect equip[EQ_COUNT];
-    GuiRect hot[INV_HOTBAR];   // hotbar tiles: one grid cell each, in a row
-    GuiRect hot_info;          // the binds listed under the row (name, rounds), loot closed only
-    GuiRect loot;              // the loot panel (title + grid), loot open only
+    GuiRect equip[EQ_COUNT];   // left: primary, secondary, holster stacked; helmet, body armor, backpack in a row
+    GuiRect att_row[INV_UI_WEAPON_ROWS];   // under primary / secondary: the attachment chips
+    GuiRect inspect;           // left, under the slots: the selected item
+    GuiRect player;            // centre: the character render (no backdrop of its own: the screen's blur)
     GuiRect discard;           // drop zone (bottom of the centre)
+    GuiRect cats;              // right, top: the category bar and Compact
+    GuiRect view;              // right, under the bar: the scrolled area
+    GuiRect loot;              // in view (unscrolled): the world container panel (title, equipment row, grid); loot open only
+    GuiRect grid;              // in view (unscrolled): the player's grid panel (title + grid)
+    float content_h;           // the right column's content height (> view.h: it scrolls)
 } InvLayout;
 
 void inv_layout(const InvLayoutIn *in, InvLayout *out);
@@ -49,12 +53,12 @@ int inv_nav_step(const GuiRect *rects, int n, int cur, int dir);
 // ------------------------------------------------------------------ drag and drop
 
 typedef enum InvTgtKind {
-    IT_NONE, IT_CELL, IT_EQUIP, IT_HOT, IT_ATTACH, IT_DISCARD, IT_OUTSIDE, IT_PANEL, IT_COUNT
+    IT_NONE, IT_CELL, IT_EQUIP, IT_ATTACH, IT_CHAR, IT_DISCARD, IT_OUTSIDE, IT_PANEL, IT_COUNT
 } InvTgtKind;
 
 // What the pointer (or the pad cursor) is over. CELL: side / parent / loc / x / y and the item
-// covering that cell (uid, 0 = empty); EQUIP: index = slot, uid = occupant; HOT: index = hotbar
-// slot, uid = the bound item; ATTACH: uid = the weapon (side), index = attachment slot.
+// covering that cell (uid, 0 = empty); EQUIP: index = slot, uid = occupant; ATTACH: uid = the weapon
+// (side), index = attachment slot; CHAR: the player character (a drop equips into its own slot).
 typedef struct InvTarget {
     u8 kind, side, loc;
     i8 index;
@@ -91,15 +95,13 @@ typedef enum InvDDAction {
     IDA_INTENT,           // send out.in
     IDA_SELECT,           // out.at selected (inspect panel / tooltip)
     IDA_CONTEXT,          // right click on out.at
-    IDA_OPEN,             // double click: open the container in a window, or inspect
+    IDA_OPEN,             // double click: inspect
     IDA_SPLIT,            // ask how many (out.in: the move, count = half)
     IDA_CONFIRM,          // ask before discarding (out.in)
     IDA_PICKED,           // carry started (sound)
     IDA_CANCEL,
-    IDA_REJECT,           // out.reason (InvResult or IDR_*), out.at shakes
+    IDA_REJECT,           // out.reason (InvResult), out.at shakes
 } InvDDAction;
-
-#define IDR_TAKE_FIRST 100   // a loot item can't be bound to the hotbar: take it first
 
 typedef struct InvDDOut {
     int action;
@@ -112,7 +114,6 @@ typedef struct InvDDOut {
 typedef struct InvView {
     const ItemDB *db;
     const InvTree *tree[INV_SIDES];
-    const u16 *quick;
 } InvView;
 
 void idd_reset(InvDrag *d);
@@ -124,5 +125,7 @@ InvDDOut idd_carry_accept(InvDrag *d, InvTarget focus, const InvView *v, bool sp
 // The carried item's footprint at the hovered cell: top-left cell + size (false: not over a cell).
 bool idd_footprint(const InvDrag *d, InvTarget t, const InvView *v, int *x, int *y, int *w, int *h);
 const char *idd_reason_text(int reason);
+// The category bar (docs/INVENTORY.md "Categories"): 0 all, else ICAT_* + 1. Items outside it dim.
+bool inv_cat_dims(int cat, const ItemDef *d);
 
 #endif

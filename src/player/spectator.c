@@ -229,7 +229,7 @@ void spectator_cl_local_data(World *w, int slot, const SpecLocalData *d, const S
         SP.last_real.seq = d->ack_seq;
         SP.last_real.yaw = p->sim.move.yaw;
         SP.last_real.pitch = p->sim.move.pitch;
-        SP.last_real.slot = p->sim.wpn.slot < INV_HOTBAR ? p->sim.wpn.slot : 0;
+        SP.last_real.slot = p->sim.wpn.slot < INV_SEL_COUNT ? p->sim.wpn.slot : 0;
         SP.real_yaw = SP.last_real.yaw;
         SP.real_pitch = SP.last_real.pitch;
         SP.view_cmd = SP.last_real;
@@ -259,11 +259,11 @@ void spectator_cl_cmds(World *w, Reader *r) {
     spec_read_cmds(r, SP.target, &SP.ring, NULL);
 }
 
-void spectator_cl_inventory(World *w, int slot, u32 revision, const u16 *quick, const InvTree *tree) {
+void spectator_cl_inventory(World *w, int slot, u32 revision, u16 hands, const InvTree *tree) {
     Player *p = slot_player(w, slot);
     if (!p || p->local) return;
     p->inv.t = *tree;
-    memcpy(p->inv.quick, quick, sizeof(p->inv.quick));
+    p->inv.hands = hands;
     p->inv.revision = revision;
 }
 

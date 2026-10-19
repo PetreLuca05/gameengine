@@ -15,6 +15,7 @@
 #include "gameplay/entities.h"
 #include "gameplay/characters.h"
 #include "gameplay/health.h"
+#include "gameplay/inventory/inv_migrate.h"
 #include "gameplay/zombies/horde.h"
 #include "anim/anim_library.h"
 #include "audio/audio.h"
@@ -736,45 +737,74 @@ static void track_named(World *w) {
 
 // ------------------------------------------------------------------ saves: the world blob
 
-// A grid tree (docs/INVENTORY.md) as [root, next_uid, [item, count, ammo, uid, parent, loc, x, y,
-// flags, dur, att0..att4] ...].
-static cJSON *tree_json(const InvTree *t) {
-    cJSON *a = cJSON_CreateArray();
-    cJSON_AddItemToArray(a, cJSON_CreateNumber(t->root));
-    cJSON_AddItemToArray(a, cJSON_CreateNumber(t->next_uid));
+// A grid tree (docs/INVENTORY.md "Saves") in format 2: {"v": 2, "root": "<container id>", "next": n,
+// "items": [["<item id>", count, ammo, uid, parent, loc, x, y, flags, dur, att0..att4] ...]}: items
+// by id, loc in today's equipment slots. Format 1 (an array of item indices, the old slots, nested
+// containers) is rebuilt by inv_migrate_v1.
+static cJSON *tree_json(const InvTree *t, const ItemDB *db) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "v", 2);
+    cJSON_AddStringToObject(o, "root", t->root >= 0 && t->root < db->container_count ? db->containers[t->root].id : "");
+    cJSON_AddNumberToObject(o, "next", t->next_uid);
+    cJSON *a = cJSON_AddArrayToObject(o, "items");
     for (int k = 0; k < INV_MAX_ITEMS; k++) {
         const InvItem *it = &t->items[k];
         if (!inv_alive(it)) continue;
-        int v[15] = { it->s.item, it->s.count, it->s.ammo, it->uid, it->parent, it->loc, it->x, it->y, it->flags, it->dur,
+        cJSON *e = cJSON_CreateArray();
+        cJSON_AddItemToArray(e, cJSON_CreateString(item_def(db, it->s.item)->id));
+        int v[14] = { it->s.count, it->s.ammo, it->uid, it->parent, it->loc, it->x, it->y, it->flags, it->dur,
                       it->s.att[0], it->s.att[1], it->s.att[2], it->s.att[3], it->s.att[4] };
-        cJSON_AddItemToArray(a, cJSON_CreateIntArray(v, 15));
+        for (int j = 0; j < 14; j++) cJSON_AddItemToArray(e, cJSON_CreateNumber(v[j]));
+        cJSON_AddItemToArray(a, e);
     }
-    return a;
+    return o;
 }
 
-static void tree_read(const cJSON *a, InvTree *t) {
-    if (!cJSON_IsArray(a) || cJSON_GetArraySize(a) < 2) return;
-    inv_tree_init(t, cJSON_GetArrayItem(a, 0)->valueint);
-    t->next_uid = (u16)cJSON_GetArrayItem(a, 1)->valueint;
+static void tree_read(const cJSON *a, InvTree *t, const ItemDB *db) {
+    if (cJSON_IsArray(a) && cJSON_GetArraySize(a) >= 2) {
+        // Format 1.
+        static InvV1Entry v1[INV_MAX_ITEMS];
+        int n = 0;
+        const cJSON *e;
+        cJSON_ArrayForEach(e, a) {
+            if (!cJSON_IsArray(e) || cJSON_GetArraySize(e) < 15 || n >= INV_MAX_ITEMS) continue;
+            int v[15];
+            for (int j = 0; j < 15; j++) v[j] = cJSON_GetArrayItem(e, j)->valueint;
+            InvV1Entry *x = &v1[n++];
+            *x = (InvV1Entry){ v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], { 0 } };
+            for (int j = 0; j < ATT_SLOTS; j++) x->att[j] = (u8)v[10 + j];
+        }
+        int dropped = inv_migrate_v1(t, db, cJSON_GetArrayItem(a, 0)->valueint, v1, n);
+        if (dropped) log_warn("story: save migration: %d inventory entries were deleted items or didn't fit (dropped)", dropped);
+        return;
+    }
+    if (!cJSON_IsObject(a)) return;
+    inv_tree_init(t, container_find(db, jstr(a, "root")));
+    t->next_uid = (u16)jnum(a, "next", 1);
     int k = 0;
     const cJSON *e;
-    cJSON_ArrayForEach(e, a) {
+    cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(a, "items")) {
         if (!cJSON_IsArray(e) || cJSON_GetArraySize(e) < 15 || k >= INV_MAX_ITEMS) continue;
-        int v[15];
-        for (int j = 0; j < 15; j++) v[j] = cJSON_GetArrayItem(e, j)->valueint;
+        const cJSON *id = cJSON_GetArrayItem(e, 0);
+        u16 item = cJSON_IsString(id) ? item_find(db, id->valuestring) : 0;
+        if (!item) { log_warn("story: save: unknown item %s dropped", cJSON_IsString(id) ? id->valuestring : "?"); continue; }
+        int v[14];
+        for (int j = 0; j < 14; j++) v[j] = cJSON_GetArrayItem(e, j + 1)->valueint;
         InvItem *it = &t->items[k++];
-        it->s.item = (u16)v[0];
-        it->s.count = (u16)v[1];
-        it->s.ammo = (i16)v[2];
-        it->uid = (u16)v[3];
-        it->parent = (u16)v[4];
-        it->loc = (u8)v[5];
-        it->x = (u8)v[6];
-        it->y = (u8)v[7];
-        it->flags = (u8)v[8];
-        it->dur = (u16)v[9];
-        for (int j = 0; j < ATT_SLOTS; j++) it->s.att[j] = (u8)v[10 + j];
+        it->s.item = item;
+        it->s.count = (u16)v[0];
+        it->s.ammo = (i16)v[1];
+        it->uid = (u16)v[2];
+        it->parent = (u16)v[3];
+        it->loc = (u8)v[4];
+        it->x = (u8)v[5];
+        it->y = (u8)v[6];
+        it->flags = (u8)v[7];
+        it->dur = (u16)v[8];
+        for (int j = 0; j < ATT_SLOTS; j++) it->s.att[j] = (u8)v[9 + j];
     }
+    inv_normalize(t, db);
+    inv_ensure_pack(t, db);
 }
 
 static cJSON *world_blob(World *w) {
@@ -796,7 +826,7 @@ static cJSON *world_blob(World *w) {
         }
         case ET_CONTAINER: {
             InvTree *t = container_tree(w, ent_from_index(w, i), false);
-            if (t) cJSON_AddItemToObject(conts, n, tree_json(t));
+            if (t) cJSON_AddItemToObject(conts, n, tree_json(t, w->items));
             break;
         }
         case ET_LIGHT: cJSON_AddBoolToObject(lights, n, (w->flags[i] & EF_ON) || (SR.light_saved[i] & 1)); break;
@@ -858,7 +888,7 @@ static void apply_world_blob(World *w, const cJSON *root) {
         }
         if (w->type[i] == ET_CONTAINER && (e = cJSON_GetObjectItemCaseSensitive(conts, n))) {
             InvTree *t = container_tree(w, ent_from_index(w, i), true);
-            if (t) tree_read(e, t);
+            if (t) tree_read(e, t, w->items);
             w->cont[i].revision++;
         }
         if (w->type[i] == ET_LIGHT && (e = cJSON_GetObjectItemCaseSensitive(lights, n))) {
@@ -903,10 +933,8 @@ static cJSON *players_blob(World *w) {
         cJSON_AddItemToArray(pos, cJSON_CreateNumber(p->sim.move.pos.z));
         cJSON_AddNumberToObject(o, "yaw", p->sim.move.yaw);
         cJSON_AddNumberToObject(o, "hp", w->health[ENT_INDEX(p->ent)].hp);
-        cJSON_AddItemToObject(o, "inventory", tree_json(&p->inv.t));
-        int q[INV_HOTBAR];
-        for (int k = 0; k < INV_HOTBAR; k++) q[k] = p->inv.quick[k];
-        cJSON_AddItemToObject(o, "hotbar", cJSON_CreateIntArray(q, INV_HOTBAR));
+        cJSON_AddItemToObject(o, "inventory", tree_json(&p->inv.t, w->items));
+        cJSON_AddNumberToObject(o, "hands", p->inv.hands);
         cJSON_AddItemToArray(arr, o);
     }
     return arr;
@@ -921,10 +949,10 @@ static void apply_player(World *w, int s, const cJSON *players) {
         float hp = jnum(o, "hp", 100);
         game_respawn_player_at(w, s, jvec(o, "pos"), jnum(o, "yaw", 0), hp > 1 ? hp : 100);
         inv_clear(&p->inv);
-        tree_read(cJSON_GetObjectItemCaseSensitive(o, "inventory"), &p->inv.t);
-        const cJSON *q = cJSON_GetObjectItemCaseSensitive(o, "hotbar");
-        for (int k = 0; k < INV_HOTBAR && k < cJSON_GetArraySize(q); k++) p->inv.quick[k] = (u16)cJSON_GetArrayItem(q, k)->valueint;
-        inv_normalize(&p->inv.t, w->items);
+        tree_read(cJSON_GetObjectItemCaseSensitive(o, "inventory"), &p->inv.t, w->items);
+        p->inv.hands = (u16)jnum(o, "hands", 0);   // format 1 had hotbar binds instead: nothing in the hands
+        if (p->inv.hands && !inv_get(&p->inv.t, p->inv.hands)) p->inv.hands = 0;
+        inv_ensure_pack(&p->inv.t, w->items);
         p->inv.revision++;
         if (p->local && G) G->view.yaw = p->sim.move.yaw;
         SR.spawn_pos[s] = p->sim.move.pos;

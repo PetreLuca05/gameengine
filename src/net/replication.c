@@ -52,6 +52,7 @@ static void capture_one(World *w, int i, NetEnt *e) {
         e->hp = w->health[i].hp;
         e->max_hp = w->health[i].max_hp;
         e->armor = w->health[i].armor;
+        e->max_armor = w->health[i].max_armor;
     }
     e->shape = w->vis[i].shape;
     e->model = w->vis[i].model;
@@ -152,7 +153,7 @@ static void write_fields(Writer *w, const NetEnt *e, u32 m) {
     if (m & NF_ROT) w_quat(w, e->rot);
     if (m & NF_ANIM) w_f32(w, e->anim);
     if (m & NF_ITEM) { w_u16(w, e->item); w_u16(w, e->count); }
-    if (m & NF_HP) { w_f32(w, e->hp); w_f32(w, e->max_hp); w_f32(w, e->armor); }
+    if (m & NF_HP) { w_f32(w, e->hp); w_f32(w, e->max_hp); w_f32(w, e->armor); w_f32(w, e->max_armor); }
     if (m & NF_VIS) { w_u8(w, e->shape); w_u16(w, e->model); w_u8(w, e->emissive); w_vec3(w, e->half); w_u32(w, e->color); }
     if (m & NF_NAME) w_str(w, e->name);
     if (m & NF_LIGHT) { w_vec3(w, e->light_color); w_f32(w, e->light_radius); w_f32(w, e->light_intensity); w_u32(w, e->light_group); }
@@ -189,7 +190,7 @@ static void read_fields(Reader *r, NetEnt *e, u32 m) {
     if (m & NF_ROT) e->rot = r_quat(r);
     if (m & NF_ANIM) e->anim = r_f32(r);
     if (m & NF_ITEM) { e->item = r_u16(r); e->count = r_u16(r); }
-    if (m & NF_HP) { e->hp = r_f32(r); e->max_hp = r_f32(r); e->armor = r_f32(r); }
+    if (m & NF_HP) { e->hp = r_f32(r); e->max_hp = r_f32(r); e->armor = r_f32(r); e->max_armor = r_f32(r); }
     if (m & NF_VIS) { e->shape = r_u8(r); e->model = r_u16(r); e->emissive = r_u8(r); e->half = r_vec3(r); e->color = r_u32(r); }
     if (m & NF_NAME) r_str(r, e->name, sizeof(e->name));
     if (m & NF_LIGHT) { e->light_color = r_vec3(r); e->light_radius = r_f32(r); e->light_intensity = r_f32(r); e->light_group = r_u32(r); }
@@ -548,7 +549,7 @@ void repl_apply(World *w, const SnapFrame *f, int local_slot, InterpBuffer *inte
             w->health[i].hp = e->hp;
             w->health[i].max_hp = e->max_hp;
             w->health[i].armor = e->armor;
-            if (w->health[i].max_armor <= 0) w->health[i].max_armor = 100;
+            w->health[i].max_armor = e->max_armor;
         }
         if (e->type == ET_LIGHT) {
             w->light[i].color = e->light_color;

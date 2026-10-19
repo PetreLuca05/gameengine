@@ -724,7 +724,7 @@ add_test(NAME ui COMMAND test_ui WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>
 # Grid inventory (docs/INVENTORY.md): rules matrix, intents, attachments, death / corpse, wire,
 # random-intent fuzz, two clients looting one crate through a 150 ms round trip.
 set(DG_INVENTORY_SOURCES src/gameplay/inventory.c src/gameplay/inventory/inv_tree.c src/gameplay/inventory/inv_rules.c
-  src/gameplay/inventory/inv_intent.c src/gameplay/inventory/inv_wire.c)
+  src/gameplay/inventory/inv_intent.c src/gameplay/inventory/inv_wire.c src/gameplay/inventory/inv_migrate.c)
 add_executable(test_inventory tests/test_inventory.c ${DG_INVENTORY_SOURCES})
 set_target_properties(test_inventory PROPERTIES C_STANDARD 11)
 target_link_libraries(test_inventory PRIVATE dg_animcore)

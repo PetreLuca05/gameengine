@@ -150,9 +150,9 @@ static bool has_dna(const Player *p) { return RV.dna_item && inv_has(&p->inv, RV
 
 static InvItem *find_dna(Player *p) {
     if (!RV.dna_item) return NULL;
-    // The equipped hotbar slot first, then anywhere in the inventory.
+    // The one in the hands first, then anywhere in the inventory.
     int eq = p->sim.wpn.slot;
-    if (eq < INV_HOTBAR && inv_hot(&p->inv, eq)->item == RV.dna_item) return inv_item_of(&p->inv, inv_hot(&p->inv, eq));
+    if (eq < INV_SEL_COUNT && inv_sel(&p->inv, eq)->item == RV.dna_item) return inv_item_of(&p->inv, inv_sel(&p->inv, eq));
     return inv_find(&p->inv, RV.dna_item);
 }
 
@@ -257,7 +257,7 @@ static void drop_slot(World *w, int slot, InvItem *it) {
     Player *p = &w->players[slot];
     if (!it || !inv_alive(it)) return;
     vec3 at = v3_add(v3_madd(p->sim.move.pos, forward_from_yaw(p->sim.move.yaw), 0.5f), v3(0, 0.6f, 0));
-    spawn_pickup_tree(w, at, &p->inv.t, it->uid);   // whole: a weapon with its attachments (a container with its contents)
+    spawn_pickup_tree(w, at, &p->inv.t, it->uid);   // whole: a weapon with its attachments
     inv_free_subtree(&p->inv.t, it->uid);
     p->inv.revision++;
 }
@@ -284,8 +284,8 @@ bool revive_sv_down(World *w, int slot, EntityId attacker) {
     RV.downed_by[slot] = attacker;
     // The held item drops, unless it is a sidearm the rules let the player keep.
     int eq = p->sim.wpn.slot;
-    if (eq < INV_HOTBAR && inv_hot(&p->inv, eq)->item && !(r->keep_sidearm && is_sidearm(w, inv_hot(&p->inv, eq)->item)))
-        drop_slot(w, slot, inv_item_of(&p->inv, inv_hot(&p->inv, eq)));
+    if (eq < INV_SEL_COUNT && inv_sel(&p->inv, eq)->item && !(r->keep_sidearm && is_sidearm(w, inv_sel(&p->inv, eq)->item)))
+        drop_slot(w, slot, inv_item_of(&p->inv, inv_sel(&p->inv, eq)));
     push_event(w, RVE_DOWNED, p->ent, attacker, RV.rules.bleed_time, p->sim.move.pos, p->name, EVENT_ALL);
     ev_sound(w, "downed", p->sim.move.pos, 0.9f, EVENT_ALL);
     if (r->auto_ping_down) game_sv_auto_ping(w, slot, PING_HELP, v3_add(p->sim.move.pos, v3(0, 0.9f, 0)));
@@ -375,7 +375,6 @@ void revive_sv_on_death(World *w, int slot) {
     for (int s = 0; s < INV_MAX_ITEMS && RV.dna_item; s++) {
         InvItem *it = &p->inv.t.items[s];
         if (!inv_alive(it) || it->s.item != RV.dna_item) continue;
-        if (inv_is_ancestor(&p->inv.t, inv_equipped(&p->inv.t, EQ_SECURE) ? inv_equipped(&p->inv.t, EQ_SECURE)->uid : 0xFFFF, it->uid)) continue;   // safe
         DnaSample *ds = dna_get(&RV.dna, it->s.ammo);
         if (r->sample_on_death == SAMPLE_LOST) {
             if (ds) dna_free(&RV.dna, it->s.ammo);
@@ -388,13 +387,13 @@ void revive_sv_on_death(World *w, int slot) {
     }
     float yaw = p->sim.move.body_yaw;
     EntityId c = revive_spawn_corpse(w, slot, p->sim.move.pos, yaw);
-    // What the player carried stays on the body (lootable, docs/INVENTORY.md), except the secure
-    // container and its contents.
+    // What the player carried stays on the body (lootable, docs/INVENTORY.md): the weapons and the
+    // backpack with its contents.
     if (ent_valid(w, c)) {
         container_set_root(w, c, "body");
         InvTree *ct = container_tree(w, c, true);
         if (ct) {
-            inv_strip_to_corpse(&p->inv.t, p->inv.quick, INV_HOTBAR, ct, w->items);
+            inv_strip_to_corpse(&p->inv.t, &p->inv.hands, ct, w->items);
             w->cont[ENT_INDEX(c)].revision++;
             p->inv.revision++;
         }

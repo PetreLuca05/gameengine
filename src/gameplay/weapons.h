@@ -151,7 +151,7 @@ bool weapon_trace(World *w, int shooter, vec3 origin, vec3 dir, float range, vec
 // Equipped slot contents (or NULL when empty).
 // WeaponState.slot of the built-in phone (taken out with its own key, docs/PHONE.md): not an
 // inventory slot; weapon_equipped returns a virtual slot holding ItemDB.builtin_phone.
-#define WPN_SLOT_PHONE INV_HOTBAR
+#define WPN_SLOT_PHONE INV_SEL_COUNT
 const InvSlot *weapon_equipped(const World *w, int slot);
 const WeaponDef *weapon_equipped_def(const World *w, int slot);
 // Current bullet cone (full angle, degrees) of the player's equipped gun; 0 for melee/none.

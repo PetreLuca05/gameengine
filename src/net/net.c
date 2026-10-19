@@ -159,7 +159,7 @@ static void send_cvars(RemoteClient *c) {
     send_msg(c->peer, CH_RELIABLE, &w);
 }
 
-// MSG_INVENTORY of player `slot`: the client's own, or the player it spectates (HUD ammo / hotbar).
+// MSG_INVENTORY of player `slot`: the client's own, or the player it spectates (HUD weapon list).
 static void send_inventory_of(RemoteClient *c, int slot) {
     World *w = game_world();
     Player *p = &w->players[slot];
@@ -168,7 +168,7 @@ static void send_inventory_of(RemoteClient *c, int slot) {
     w_u8(&wr, (u8)slot);
     w_u32(&wr, p->inv.revision);
     w_u32(&wr, p->inv_ack_seq);
-    for (int k = 0; k < INV_HOTBAR; k++) w_u16(&wr, p->inv.quick[k]);
+    w_u16(&wr, p->inv.hands);
     static u8 tree[INV_WIRE_TREE_MAX];
     int n = inv_wire_write_tree(&p->inv.t, tree, sizeof(tree));
     w_u16(&wr, (u16)n);
@@ -725,16 +725,15 @@ static void client_handle(const NetEvent *e) {
         int slot = r_u8(&r);
         u32 rev = r_u32(&r);
         u32 ack = r_u32(&r);
-        u16 quick[INV_HOTBAR];
-        for (int k = 0; k < INV_HOTBAR; k++) quick[k] = r_u16(&r);
+        u16 hands = r_u16(&r);
         u16 n = r_u16(&r);
         static u8 buf[INV_WIRE_TREE_MAX];
         static InvTree tree;
         if (n > sizeof(buf)) break;
         r_bytes(&r, buf, n);
         if (r.overflow || slot >= MAX_PLAYERS || !inv_wire_read_tree(&tree, buf, n)) break;
-        if (slot == N->local_slot) game_cl_inventory(N->local_slot, rev, ack, quick, &tree);   // reconcile with the predicted intents
-        else spectator_cl_inventory(w, slot, rev, quick, &tree);                            // the spectated player's (HUD)
+        if (slot == N->local_slot) game_cl_inventory(N->local_slot, rev, ack, hands, &tree);   // reconcile with the predicted intents
+        else spectator_cl_inventory(w, slot, rev, hands, &tree);                            // the spectated player's (HUD)
         break;
     }
     case MSG_LOOT: {

@@ -576,7 +576,7 @@
       ]
     },
     {
-      "_comment": "Gear locker by the weapon bench: wearables, containers and cases for the grid inventory (docs/INVENTORY.md).",
+      "_comment": "Gear locker by the weapon bench: the two bigger backpacks, a helmet, a plate carrier and plates, the hand tools (docs/INVENTORY.md).",
       "type": "container",
       "name": "gear_locker",
       "grid": "stash",
@@ -585,17 +585,12 @@
       "loot": [
         ["backpack_hiking", 1],
         ["backpack", 1],
-        ["sling_bag", 1],
-        ["rig_chest", 1],
-        ["plate_carrier", 1],
         ["helmet", 1],
-        ["headset", 1],
-        ["balaclava", 1],
-        ["glasses", 1],
-        ["armband", 1],
-        ["secure_alpha", 1],
-        ["ammo_case", 1],
-        ["med_case", 1]
+        ["plate_carrier", 1],
+        ["armor", 2],
+        ["flashlight", 1],
+        ["fuel_can", 1],
+        ["tire_repair", 1]
       ]
     },
     {

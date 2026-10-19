@@ -1,15 +1,15 @@
-// Inventory screen (docs/INVENTORY.md "Screen"), full screen over the game:
-//   left:   the player's grids stacked (pockets, rig, backpack, secure container: the quick-move
-//           order), each a panel with its name, weight and used / total cells; the column scrolls;
-//   centre: the player, live (the game camera turns to face the body: inv_showcase), with the
-//           equipment slots around it and the discard zone below; no backdrop behind the player;
-//   right:  the hotbar (six large tiles); with a world container open the hotbar compacts and the
-//           loot grid (crate, body, trunk) fills the rest of the column.
-// No tabs. Inspect windows, nested container windows and the split dialog float over it.
-// Mouse: drag between any grids / slots / tiles (R rotates, the footprint shows green / red),
-// Ctrl+click quick move, Alt+click equip, Shift+drag split, double click open / inspect, right
-// click menu, drag out / onto Discard drops. Pad: a cell cursor (d-pad / stick), LB / RB cycle the
-// regions, A pick up / place, X rotate (menu when idle), Y quick move, B cancel / close.
+// Inventory screen (docs/INVENTORY.md "Screen"), over the game: the first-person view keeps rendering
+// behind it (the camera never moves) under a full-screen blur.
+//   left:   the primary and secondary weapon slots, each with its attachment chips, the holster,
+//           the gear row (helmet, plate carrier, backpack) and the inspect panel;
+//   centre: a second render of the player character (its own instance, idle, the worn gear) on the
+//           blur, head to mid-thigh; dropping a weapon or gear on it equips it; the discard zone;
+//   right:  the category bar (highlights, never moves anything) and Compact, then an open world
+//           container's grid above the player's grid (the worn backpack's); the column scrolls.
+// Mouse: drag between any grids / slots / chips (R rotates, the footprint shows green / red),
+// Ctrl+click quick move, Alt+click equip, Shift+drag split, double click inspect, right click menu,
+// drag out / onto Discard drops. Pad: a cell cursor (d-pad / stick), LB / RB cycle the regions,
+// A pick up / place, X rotate (menu when idle), Y quick move, B cancel / close.
 // Every change is an intent (gameplay/inventory/inv_intent.h) predicted locally and confirmed by
 // the host; the drag-and-drop state machine and the layout are pure (inv_dd.c, inv_layout.c).
 #include "inv_screen.h"
@@ -23,7 +23,9 @@
 #include "game/game_internal.h"
 #include "gameplay/attachments.h"
 #include "gameplay/weapons.h"
+#include "gameplay/health.h"
 #include "gameplay/entities.h"
+#include "gameplay/characters.h"
 #include "gameplay/revive/revive.h"
 #include <SDL3/SDL.h>
 #include <math.h>
@@ -36,23 +38,23 @@
 #define PREVIEW_W 768
 #define PREVIEW_H 512
 #define MAX_HITS 640
-#define MAX_WINS 4
 #define MAX_PAD 640
 
-typedef enum HitKind { HK_BLOCK, HK_GRID, HK_EQUIP, HK_HOT, HK_ATTACH, HK_DISCARD } HitKind;
+typedef enum HitKind { HK_BLOCK, HK_GRID, HK_EQUIP, HK_ATTACH, HK_CHAR, HK_DISCARD } HitKind;
 typedef struct Hit {
     u8 kind;
-    GuiRect r, clip;          // clip: the visible part (scrolled panels, windows)
-    InvTarget t;              // EQUIP / HOT / ATTACH: the target; GRID: side / parent / loc
+    GuiRect r, clip;          // clip: the visible part (the scrolled column)
+    InvTarget t;              // EQUIP / ATTACH: the target; GRID: side / parent / loc
     float cell;
 } Hit;
 
-typedef struct Win { bool open; u8 side; u16 uid; vec2 pos; bool dragging; vec2 grab; } Win;
+// Pad regions (LB / RB cycle them).
+enum { PR_SLOTS, PR_CHIPS, PR_LOOT, PR_GRID, PR_INSPECT, PR_COUNT };
 
 static struct {
     InvDrag dd;
     InvTarget hover;
-    InvTarget sel;             // selected item (CELL / EQUIP: side + uid)
+    InvTarget sel;             // selected item (CELL / EQUIP: side + uid): the inspect panel
     struct { bool open; InvTarget at; vec2 pos; double t; } ctx;
     struct { bool open; InvIntent in; float count; int max; } split;
     InvIntent pending_discard;
@@ -62,19 +64,19 @@ static struct {
     double shake_t;
     Hit hits[MAX_HITS];
     int hit_n;
-    GuiScroll left_scroll, loot_scroll;
-    Win win[MAX_WINS];
+    GuiScroll right_scroll;
     struct {
-        bool open, dragging, rotating;
-        u8 side;
-        u16 uid;
-        vec2 pos, grab, rot_from;
+        bool rotating;
+        vec2 rot_from;
         TextureId tex;
         ItemViewCam cam;
         u16 cam_item;
         double last_touch;
     } insp;
-    int filter[INV_UI_MAX_PANELS + 1];   // per panel: 0 all, 1 weapons, 2 ammo, 3 meds, 4 gear (dims the rest)
+    int cat;                   // the category bar: 0 all, else ICAT_* + 1
+    float char_yaw;            // the character turned by dragging it
+    bool char_drag;
+    float char_from;
     // pad cursor
     InvTarget pad_t[MAX_PAD];
     GuiRect pad_r[MAX_PAD];
@@ -82,7 +84,6 @@ static struct {
     int pad_n, pad_cur;
     bool alt_scripted;
     InvLayout L;
-    Cvar *showcase, *order;
 } V;
 
 static Game *g_(void) { return game(); }
@@ -105,7 +106,6 @@ static InvView view(void) {
     v.db = items();
     v.tree[INV_SIDE_SELF] = p ? &p->inv.t : NULL;
     v.tree[INV_SIDE_LOOT] = game_loot_tree();
-    v.quick = p ? p->inv.quick : NULL;
     return v;
 }
 
@@ -131,7 +131,7 @@ static u32 type_color(const ItemDef *d) {
     }
 }
 
-// The slot view of a payload (the HUD hotbar and the attachment chips use the slot widget).
+// The slot view of a payload (the attachment chips use the slot widget).
 void inventory_slot_view(const InvSlot *s, const ItemDB *db, int mag_override, GuiSlotView *v) {
     memset(v, 0, sizeof(*v));
     v->ammo_frac = -1;
@@ -199,7 +199,7 @@ int inv_screen_send(InvIntent in) {
     }
     if (r == IIR_OK) {
         if (in.type == II_DISCARD) gui_sound(TH->snd_drop);
-        else if (in.type == II_MOUNT || in.type == II_UNMOUNT || in.type == II_EQUIP || in.type == II_BIND) gui_sound(TH->snd_equip);
+        else if (in.type == II_MOUNT || in.type == II_UNMOUNT || in.type == II_EQUIP || in.type == II_HOLD) gui_sound(TH->snd_equip);
         else gui_sound(TH->snd_click);
     }
     return r;
@@ -210,26 +210,9 @@ void inventory_confirm_drop(bool yes) {
     memset(&V.pending_discard, 0, sizeof(V.pending_discard));
 }
 
-static void open_window(int side, u16 uid) {
-    const InvItem *it = item_of(side, uid);
-    if (!it || !item_container(items(), it->s.item)) return;
-    for (int i = 0; i < MAX_WINS; i++) if (V.win[i].open && V.win[i].side == side && V.win[i].uid == uid) return;
-    int slot = 0;
-    for (int i = 0; i < MAX_WINS; i++) if (!V.win[i].open) { slot = i; break; }
-    Win *w = &V.win[slot];
-    w->open = true;
-    w->side = (u8)side;
-    w->uid = uid;
-    w->pos = v2(V.L.center.x + V.L.center.w * 0.2f + (float)slot * gui_s(24), V.L.center.y + gui_s(40) + (float)slot * gui_s(24));
-    w->dragging = false;
-    gui_sound(TH->snd_click);
-}
-
-static void open_inspect(int side, u16 uid) {
-    V.insp.open = true;
-    V.insp.side = (u8)side;
-    V.insp.uid = uid;
-    V.insp.pos = v2(V.L.center.x + V.L.center.w * 0.08f, V.L.center.y + gui_s(24));
+static void select_item(InvTarget at) {
+    if (!at.uid) return;
+    V.sel = at;
     gui_anim_restart(gui_id("inv_insp_in"));
 }
 
@@ -262,28 +245,22 @@ static void apply(const InvDDOut *o) {
         V.pending_discard = o->in;
         char title[96];
         snprintf(title, sizeof(title), "Discard %s?", item_def(items(), it->s.item)->name);
-        screens_confirm(CONFIRM_DROP, title, item_container(items(), it->s.item) ? "It and everything in it will be left on the ground." : "It will be left on the ground in front of you.", 0);
+        bool worn_pack = !it->parent && it->loc == INV_LOC_EQUIP + EQ_BACKPACK && o->in.src_side == INV_SIDE_SELF;
+        screens_confirm(CONFIRM_DROP, title, worn_pack ? "It will be left on the ground; what it holds moves into your sling bag." : "It will be left on the ground in front of you.", 0);
         break;
     }
     case IDA_SELECT:
-        if (o->at.uid) { V.sel = o->at; gui_sound(TH->snd_click); }
+        if (o->at.uid) { select_item(o->at); gui_sound(TH->snd_click); }
         break;
     case IDA_CONTEXT:
         V.ctx.open = true;
         V.ctx.at = o->at;
         V.ctx.pos = gui_mouse();
         V.ctx.t = gui_time();
-        V.sel = o->at;
+        select_item(o->at);
         gui_set_focus(0);
         break;
-    case IDA_OPEN: {
-        int side = o->at.kind == IT_HOT ? INV_SIDE_SELF : o->at.side;
-        const InvItem *it = item_of(side, o->at.uid);
-        if (!it) break;
-        if (item_container(items(), it->s.item) && !(side == INV_SIDE_SELF && !it->parent && it->loc >= INV_LOC_EQUIP)) open_window(side, it->uid);
-        else open_inspect(side, it->uid);
-        break;
-    }
+    case IDA_OPEN: select_item(o->at); break;
     case IDA_REJECT:
         shake(o->at);
         inv_screen_toast(idd_reason_text(o->reason));
@@ -313,6 +290,12 @@ static void pad_add(InvTarget t, GuiRect r, int region) {
     V.pad_region[V.pad_n++] = (u8)region;
 }
 
+static bool pad_focused(int kind, int side, int index) {
+    if (!gui_nav_mode() || V.pad_cur >= V.pad_n) return false;
+    const InvTarget *t = &V.pad_t[V.pad_cur];
+    return t->kind == kind && t->side == side && t->index == index;
+}
+
 static GuiRect fit_aspect(GuiRect r, float aspect) {
     float w = r.w, h = r.w / aspect;
     if (h > r.h) { h = r.h; w = h * aspect; }
@@ -338,97 +321,86 @@ void inv_draw_item_image(GuiRect r, const ItemDB *db, const InvSlot *s, bool rot
     gd_alpha_pop();
 }
 
-static bool filtered_out(int filter, const ItemDef *d) {
-    switch (filter) {
-    case 1: return d->kind != ITEM_WEAPON && d->kind != ITEM_THROWABLE && d->kind != ITEM_ATTACHMENT;
-    case 2: return d->kind != ITEM_AMMO;
-    case 3: return d->kind != ITEM_CONSUMABLE;
-    case 4: return d->equip_slot == EQ_NONE && d->container < 0;
-    default: return false;
-    }
+static bool carrying(int side, u16 uid) { return V.dd.state == IDD_DRAGGING && V.dd.side == side && V.dd.uid == uid && V.dd.src.kind != IT_ATTACH; }
+
+static bool in_hands(int side, u16 uid) {
+    Player *p = game_local_player();
+    return side == INV_SIDE_SELF && p && uid && p->inv.hands == uid;
 }
 
-static bool carrying(int side, u16 uid) { return V.dd.state == IDD_DRAGGING && V.dd.side == side && V.dd.uid == uid && V.dd.src.kind != IT_HOT; }
-
-static int bound_key(const Player *p, u16 uid) {
-    for (int k = 0; k < INV_HOTBAR; k++) if (p->inv.quick[k] == uid) return k + 1;
-    return 0;
-}
-
-// One item tile inside a grid (or an equipment slot).
+// One item tile inside a grid.
 static void draw_item_tile(GuiRect r, const InvItem *it, int side, bool dim, InvTarget me) {
     const ItemDB *db = items();
     const ItemDef *d = item_def(db, it->s.item);
-    Player *p = game_local_player();
     float rad = gui_s(TH->radius);
     float sx = shake_amount(me);
     if (sx > 0) r.x += sinf(sx * 40.0f) * sx * gui_s(5);
-    bool sel = V.sel.uid == it->uid && (V.sel.kind == IT_HOT ? INV_SIDE_SELF : V.sel.side) == side;
+    bool sel = V.sel.uid == it->uid && V.sel.side == side;
     u32 bg = gui_rgba_lerp(TH->slot_bg, type_color(d), 0.16f);
     if (V.hover.uid == it->uid && V.hover.side == side && V.dd.state == IDD_IDLE) bg = gui_rgba_lerp(bg, TH->slot_hi, 0.6f);
-    gd_alpha_push(carrying(side, it->uid) ? 0.35f : (dim ? 0.3f : 1.0f));
+    gd_alpha_push(carrying(side, it->uid) ? 0.35f : (dim ? 0.25f : 1.0f));
     gd_round_border(gui_rect_inset(r, 1), rad, sel ? fmaxf(1.0f, gui_s(1.5f)) : 1.0f, bg, sel ? TH->select : TH->slot_border);
     inv_draw_item_image(gui_rect_inset(r, fminf(r.w, r.h) * 0.08f), db, &it->s, (it->flags & INVF_ROT) != 0, 1.0f);
     float fs = fmaxf(tpx(TH->t_tiny), fminf(gui_s(13), V.L.cell * 0.22f));
-    int key = side == INV_SIDE_SELF && p ? bound_key(p, it->uid) : 0;
-    float badge = key ? fs * 1.3f : 0.0f;   // the hotbar key badge (top right): the name stops left of it
-    GuiText name = { fs, GW_MEDIUM, TH->text_dim, GUI_LEFT, 0.02f, true, true, r.w - gui_s(8) - (key ? badge + gui_s(3) : 0.0f) };
+    bool held = in_hands(side, it->uid);
+    float badge = held ? fs * 0.7f : 0.0f;   // in the hands: a dot top right; the name stops left of it
+    GuiText name = { fs, GW_MEDIUM, TH->text_dim, GUI_LEFT, 0.02f, true, true, r.w - gui_s(8) - (held ? badge + gui_s(4) : 0.0f) };
     if (name.max_w > fs * 1.5f) gd_text(&name, r.x + gui_s(4), r.y + gui_s(2), revive_item_name(db, it->s.item, it->s.ammo));
     char b[24];
     const WeaponDef *wd = item_weapon(db, it->s.item);
+    GuiText br = { fs, GW_MEDIUM, TH->text_dim, GUI_RIGHT, 0, false, true, 0 };
+    float by = r.y + r.h - gd_line_height(fs) - gui_s(2);
     if (it->s.count > 1) {
         snprintf(b, sizeof(b), "%d", it->s.count);
-        GuiText t = { fs, GW_SEMIBOLD, TH->text, GUI_RIGHT, 0, false, true, 0 };
-        gd_text(&t, r.x + r.w - gui_s(4), r.y + r.h - gd_line_height(fs) - gui_s(2), b);
+        br.weight = GW_SEMIBOLD;
+        br.color = TH->text;
+        gd_text(&br, r.x + r.w - gui_s(4), by, b);
     } else if (wd && wd->kind != WPN_MELEE && wd->mag_size > 0) {
         snprintf(b, sizeof(b), "%d", it->s.ammo);
-        GuiText t = { fs, GW_MEDIUM, TH->text_dim, GUI_RIGHT, 0, false, true, 0 };
-        gd_text(&t, r.x + r.w - gui_s(4), r.y + r.h - gd_line_height(fs) - gui_s(2), b);
+        gd_text(&br, r.x + r.w - gui_s(4), by, b);
     } else if (d->use_type == INV_USE_CHARGES && d->charges > 1) {
         snprintf(b, sizeof(b), "%d/%d", d->charges - it->s.ammo, d->charges);
-        GuiText t = { fs, GW_MEDIUM, TH->text_dim, GUI_RIGHT, 0, false, true, 0 };
-        gd_text(&t, r.x + r.w - gui_s(4), r.y + r.h - gd_line_height(fs) - gui_s(2), b);
+        gd_text(&br, r.x + r.w - gui_s(4), by, b);
+    } else if (item_container(db, it->s.item)) {   // a spare backpack: its grid
+        int cc, cr;
+        inv_container_extent(item_container(db, it->s.item), &cc, &cr);
+        snprintf(b, sizeof(b), "%dx%d", cc, cr);
+        br.color = TH->text_faint;
+        gd_text(&br, r.x + r.w - gui_s(4), by, b);
+    } else if (d->plates && it->s.ammo > 0) {   // a plate carrier holding plates
+        snprintf(b, sizeof(b), "%d/%d", (int)ceilf((float)it->s.ammo / ARMOR_PER_PLATE), d->plates);
+        gd_text(&br, r.x + r.w - gui_s(4), by, b);
     }
     if (d->durability) {   // durability: a thin bar along the bottom
         float f = (float)it->dur / (float)d->durability;
         GuiRect bar = { r.x + gui_s(4), r.y + r.h - gui_s(4), (r.w - gui_s(8)) * saturate(f), gui_s(2) };
         gd_rect(bar, f < 0.3f ? TH->danger : TH->text_faint);
     }
-    const InvContainerDef *cd = item_container(db, it->s.item);
-    if (cd && side < INV_SIDES) {   // a container: how full
-        InvTree *t = inv_screen_tree(side);
-        int used = t ? inv_cells_used(t, db, it->uid) : 0;
-        snprintf(b, sizeof(b), "%d/%d", used, cd->capacity);
-        GuiText t2 = { fs * 0.9f, GW_MEDIUM, TH->text_faint, GUI_LEFT, 0, false, true, 0 };
-        gd_text(&t2, r.x + gui_s(4), r.y + r.h - gd_line_height(t2.size) - gui_s(2), b);
-    }
-    if (key) {
-        snprintf(b, sizeof(b), "%d", key);
-        float k = badge;
-        GuiRect kr = { r.x + r.w - k - gui_s(3), r.y + gui_s(3), k, k };
-        gd_round(kr, gui_s(3), gui_rgba_mul(TH->accent, 0.85f));
-        gw_label(kr, b, fs, GW_SEMIBOLD, TH->text_dark, GUI_CENTER);
-    }
+    if (held) gd_circle(r.x + r.w - gui_s(4) - badge * 0.5f, r.y + gui_s(4) + badge * 0.5f, badge * 0.5f, TH->select);
     gd_alpha_pop();
 }
 
-static const char *short_slot_name(int slot) {
-    static const char *n[EQ_COUNT] = { "Primary", "Secondary", "Holster", "Melee", "Headwear", "Earpiece", "Face cover", "Eyewear",
-                                       "Body armor", "Tactical rig", "Backpack", "Armband", "Secure" };
+static const char *slot_name(int slot) {
+    static const char *n[EQ_COUNT] = { "Primary", "Secondary", "Holster", "Backpack", "Helmet", "Body armor" };
     return slot >= 0 && slot < EQ_COUNT ? n[slot] : "?";
 }
 
-static void tooltip_for(GuiId id, int side, const InvItem *it) {
+static const char *cat_name(int cat) {
+    static const char *n[ICAT_COUNT] = { "Weapons", "Attachments", "Medical", "Throwables", "Tools", "Misc" };
+    return cat >= 0 && cat < ICAT_COUNT ? n[cat] : "Misc";
+}
+
+static void tooltip_for(GuiId id, const InvItem *it) {
     const ItemDB *db = items();
     const ItemDef *d = item_def(db, it->s.item);
     int w, h;
     inv_item_size(db, it, &w, &h);
     char tip[320];
-    int n = snprintf(tip, sizeof(tip), "%s\n%s  \xC2\xB7  %dx%d  \xC2\xB7  %.2f kg", revive_item_name(db, it->s.item, it->s.ammo), item_kind_name(d->kind), w, h,
-                     inv_item_weight(inv_screen_tree(side), db, it));
+    int n = snprintf(tip, sizeof(tip), "%s\n%s  \xC2\xB7  %dx%d", revive_item_name(db, it->s.item, it->s.ammo), cat_name(d->category), w, h);
     if (d->max_stack > 1) n += snprintf(tip + n, sizeof(tip) - (size_t)n, "\nStack %d / %d", it->s.count, d->max_stack);
     if (d->durability) n += snprintf(tip + n, sizeof(tip) - (size_t)n, "\nDurability %d / %d", it->dur, d->durability);
-    if (d->equip_slot != EQ_NONE) n += snprintf(tip + n, sizeof(tip) - (size_t)n, "\nWorn: %s", short_slot_name(d->equip_slot));
+    if (d->plates) n += snprintf(tip + n, sizeof(tip) - (size_t)n, "\nHolds %d plates", d->plates);
+    if (d->equip_slot != EQ_NONE) n += snprintf(tip + n, sizeof(tip) - (size_t)n, "\nWorn: %s", slot_name(d->equip_slot));
     gui_tooltip(id, tip);
 }
 
@@ -445,8 +417,8 @@ static void draw_footprint(const Hit *h) {
     gd_round_border(fr, gui_s(TH->radius), fmaxf(1.0f, gui_s(1.5f)), gui_rgba_mul(c, 0.22f), gui_rgba_mul(c, 0.9f));
 }
 
-// A container's compartments at origin (cells), its items, hit / pad registration.
-static void draw_grid(GuiRect origin, GuiRect clip, int side, u16 parent, const InvContainerDef *cd, int filter, int region) {
+// A tree's grid at origin (cells), its items, hit / pad registration. One rectangle: no dividers.
+static void draw_grid(GuiRect origin, GuiRect clip, int side, u16 parent, const InvContainerDef *cd, int region) {
     InvTree *t = inv_screen_tree(side);
     const ItemDB *db = items();
     if (!t || !cd) return;
@@ -454,7 +426,6 @@ static void draw_grid(GuiRect origin, GuiRect clip, int side, u16 parent, const 
     for (int c = 0; c < cd->comp_count; c++) {
         const InvCompDef *k = &cd->comp[c];
         GuiRect gr = { origin.x + (float)k->at_x * cell, origin.y + (float)k->at_y * cell, (float)k->w * cell, (float)k->h * cell };
-        if (cd->comp_count > 1 && c > 0) gr.x += (float)k->at_x * gui_s(3);   // pouches apart
         gd_round(gr, gui_s(TH->radius), gui_rgba_mul(TH->slot_bg, 0.9f));
         for (int y = 0; y < k->h; y++)
             for (int x = 0; x < k->w; x++) {
@@ -476,9 +447,9 @@ static void draw_grid(GuiRect origin, GuiRect clip, int side, u16 parent, const 
             inv_item_size(db, it, &w, &h);
             GuiRect ir = { gr.x + (float)it->x * cell, gr.y + (float)it->y * cell, (float)w * cell, (float)h * cell };
             InvTarget me = { IT_CELL, (u8)side, (u8)c, 0, parent, it->uid, it->x, it->y };
-            draw_item_tile(ir, it, side, filtered_out(filter, item_def(db, it->s.item)), me);
+            draw_item_tile(ir, it, side, inv_cat_dims(V.cat, item_def(db, it->s.item)), me);
             if (V.hover.kind == IT_CELL && V.hover.uid == it->uid && V.hover.side == side && V.dd.state == IDD_IDLE && !V.ctx.open)
-                tooltip_for(gui_idi("inv_item", side * 65536 + it->uid), side, it);
+                tooltip_for(gui_idi("inv_item", side * 65536 + it->uid), it);
         }
         // The editor's fit map: every cell where its item fits.
         u16 fit = inv_editor_fit_item();
@@ -499,383 +470,161 @@ static void draw_grid(GuiRect origin, GuiRect clip, int side, u16 parent, const 
     }
 }
 
-static void panel_title(GuiRect r, const char *name, float kg, int used, int cap, int *filter, GuiId fid) {
-    GuiText t = { tpx(TH->t_label), GW_SEMIBOLD, TH->text, GUI_LEFT, TH->tracking_caps, true, false, r.w * 0.38f };
+// A panel title: the name left, a note (cells used / free, the grid size) right of it.
+static void panel_title(GuiRect r, const char *name, const char *note) {
+    GuiText t = { tpx(TH->t_label), GW_SEMIBOLD, TH->text, GUI_LEFT, TH->tracking_caps, true, false, r.w * 0.6f };
     gd_text(&t, r.x, r.y + gui_s(4), name);
-    char b[64];
-    snprintf(b, sizeof(b), "%.1f kg   %d/%d", kg, used, cap);
     GuiText s = { tpx(TH->t_small), GW_REGULAR, TH->text_faint, GUI_RIGHT, 0, false, false, 0 };
-    float fw = gui_s(46);
-    gd_text(&s, r.x + r.w - 2 * fw - gui_s(12), r.y + gui_s(5), b);   // left of the Sort and filter chips
-    if (filter) {
-        static const char *names[5] = { "All", "Guns", "Ammo", "Meds", "Gear" };
-        GuiRect fr = { r.x + r.w - fw, r.y + gui_s(2), fw, gui_s(20) };
-        GuiInteract in = gui_interact(fid, fr, 0);
-        gd_round(fr, gui_s(TH->radius), in.hot ? TH->hover : gui_rgba_mul(TH->slot_bg, 0.8f));
-        gw_label(fr, names[*filter % 5], tpx(TH->t_tiny + 1), GW_MEDIUM, *filter ? TH->accent : TH->text_faint, GUI_CENTER);
-        if (in.clicked) *filter = (*filter + 1) % 5;
-        if (in.right_clicked) *filter = 0;
-        if (in.hovered) gui_tooltip(fid, "Filter (click to cycle)");
-    }
+    gd_text(&s, r.x + r.w, r.y + gui_s(5), note);
 }
 
-static void sort_button(GuiRect r, int side, u16 parent, GuiId id) {
-    GuiRect br = { r.x + r.w - gui_s(46) * 2 - gui_s(6), r.y + gui_s(2), gui_s(46), gui_s(20) };
-    GuiInteract in = gui_interact(id, br, 0);
-    gd_round(br, gui_s(TH->radius), in.hot ? TH->hover : gui_rgba_mul(TH->slot_bg, 0.8f));
-    gw_label(br, "Sort", tpx(TH->t_tiny + 1), GW_MEDIUM, TH->text_faint, GUI_CENTER);
-    static int key;
-    if (in.hovered) gui_tooltip(id, key == 0 ? "Sort by type" : key == 1 ? "Sort by weight" : "Sort by size");
-    if (in.clicked) {
-        InvIntent s;
-        memset(&s, 0, sizeof(s));
-        s.type = II_SORT;
-        s.dst_side = (u8)side;
-        s.dst = parent;
-        s.aux = (u8)key;
-        inv_screen_send(s);
-        key = (key + 1) % 3;
-    }
-}
-
-// ------------------------------------------------------------------ columns
-
-typedef struct PanelSrc { const char *name; u16 parent; const InvContainerDef *cd; } PanelSrc;
-
-// The player's grids in the quick-move order (pockets always; rig / backpack / secure when worn).
-static int player_panels(PanelSrc *out) {
-    Player *p = game_local_player();
-    const ItemDB *db = items();
-    if (!p || !db) return 0;
-    InvOrder o = inv_get_order();
-    int n = 0;
-    bool done[IQ_COUNT] = { false };
-    for (int pass = 0; pass < 2; pass++)
-        for (int i = 0; i < (pass ? IQ_COUNT : o.n); i++) {
-            int q = pass ? i : o.t[i];
-            if (done[q]) continue;
-            done[q] = true;
-            u16 parent;
-            if (!inv_quick_parent(&p->inv.t, (InvQuickTarget)q, &parent)) continue;
-            const InvContainerDef *cd = inv_parent_def(&p->inv.t, db, parent);
-            if (!cd) continue;
-            static const char *names[IQ_COUNT] = { "Tactical rig", "Backpack", "Pockets", "Secure container" };
-            out[n].name = parent ? item_def(db, inv_get(&p->inv.t, parent)->s.item)->name : names[q];
-            if (q == IQ_POCKETS) out[n].name = "Pockets";
-            out[n].parent = parent;
-            out[n].cd = cd;
-            n++;
-        }
-    return n;
-}
-
-static void draw_left(const PanelSrc *ps, int n) {
-    InvLayout *L = &V.L;
-    Player *p = game_local_player();
-    const ItemDB *db = items();
-    gw_panel(gui_rect(L->left.x - gui_s(8), L->left.y - gui_s(8), L->left.w + gui_s(16), L->left.h + gui_s(16)), true);
-    gui_block_rect(L->left);
-    gw_scroll_begin(&V.left_scroll, gui_id("inv_left_scroll"), L->left);
-    float oy = gw_scroll_y(&V.left_scroll) - L->left.y;
-    for (int i = 0; i < n; i++) {
-        GuiRect pr = L->panel[i];
-        pr.y += oy;
-        float kg = inv_parent_weight(&p->inv.t, db, ps[i].parent);
-        panel_title(gui_rect(pr.x + L->pad, pr.y, pr.w - 2 * L->pad, L->title_h), ps[i].name, kg, inv_cells_used(&p->inv.t, db, ps[i].parent), ps[i].cd->capacity,
-                    &V.filter[i], gui_idi("inv_filter", i));
-        sort_button(gui_rect(pr.x + L->pad, pr.y, pr.w - 2 * L->pad, L->title_h), INV_SIDE_SELF, ps[i].parent, gui_idi("inv_sort", i));
-        GuiRect origin = { pr.x + L->pad, pr.y + L->title_h, 0, 0 };
-        draw_grid(origin, L->left, INV_SIDE_SELF, ps[i].parent, ps[i].cd, V.filter[i], 0);
-    }
-    gw_scroll_end(&V.left_scroll, L->left_content_h + gui_s(8));
-}
-
-static void draw_equip(void) {
-    InvLayout *L = &V.L;
-    Player *p = game_local_player();
+// An equipment slot's frame: the slot name, its backdrop, the drag highlight, the shake. Returns the
+// content rect.
+static GuiRect slot_frame(GuiRect r, int slot, InvTarget me, const InvItem *it) {
     const ItemDB *db = items();
     InvView v = view();
-    for (int s = 0; s < EQ_COUNT; s++) {
-        GuiRect r = L->equip[s];
-        InvTarget me = { IT_EQUIP, INV_SIDE_SELF, 0, (i8)s, 0, 0, 0, 0 };
-        const InvItem *it = inv_equipped_c(&p->inv.t, s);
-        me.uid = it ? it->uid : 0;
-        hit_add(HK_EQUIP, r, r, me, 0);
-        pad_add(me, r, 1);
-        bool hover = V.hover.kind == IT_EQUIP && V.hover.index == s;
-        // The centre has no panel behind the player: each slot carries its own backdrop (the side
-        // panels' blur under the panel colour) so an empty one reads over a bright sky or floor and
-        // nothing sharp of the world (a label, a floor marker) shows through as if it were in it.
-        u32 border = gui_rgba_lerp(TH->panel_border, TH->text_faint, 0.35f), bg = TH->panel;
-        if (V.dd.state == IDD_DRAGGING && hover) {
-            InvDDOut o = idd_drop_on(&V.dd, me, &v);
-            bool ok = o.action == IDA_INTENT && dry_run(&o.in) == IIR_OK;
-            border = ok ? TH->ok : TH->danger;
-            bg = gui_rgba_lerp(bg, border, 0.2f);
-        } else if (V.dd.state == IDD_DRAGGING) {
-            const InvItem *c = item_of(V.dd.side, V.dd.uid);
-            if (c && V.dd.src.kind != IT_HOT && V.dd.src.kind != IT_ATTACH && inv_equip_accepts(s, item_def(db, c->s.item))) border = gui_rgba_mul(TH->accent, 0.8f);
-        }
-        float sh = shake_amount(me);
-        if (sh > 0) r.x += sinf(sh * 40.0f) * sh * gui_s(5);
-        gd_backdrop(gui_rect_inset(r, 1), WHITE);
-        gd_round_border(r, gui_s(TH->radius), 1, bg, border);
-        GuiText lab = { tpx(TH->t_tiny), GW_MEDIUM, it ? TH->text_faint : TH->text_dim, GUI_LEFT, TH->tracking_caps, true, false, r.w - gui_s(8) };
-        gd_text(&lab, r.x + gui_s(5), r.y + gui_s(3), short_slot_name(s));
-        if (it) {
-            float lh = gd_line_height(lab.size) + gui_s(4);
-            GuiRect ir = { r.x + gui_s(4), r.y + lh, r.w - gui_s(8), r.h - lh - gui_s(4) };
-            draw_item_tile(ir, it, INV_SIDE_SELF, false, me);
-            if (hover && V.dd.state == IDD_IDLE && !V.ctx.open) tooltip_for(gui_idi("inv_eq", s), INV_SIDE_SELF, it);
-        }
-        if (gui_nav_mode() && V.pad_cur < V.pad_n && V.pad_t[V.pad_cur].kind == IT_EQUIP && V.pad_t[V.pad_cur].index == s) gw_focus_ring(r, gui_s(TH->radius), 1.0f);
+    bool hover = V.hover.kind == IT_EQUIP && V.hover.side == me.side && V.hover.index == slot;
+    u32 border = gui_rgba_lerp(TH->panel_border, TH->text_faint, 0.35f), bg = TH->panel;
+    if (V.dd.state == IDD_DRAGGING && hover) {
+        InvDDOut o = idd_drop_on(&V.dd, me, &v);
+        bool ok = o.action == IDA_INTENT && dry_run(&o.in) == IIR_OK;
+        border = ok ? TH->ok : TH->danger;
+        bg = gui_rgba_lerp(bg, border, 0.2f);
+    } else if (V.dd.state == IDD_DRAGGING) {
+        const InvItem *c = item_of(V.dd.side, V.dd.uid);
+        if (c && V.dd.src.kind != IT_ATTACH && inv_equip_accepts(slot, item_def(db, c->s.item))) border = gui_rgba_mul(TH->accent, 0.8f);
+    } else if (hover) {
+        bg = gui_rgba_lerp(bg, TH->slot_hi, 0.6f);
     }
-    // Discard zone.
-    GuiRect d = L->discard;
-    InvTarget dt = { IT_DISCARD, 0, 0, 0, 0, 0, 0, 0 };
-    hit_add(HK_DISCARD, d, d, dt, 0);
-    bool over = V.dd.state == IDD_DRAGGING && V.hover.kind == IT_DISCARD;
-    bool dragging = V.dd.state == IDD_DRAGGING;
-    // A solid pill (the panel colour near opaque, a danger-tinted edge): visible over the scene before a
-    // drag starts, nothing of the world showing through it (a pill: no square blur backdrop).
-    u32 fill = min_alpha(over ? gui_rgba_lerp(TH->panel, TH->danger, 0.45f) : TH->panel, 0.95f);
-    u32 edge = over ? TH->danger : gui_rgba_lerp(TH->panel_border, TH->danger, dragging ? 0.8f : 0.45f);
-    gd_round_border(d, d.h * 0.5f, dragging ? fmaxf(1.0f, gui_s(1.5f)) : 1.0f, fill, edge);
-    gw_label_caps(d, "Discard", tpx(TH->t_label), over ? TH->text : dragging ? TH->text_dim : TH->text_faint, GUI_CENTER);
+    if (it && V.sel.uid == it->uid && V.sel.side == me.side) border = TH->select;
+    float sh = shake_amount(me);
+    if (sh > 0) r.x += sinf(sh * 40.0f) * sh * gui_s(5);
+    gd_backdrop(gui_rect_inset(r, 1), WHITE);
+    gd_round_border(r, gui_s(TH->radius), 1, bg, border);
+    GuiText lab = { tpx(TH->t_tiny), GW_MEDIUM, it ? TH->text_faint : TH->text_dim, GUI_LEFT, TH->tracking_caps, true, false, r.w - gui_s(8) };
+    gd_text(&lab, r.x + gui_s(5), r.y + gui_s(3), slot_name(slot));
+    if (pad_focused(IT_EQUIP, me.side, slot)) gw_focus_ring(r, gui_s(TH->radius), 1.0f);
+    float lh = gd_line_height(lab.size) + gui_s(4);
+    return gui_rect(r.x + gui_s(4), r.y + lh, r.w - gui_s(8), r.h - lh - gui_s(4));
 }
 
-static void draw_hotbar(void) {
-    InvLayout *L = &V.L;
-    Game *g = g_();
+// ------------------------------------------------------------------ left: slots, chips, inspect
+
+// A weapon slot: the image at its grid aspect, the name, the magazine / reserve and (drawn) the fire mode.
+static void draw_weapon_slot(int slot) {
+    GuiRect r = V.L.equip[slot];
     Player *p = game_local_player();
     const ItemDB *db = items();
-    InvView v = view();
-    gw_panel(gui_rect(L->right.x - gui_s(8), L->right.y - gui_s(8), L->right.w + gui_s(16), L->right.h + gui_s(16)), true);
-    gui_block_rect(L->right);
-    GuiText t = { tpx(TH->t_label), GW_SEMIBOLD, TH->text, GUI_LEFT, TH->tracking_caps, true, false, 0 };
-    gd_text(&t, L->right.x, L->right.y + gui_s(4), "Hotbar");
-    for (int k = 0; k < INV_HOTBAR; k++) {
-        GuiRect r = L->hot[k];
-        const InvSlot *s = inv_hot_c(&p->inv, k);
-        InvTarget me = { IT_HOT, INV_SIDE_SELF, 0, (i8)k, 0, s->item ? p->inv.quick[k] : 0, 0, 0 };
-        hit_add(HK_HOT, r, r, me, 0);
-        pad_add(me, r, 2);
-        bool sel = k == g->hotbar_slot;
-        bool hover = V.hover.kind == IT_HOT && V.hover.index == k;
-        u32 border = sel ? TH->select : TH->slot_border, bg = gui_rgba_mul(TH->slot_bg, 0.9f);
-        if (V.dd.state == IDD_DRAGGING && hover) {
-            InvDDOut o = idd_drop_on(&V.dd, me, &v);
-            bool ok = o.action == IDA_INTENT && dry_run(&o.in) == IIR_OK;
-            border = ok ? TH->ok : TH->danger;
-            bg = gui_rgba_lerp(bg, border, 0.2f);
-        } else if (hover) bg = gui_rgba_lerp(bg, TH->slot_hi, 0.6f);
-        float sh = shake_amount(me);
-        if (sh > 0) r.x += sinf(sh * 40.0f) * sh * gui_s(5);
-        gd_alpha_push(V.dd.state == IDD_DRAGGING && V.dd.src.kind == IT_HOT && V.dd.src.index == k ? 0.4f : 1.0f);
-        gd_round_border(gui_rect_inset(r, 1), gui_s(TH->radius), sel ? fmaxf(1.0f, gui_s(1.5f)) : 1.0f, bg, border);
-        char key[4];
-        snprintf(key, sizeof(key), "%d", k + 1);
-        GuiText kt = { tpx(TH->t_tiny), GW_SEMIBOLD, sel ? TH->select : TH->text_dim, GUI_LEFT, 0, false, false, 0 };
-        gd_text(&kt, r.x + gui_s(4), r.y + gui_s(2), key);
-        if (s->item) {
-            const InvItem *it = inv_get_c(&p->inv.t, p->inv.quick[k]);
-            inv_draw_item_image(gui_rect_inset(r, r.w * 0.14f), db, s, false, 1.0f);   // lying flat, at its grid aspect
-            const WeaponDef *wd = item_weapon(db, s->item);
-            char b[16] = "";
-            if (wd && wd->kind != WPN_MELEE && wd->mag_size > 0) snprintf(b, sizeof(b), "%d", k == p->sim.wpn.slot ? p->sim.wpn.mag : s->ammo);
-            else if (s->count > 1) snprintf(b, sizeof(b), "%d", s->count);
-            if (b[0]) {
-                GuiText at = { tpx(TH->t_tiny), GW_SEMIBOLD, TH->text, GUI_RIGHT, 0, false, true, 0 };
-                gd_text(&at, r.x + r.w - gui_s(4), r.y + r.h - gd_line_height(at.size) - gui_s(2), b);
-            }
-            if (hover && V.dd.state == IDD_IDLE && !V.ctx.open && it) tooltip_for(gui_idi("inv_hot", k), INV_SIDE_SELF, it);
+    const InvItem *it = inv_equipped_c(&p->inv.t, slot);
+    InvTarget me = { IT_EQUIP, INV_SIDE_SELF, 0, (i8)slot, 0, it ? it->uid : 0, 0, 0 };
+    hit_add(HK_EQUIP, r, r, me, 0);
+    pad_add(me, r, PR_SLOTS);
+    GuiRect c = slot_frame(r, slot, me, it);
+    if (!it) return;
+    gd_alpha_push(carrying(INV_SIDE_SELF, it->uid) ? 0.35f : 1.0f);
+    float fs = tpx(TH->t_small);
+    GuiRect img = { c.x, c.y, c.w * 0.62f, c.h - gd_line_height(fs) };
+    inv_draw_item_image(img, db, &it->s, false, 1.0f);
+    GuiText nm = { fs, GW_SEMIBOLD, TH->text, GUI_LEFT, 0, false, true, c.w * 0.6f };
+    gd_text(&nm, c.x + gui_s(2), c.y + c.h - gd_line_height(fs), revive_item_name(db, it->s.item, it->s.ammo));
+    const WeaponDef *wd = item_weapon(db, it->s.item);
+    if (wd && wd->kind != WPN_MELEE && wd->mag_size > 0) {
+        WeaponDef eff;
+        attach_weapon_effective(db, wd, it->s.att, &eff);
+        bool drawn = p->sim.wpn.slot == slot;
+        char b[48];
+        snprintf(b, sizeof(b), "%d / %d  \xC2\xB7  %d", drawn ? p->sim.wpn.mag : it->s.ammo, eff.mag_size, wd->ammo_item ? inv_count(&p->inv, wd->ammo_item) : 0);
+        GuiText at = { fs, GW_MEDIUM, TH->text_dim, GUI_RIGHT, 0, false, false, 0 };
+        gd_text(&at, c.x + c.w - gui_s(2), c.y + c.h - gd_line_height(fs), b);
+        if (drawn) {
+            GuiText fm = { tpx(TH->t_tiny), GW_SEMIBOLD, TH->select, GUI_RIGHT, TH->tracking_caps, true, false, 0 };
+            gd_text(&fm, c.x + c.w - gui_s(2), c.y, fire_mode_name((FireMode)p->sim.wpn.fire_mode));
         }
-        gd_alpha_pop();
-        if (gui_nav_mode() && V.pad_cur < V.pad_n && V.pad_t[V.pad_cur].kind == IT_HOT && V.pad_t[V.pad_cur].index == k) gw_focus_ring(r, gui_s(TH->radius), 1.0f);
     }
-    // The binds under the row (loot closed): key, name, magazine / reserve or the stack.
-    GuiRect ir = L->hot_info;
-    if (ir.h <= 0) return;
-    float rh = DG_MIN(ir.h / (float)INV_HOTBAR, gui_s(26));
-    bool hinted = false;   // the empty-slot hint once, a dash on the other empty rows
-    for (int k = 0; k < INV_HOTBAR; k++) {
-        GuiRect row = { ir.x, ir.y + (float)k * rh, ir.w, rh };
-        const InvSlot *s = inv_hot_c(&p->inv, k);
-        bool sel = k == g->hotbar_slot;
-        if (sel) gd_round(row, gui_s(TH->radius), gui_rgba_mul(TH->slot_hi, 0.5f));
-        float ty = row.y + (rh - gd_line_height(tpx(TH->t_small))) * 0.5f;
-        char key[4];
-        snprintf(key, sizeof(key), "%d", k + 1);
-        GuiText kt = { tpx(TH->t_small), GW_SEMIBOLD, sel ? TH->select : TH->text_dim, GUI_LEFT, 0, false, false, 0 };
-        gd_text(&kt, row.x + gui_s(6), ty, key);
-        if (!s->item) {
-            GuiText et = { tpx(TH->t_small), GW_REGULAR, TH->text_faint, GUI_LEFT, 0, false, false, 0 };
-            gd_text(&et, row.x + gui_s(26), ty, hinted ? "\xE2\x80\x94" : "Drag an item onto a tile");
-            hinted = true;
-            continue;
-        }
-        const ItemDef *d = item_def(db, s->item);
-        char b[48] = "";
-        const WeaponDef *wd = item_weapon(db, s->item);
-        if (wd && wd->kind != WPN_MELEE && wd->mag_size > 0) {
-            WeaponDef eff;
-            attach_weapon_effective(db, wd, s->att, &eff);
-            int mag = k == p->sim.wpn.slot ? p->sim.wpn.mag : s->ammo;
-            snprintf(b, sizeof(b), "%d / %d   \xC2\xB7   %d", mag, eff.mag_size, wd->ammo_item ? inv_count(&p->inv, wd->ammo_item) : 0);
-        } else if (s->count > 1 || d->max_stack > 1) {
-            snprintf(b, sizeof(b), "x%d", inv_count(&p->inv, s->item));
-        }
-        GuiText at = { tpx(TH->t_small), GW_MEDIUM, TH->text_dim, GUI_RIGHT, 0, false, false, 0 };
-        float aw = b[0] ? gd_text_width(&at, b) : 0.0f;
-        GuiText nm = { tpx(TH->t_small), GW_SEMIBOLD, TH->text, GUI_LEFT, 0, false, true, row.w - gui_s(26 + 16) - aw };
-        gd_text(&nm, row.x + gui_s(26), ty, revive_item_name(db, s->item, s->ammo));
-        if (b[0]) gd_text(&at, row.x + row.w - gui_s(8), ty, b);
-    }
+    gd_alpha_pop();
+    if (V.hover.kind == IT_EQUIP && V.hover.side == INV_SIDE_SELF && V.hover.index == slot && V.dd.state == IDD_IDLE && !V.ctx.open) tooltip_for(gui_idi("inv_eq", slot), it);
 }
 
-static const char *loot_name(void) {
-    Game *g = g_();
-    World *w = g->world;
-    EntityId e = game_loot_ent();
-    if (!ent_valid(w, e)) return "Container";
-    int i = (int)ENT_INDEX(e);
-    static char b[64];
-    switch (w->type[i]) {
-    case ET_CORPSE: snprintf(b, sizeof(b), "Body: %s", w->names[i][0] ? w->names[i] : "unknown"); return b;
-    case ET_VEHICLE: return "Trunk";
-    default: break;
-    }
-    InvTree *t = game_loot_tree();
-    const InvContainerDef *cd = t ? inv_root_def(t, items()) : NULL;
-    if (cd && !strcmp(cd->id, "cabinet")) return "Cabinet";
-    if (cd && !strcmp(cd->id, "wardrobe")) return "Wardrobe";
-    return "Crate";
-}
-
-static void draw_loot(void) {
-    InvLayout *L = &V.L;
-    InvTree *t = game_loot_tree();
+// The attachment chips of a weapon in a row (a weapon's own slots only): mounted attachment or an
+// empty outline with the slot name; drag an attachment in to mount it, drag a chip out to unmount.
+static void draw_chips(GuiRect row, int side, const InvItem *w, int region) {
     const ItemDB *db = items();
-    GuiRect r = L->loot;
-    if (!t) {
-        gw_label(r, "Opening\xE2\x80\xA6", tpx(TH->t_body), GW_REGULAR, TH->text_faint, GUI_CENTER);
+    const WeaponDef *wd = w ? item_weapon(db, w->s.item) : NULL;
+    if (!wd || wd->kind == WPN_MELEE) {
+        gw_label(row, w ? "Takes no attachments" : "", tpx(TH->t_tiny), GW_REGULAR, TH->text_faint, GUI_LEFT);
         return;
     }
-    const InvContainerDef *cd = inv_root_def(t, db);
-    GuiRect tr = { r.x, r.y, r.w, L->title_h };
-    panel_title(tr, loot_name(), inv_tree_weight(t, db), inv_cells_used(t, db, 0), cd->capacity, &V.filter[INV_UI_MAX_PANELS], gui_id("inv_filter_loot"));
-    GuiRect ta = { r.x, r.y + r.h - gui_s(TH->button_h + 4), gui_s(120), gui_s(TH->button_h + 4) };
-    if (gw_button(gui_id("inv_take_all"), ta, "Take all", GB_PRIMARY, true)) {
-        InvIntent in;
-        memset(&in, 0, sizeof(in));
-        in.type = II_TAKE_ALL;
-        in.src_side = in.dst_side = INV_SIDE_LOOT;
-        int left = 0;
-        int r = dry_run_left(&in, &left);
-        // Take all takes what fits: say so when some of it stays (no room in the pockets / packs).
-        if (inv_screen_send(in) == IIR_OK && r == IIR_OK && left > 0) {
-            char msg[64];
-            if (left == 1) snprintf(msg, sizeof(msg), "No room for 1 item");
-            else snprintf(msg, sizeof(msg), "No room for %d items", left);
-            inv_screen_toast(msg);
+    int n = 0;
+    for (int k = 0; k < ATT_SLOTS; k++) n += wd->att_slots[k].present;
+    if (!n) return;
+    float gap = gui_s(6), cw = fminf(row.h, (row.w - gap * (float)(ATT_SLOTS - 1)) / (float)ATT_SLOTS);
+    InvView v = view();
+    int col = 0;
+    for (int k = 0; k < ATT_SLOTS; k++) {
+        if (!wd->att_slots[k].present) continue;
+        GuiRect chip = { row.x + (cw + gap) * (float)col++, row.y, cw, cw };
+        InvTarget me = { IT_ATTACH, (u8)side, 0, (i8)k, 0, w->uid, 0, 0 };
+        hit_add(HK_ATTACH, chip, chip, me, 0);
+        pad_add(me, chip, region);
+        GuiSlotView sv;
+        InvSlot fake;
+        memset(&fake, 0, sizeof(fake));
+        fake.item = item_for_attachment(db, w->s.att[k]);
+        fake.count = fake.item ? 1 : 0;
+        inventory_slot_view(&fake, db, -1, &sv);
+        bool hover = V.hover.kind == IT_ATTACH && V.hover.uid == w->uid && V.hover.side == side && V.hover.index == k;
+        sv.hot = hover;
+        if (V.dd.state == IDD_DRAGGING && hover) {
+            InvDDOut o = idd_drop_on(&V.dd, me, &v);
+            sv.drop_state = o.action == IDA_INTENT && dry_run(&o.in) == IIR_OK ? 1 : 2;
+        } else if (V.dd.state == IDD_DRAGGING && V.dd.src.kind != IT_ATTACH) {
+            const InvItem *src = item_of(V.dd.side, V.dd.uid);
+            int aslot;
+            if (src && inv_attach_check(db, &w->s, src->s.item, &aslot) == IIR_OK && aslot == k) sv.drop_state = 1;
         }
+        sv.shake = shake_amount(me);
+        sv.focus = gui_nav_mode() && V.pad_cur < V.pad_n && V.pad_t[V.pad_cur].kind == IT_ATTACH && V.pad_t[V.pad_cur].uid == w->uid && V.pad_t[V.pad_cur].index == k;
+        if (V.dd.state == IDD_DRAGGING && V.dd.src.kind == IT_ATTACH && V.dd.uid == w->uid && V.dd.src.index == k) sv.dim = true;
+        gw_slot(chip, &sv);
+        if (!fake.item) gw_label_caps(chip, attach_slot_name(k), fminf(tpx(TH->t_tiny) * 0.85f, cw * 0.22f), TH->text_faint, GUI_CENTER);
+        if (hover && V.dd.state == IDD_IDLE) gui_tooltip(gui_idi("inv_att", side * 4096 + w->uid * 8 + k), fake.item ? item_def(db, fake.item)->name : attach_slot_name(k));
     }
-    sort_button(tr, INV_SIDE_LOOT, 0, gui_id("inv_sort_loot"));
-    GuiRect clip = { r.x, r.y + L->title_h, r.w, r.h - L->title_h - ta.h - L->gap };
-    // Tall containers (a stash, a corpse's pockets and packs open in windows) scroll.
-    int cols, rows;
-    inv_container_extent(cd, &cols, &rows);
-    gw_scroll_begin(&V.loot_scroll, gui_id("inv_loot_scroll"), clip);
-    float y = gw_scroll_y(&V.loot_scroll), y0 = y;
-    if (cd->equip) {
-        // A body (corpse): its equipment as tiles, the worn containers' grids, then the pockets.
-        float q = 1.6f * L->cell, x = r.x;
-        bool any = false;
-        for (int sl = 0; sl < EQ_COUNT; sl++) {
-            const InvItem *it = inv_equipped_c(t, sl);
-            if (!it) continue;
-            any = true;
-            if (x + q > r.x + r.w) { x = r.x; y += q + L->gap; }
-            GuiRect er = { x, y, q, q };
-            InvTarget me = { IT_EQUIP, INV_SIDE_LOOT, 0, (i8)sl, 0, it->uid, 0, 0 };
-            hit_add(HK_EQUIP, er, clip, me, 0);
-            if (gui_rect_contains(clip, er.x + q * 0.5f, er.y + q * 0.5f)) pad_add(me, er, 3);
-            draw_item_tile(er, it, INV_SIDE_LOOT, false, me);
-            if (V.hover.kind == IT_EQUIP && V.hover.side == INV_SIDE_LOOT && V.hover.index == sl && V.dd.state == IDD_IDLE && !V.ctx.open)
-                tooltip_for(gui_idi("inv_leq", sl), INV_SIDE_LOOT, it);
-            x += q + L->gap;
-        }
-        if (any) y += q + L->gap;
-        static const int worn[3] = { EQ_RIG, EQ_BACKPACK, EQ_SECURE };
-        for (int k = 0; k < 3; k++) {
-            const InvItem *c = inv_equipped_c(t, worn[k]);
-            const InvContainerDef *ccd = c ? item_container(db, c->s.item) : NULL;
-            if (!ccd) continue;
-            int cc, cr;
-            inv_container_extent(ccd, &cc, &cr);
-            GuiText st = { tpx(TH->t_small), GW_SEMIBOLD, TH->text_dim, GUI_LEFT, TH->tracking_caps, true, false, r.w };
-            gd_text(&st, r.x, y + gui_s(2), item_def(db, c->s.item)->name);
-            y += gui_s(20);
-            draw_grid(gui_rect(r.x, y, 0, 0), clip, INV_SIDE_LOOT, c->uid, ccd, V.filter[INV_UI_MAX_PANELS], 3);
-            y += (float)cr * L->cell + L->gap;
-        }
-        GuiText st = { tpx(TH->t_small), GW_SEMIBOLD, TH->text_dim, GUI_LEFT, TH->tracking_caps, true, false, r.w };
-        gd_text(&st, r.x, y + gui_s(2), "Pockets");
-        y += gui_s(20);
-    }
-    draw_grid(gui_rect(r.x, y, 0, 0), clip, INV_SIDE_LOOT, 0, cd, V.filter[INV_UI_MAX_PANELS], 3);
-    y += (float)rows * L->cell;
-    gw_scroll_end(&V.loot_scroll, y - y0 + gui_s(4));
 }
 
-// ------------------------------------------------------------------ windows (nested containers, inspect)
-
-static GuiRect window_frame(vec2 *pos, bool *dragging, vec2 *grab, float w, float h, const char *title, GuiId id, bool *close) {
-    GuiRect r = { pos->x, pos->y, w, h };
-    r.x = clampf(r.x, 0, gui_w() - w);
-    r.y = clampf(r.y, 0, gui_h() - h);
-    *pos = v2(r.x, r.y);
-    int layer = gd_layer();
-    gd_set_layer(GL_OVERLAY);
-    gw_panel(r, true);
-    gui_block_rect(r);
-    hit_add(HK_BLOCK, r, r, (InvTarget){ IT_PANEL, 0, 0, 0, 0, 0, 0, 0 }, 0);
-    GuiRect bar = { r.x, r.y, r.w, gui_s(30) };
-    GuiInteract in = gui_interact(id, bar, 0);
-    if (in.pressed && V.dd.state == IDD_IDLE) { *dragging = true; *grab = v2(gui_mouse().x - r.x, gui_mouse().y - r.y); }
-    if (*dragging) {
-        if (!gui_mouse_down(0)) *dragging = false;
-        else *pos = v2(gui_mouse().x - grab->x, gui_mouse().y - grab->y);
-    }
-    GuiText t = { tpx(TH->t_label), GW_SEMIBOLD, TH->text, GUI_LEFT, TH->tracking_caps, true, false, r.w - gui_s(50) };
-    gd_text(&t, r.x + gui_s(12), r.y + gui_s(8), title);
-    GuiRect x = { r.x + r.w - gui_s(28), r.y + gui_s(4), gui_s(22), gui_s(22) };
-    GuiInteract xi = gui_interact(id + 1, x, 0);
-    gd_round(x, gui_s(TH->radius), xi.hot ? TH->hover : 0);
-    gw_label(x, "\xC3\x97", tpx(TH->t_body), GW_MEDIUM, xi.hot ? TH->text : TH->text_faint, GUI_CENTER);
-    *close = xi.clicked;
-    gd_set_layer(layer);
-    return gui_rect(r.x + gui_s(12), r.y + gui_s(34), r.w - gui_s(24), r.h - gui_s(44));
-}
-
-static void draw_windows(void) {
+// A gear slot (helmet, plate carrier, backpack): the image, the plates / grid / durability.
+static void draw_gear_slot(int slot) {
+    GuiRect r = V.L.equip[slot];
+    Player *p = game_local_player();
     const ItemDB *db = items();
-    for (int i = 0; i < MAX_WINS; i++) {
-        Win *w = &V.win[i];
-        if (!w->open) continue;
-        const InvItem *it = item_of(w->side, w->uid);
-        const InvContainerDef *cd = it ? item_container(db, it->s.item) : NULL;
-        if (!cd) { w->open = false; continue; }
-        int cols, rows;
-        inv_container_extent(cd, &cols, &rows);
-        float cw = (float)cols * V.L.cell + gui_s(24) + (float)cols * gui_s(3), ch = (float)rows * V.L.cell + gui_s(48);
-        bool close = false;
-        GuiRect c = window_frame(&w->pos, &w->dragging, &w->grab, fmaxf(cw, gui_s(220)), ch, item_def(db, it->s.item)->name, gui_idi("inv_win", i * 2), &close);
-        int layer = gd_layer();
-        gd_set_layer(GL_OVERLAY);
-        draw_grid(gui_rect(c.x, c.y, 0, 0), gui_rect(c.x - 1, c.y - 1, c.w + 2, c.h + 2), w->side, w->uid, cd, 0, 4 + i);
-        gd_set_layer(layer);
-        if (close) w->open = false;
+    const InvItem *it = inv_equipped_c(&p->inv.t, slot);
+    InvTarget me = { IT_EQUIP, INV_SIDE_SELF, 0, (i8)slot, 0, it ? it->uid : 0, 0, 0 };
+    hit_add(HK_EQUIP, r, r, me, 0);
+    pad_add(me, r, PR_SLOTS);
+    GuiRect c = slot_frame(r, slot, me, it);
+    float fs = tpx(TH->t_tiny);
+    char b[32] = "";
+    if (slot == EQ_BODY_ARMOR || (slot == EQ_HEADWEAR && !it)) {
+        // The plates the player holds: 1 without a carrier, its plates with one (docs/DAMAGE.md "Armor").
+        const Health *h = game_world() ? &game_world()->health[ENT_INDEX(p->ent)] : NULL;
+        if (slot == EQ_BODY_ARMOR && h) snprintf(b, sizeof(b), "%d/%d plates", (int)ceilf(h->armor / ARMOR_PER_PLATE - 0.01f), (int)lrintf(h->max_armor / ARMOR_PER_PLATE));
+    }
+    if (it) {
+        gd_alpha_push(carrying(INV_SIDE_SELF, it->uid) ? 0.35f : 1.0f);
+        inv_draw_item_image(gui_rect(c.x, c.y, c.w, c.h - gd_line_height(fs)), db, &it->s, false, 1.0f);
+        const ItemDef *d = item_def(db, it->s.item);
+        if (slot == EQ_BACKPACK) {
+            int cc, cr;
+            inv_grid_size(&p->inv.t, db, &cc, &cr);
+            snprintf(b, sizeof(b), "%d x %d", cc, cr);
+        } else if (d->durability) {
+            snprintf(b, sizeof(b), "%d / %d", it->dur, d->durability);
+        }
+        gd_alpha_pop();
+        if (V.hover.kind == IT_EQUIP && V.hover.side == INV_SIDE_SELF && V.hover.index == slot && V.dd.state == IDD_IDLE && !V.ctx.open) tooltip_for(gui_idi("inv_eq", slot), it);
+    }
+    if (b[0]) {
+        GuiText t = { fs, GW_MEDIUM, TH->text_dim, GUI_CENTER, 0, false, true, c.w };
+        gd_text(&t, c.x + c.w * 0.5f, c.y + c.h - gd_line_height(fs), b);
     }
 }
 
@@ -895,7 +644,7 @@ static void stat_line(GuiCursor *c, const char *label, const char *value, float 
 
 static float pct(float now, float base) { return base != 0.0f ? 100.0f * (now - base) / fabsf(base) : 0.0f; }
 
-static void item_stats(GuiCursor *c, const InvItem *it, int side) {
+static void item_stats(GuiCursor *c, const InvItem *it) {
     const ItemDB *db = items();
     const InvSlot *s = &it->s;
     const ItemDef *d = item_def(db, s->item);
@@ -907,8 +656,6 @@ static void item_stats(GuiCursor *c, const InvItem *it, int side) {
     if (bw != DG_MAX(1, d->grid_w) || bh != DG_MAX(1, d->grid_h) || (it->flags & INVF_FOLDED)) snprintf(v, sizeof(v), "%dx%d (base %dx%d)", w, h, d->grid_w, d->grid_h);
     else snprintf(v, sizeof(v), "%dx%d", w, h);
     stat_line(c, "Footprint", v, 0, true);
-    snprintf(v, sizeof(v), "%.2f kg", inv_item_weight(inv_screen_tree(side), db, it));
-    stat_line(c, "Weight", v, 0, true);
     if (wd) {
         WeaponDef eff;
         attach_weapon_effective(db, wd, s->att, &eff);
@@ -939,31 +686,41 @@ static void item_stats(GuiCursor *c, const InvItem *it, int side) {
     }
     const InvContainerDef *cd = item_container(db, s->item);
     if (cd) {
-        snprintf(v, sizeof(v), "%d cells, %d compartment%s", cd->capacity, cd->comp_count, cd->comp_count > 1 ? "s" : "");
-        stat_line(c, "Holds", v, 0, true);
+        int cc, cr;
+        inv_container_extent(cd, &cc, &cr);
+        snprintf(v, sizeof(v), "%d x %d", cc, cr);
+        stat_line(c, "Grid", v, 0, true);
     }
+    if (d->plates) { snprintf(v, sizeof(v), "%d (without: %d)", d->plates, ARMOR_BASE_PLATES); stat_line(c, "Plates", v, 0, true); }
     if (d->durability) { snprintf(v, sizeof(v), "%d / %d", it->dur, d->durability); stat_line(c, "Durability", v, 0, true); }
 }
 
+// The inspect panel (docked under the slots): the selected item turning in 3D, its attachments,
+// what it is and its stats.
 static void draw_inspect(void) {
-    if (!V.insp.open) return;
+    GuiRect pr = V.L.inspect;
+    if (pr.h < gui_s(60)) return;
+    gw_panel(pr, true);
+    gui_block_rect(pr);
+    hit_add(HK_BLOCK, pr, pr, (InvTarget){ IT_PANEL, 0, 0, 0, 0, 0, 0, 0 }, 0);
+    GuiRect c = gui_rect_inset(pr, V.L.pad);
     const ItemDB *db = items();
-    const InvItem *it = item_of(V.insp.side, V.insp.uid);
-    if (!it) { V.insp.open = false; return; }
-    const ItemDef *d = item_def(db, it->s.item);
-    const WeaponDef *wd = item_weapon(db, it->s.item);
-    bool close = false;
-    float ww = gui_s(440), wh = gui_s(wd ? 560 : 460);
-    char title[80];
-    snprintf(title, sizeof(title), "Inspect: %s", revive_item_name(db, it->s.item, it->s.ammo));
-    GuiRect c = window_frame(&V.insp.pos, &V.insp.dragging, &V.insp.grab, ww, wh, title, gui_id("inv_insp"), &close);
-    if (close) {
-        V.insp.open = false;
+    const InvItem *it = item_of(V.sel.side, V.sel.uid);
+    if (!it) {
+        memset(&V.sel, 0, sizeof(V.sel));
+        gw_label(c, "Select an item to inspect it", tpx(TH->t_small), GW_REGULAR, TH->text_faint, GUI_CENTER);
         return;
     }
-    int layer = gd_layer();
-    gd_set_layer(GL_OVERLAY);
-    GuiRect vr = { c.x, c.y, c.w, c.w * 0.5f };
+    const ItemDef *d = item_def(db, it->s.item);
+    const WeaponDef *wd = item_weapon(db, it->s.item);
+    float a = gui_ease_out(gui_anim_t(gui_id("inv_insp_in")) / TH->modal_in);
+    gd_alpha_push(a);
+    GuiText title = { tpx(TH->t_label), GW_SEMIBOLD, TH->text, GUI_LEFT, TH->tracking_caps, true, true, c.w * 0.65f };
+    gd_text(&title, c.x, c.y, revive_item_name(db, it->s.item, it->s.ammo));
+    GuiText kind = { tpx(TH->t_tiny), GW_SEMIBOLD, type_color(d), GUI_RIGHT, TH->tracking_caps, true, false, 0 };
+    gd_text(&kind, c.x + c.w, c.y + gui_s(1), cat_name(d->category));
+    float ty = c.y + gd_line_height(title.size) + gui_s(4);
+    GuiRect vr = { c.x, ty, c.w, fminf(c.w * 0.5f, (c.y + c.h - ty) * 0.45f) };
     if (V.insp.cam_item != it->s.item) {
         item_view_default_cam(db, it->s.item, &V.insp.cam);
         V.insp.cam.zoom = wd ? 1.2f : 0.85f;
@@ -1007,47 +764,241 @@ static void draw_inspect(void) {
     render_ui3d(&rv);
     gd_image(vr, V.insp.tex, v4(0, 0, 1, 1), WHITE);
     GuiCursor cur = gc_make(gui_rect(c.x, vr.y + vr.h + gui_s(6), c.w, 10000), gui_s(2));
-    // Attachment slots (drag attachments in / out; the footprint line updates live).
+    // The attachment chips of any weapon (the slot column shows the primary's and secondary's too).
     if (wd && wd->kind != WPN_MELEE) {
-        float gap = gui_s(6), cw = (c.w - gap * (float)(ATT_SLOTS - 1)) / (float)ATT_SLOTS;
-        GuiRect row = gc_row(&cur, cw + gui_s(16));
-        int col = 0;
-        InvView v = view();
-        for (int k = 0; k < ATT_SLOTS; k++) {
-            if (!wd->att_slots[k].present) continue;
-            GuiRect chip = { row.x + (cw + gap) * (float)col++, row.y, cw, cw };
-            InvTarget me = { IT_ATTACH, V.insp.side, 0, (i8)k, 0, it->uid, 0, 0 };
-            hit_add(HK_ATTACH, chip, chip, me, 0);
-            pad_add(me, chip, 6);
-            GuiSlotView sv;
-            InvSlot fake;
-            memset(&fake, 0, sizeof(fake));
-            fake.item = item_for_attachment(db, it->s.att[k]);
-            fake.count = fake.item ? 1 : 0;
-            inventory_slot_view(&fake, db, -1, &sv);
-            bool hover = V.hover.kind == IT_ATTACH && V.hover.index == k;
-            sv.hot = hover;
-            if (V.dd.state == IDD_DRAGGING && hover) {
-                InvDDOut o = idd_drop_on(&V.dd, me, &v);
-                sv.drop_state = o.action == IDA_INTENT && dry_run(&o.in) == IIR_OK ? 1 : 2;
-            }
-            sv.shake = shake_amount(me);
-            if (V.dd.state == IDD_DRAGGING && V.dd.src.kind == IT_ATTACH && V.dd.src.index == k) sv.dim = true;
-            gw_slot(chip, &sv);
-            gw_label_caps(gui_rect(chip.x, chip.y + chip.h + gui_s(1), chip.w, gui_s(14)), attach_slot_name(k), tpx(TH->t_tiny), hover ? TH->text : TH->text_faint, GUI_CENTER);
-            if (hover && fake.item && V.dd.state == IDD_IDLE) gui_tooltip(gui_idi("inv_att", k), item_def(db, fake.item)->name);
-        }
+        float ch = fminf(gui_s(40), (c.w - gui_s(24)) / (float)ATT_SLOTS);
+        draw_chips(gc_row(&cur, ch), V.sel.side, it, PR_INSPECT);
     }
-    GuiText kind = { tpx(TH->t_label), GW_SEMIBOLD, type_color(d), GUI_LEFT, TH->tracking_caps, true, false, 0 };
-    GuiRect kr = gc_row(&cur, gui_s(18));
-    gd_text(&kind, kr.x, kr.y, item_kind_name(d->kind));
     GuiText desc = { tpx(TH->t_small + 1), GW_REGULAR, TH->text_dim, GUI_LEFT, 0, false, false, 0 };
+    gd_clip_push(gui_rect(c.x, cur.y, c.w, c.y + c.h - cur.y));
     float dh = gd_text_wrap(&desc, cur.area.x, cur.y, cur.area.w, d->desc, true);
     cur.y += dh + gui_s(8);
-    gd_clip_push(gui_rect(c.x, cur.y, c.w, c.y + c.h - cur.y));
-    item_stats(&cur, it, V.insp.side);
+    item_stats(&cur, it);
     gd_clip_pop();
-    gd_set_layer(layer);
+    gd_alpha_pop();
+}
+
+static void draw_left(void) {
+    Player *p = game_local_player();
+    static const int weapons[3] = { EQ_PRIMARY, EQ_SECONDARY, EQ_HOLSTER };
+    for (int i = 0; i < 3; i++) {
+        draw_weapon_slot(weapons[i]);
+        if (i < INV_UI_WEAPON_ROWS) draw_chips(V.L.att_row[i], INV_SIDE_SELF, inv_equipped_c(&p->inv.t, weapons[i]), PR_CHIPS);
+    }
+    static const int gear[3] = { EQ_HEADWEAR, EQ_BODY_ARMOR, EQ_BACKPACK };
+    for (int i = 0; i < 3; i++) draw_gear_slot(gear[i]);
+    draw_inspect();
+}
+
+// ------------------------------------------------------------------ centre: the character
+
+// The second render of the player (gameplay/characters.h chars_preview): the same model and
+// cosmetics, its own idle pose, the worn gear, alone on a transparent background over the blur.
+// Dropping a weapon or gear on it equips it; dragging it turns it.
+static void draw_character(void) {
+    InvLayout *L = &V.L;
+    Game *g = g_();
+    Player *p = game_local_player();
+    GuiRect r = L->player;
+    float s = gui_scale() > 0 ? gui_scale() : 1.0f;
+    (void)s;
+    if (g && g->world && p) {
+        CharPreviewIn in;
+        memset(&in, 0, sizeof(in));
+        in.w = (int)lrintf(r.w);
+        in.h = (int)lrintf(r.h);
+        in.yaw = V.char_yaw;
+        static const int worn[CWORN_COUNT] = { EQ_HEADWEAR, EQ_BODY_ARMOR, EQ_BACKPACK };
+        for (int k = 0; k < CWORN_COUNT; k++) {
+            const InvItem *it = inv_equipped_c(&p->inv.t, worn[k]);
+            in.worn[k] = it ? it->s.item : 0;
+        }
+        TextureId tex = chars_preview(g->world, g->local_slot, &in);
+        if (tex) gd_image(r, tex, v4(0, 0, 1, 1), WHITE);
+    }
+    // The drop target: the body's middle (not the empty sides of the column).
+    GuiRect body = { r.x + r.w * 0.25f, r.y + r.h * 0.12f, r.w * 0.5f, r.h * 0.76f };
+    InvTarget me = { IT_CHAR, INV_SIDE_SELF, 0, 0, 0, 0, 0, 0 };
+    hit_add(HK_CHAR, body, body, me, 0);
+    if (V.dd.state == IDD_DRAGGING && V.dd.src.kind != IT_ATTACH) {
+        InvView v = view();
+        InvDDOut o = idd_drop_on(&V.dd, me, &v);
+        if (o.action == IDA_INTENT) {
+            bool over = V.hover.kind == IT_CHAR;
+            bool ok = dry_run(&o.in) == IIR_OK;
+            u32 c = over ? (ok ? TH->ok : TH->danger) : TH->accent;
+            gd_round_outline(body, gui_s(TH->radius_panel), over ? fmaxf(1.0f, gui_s(1.5f)) : 1.0f, gui_rgba_mul(c, over ? 0.9f : 0.35f));
+            GuiText t = { tpx(TH->t_small), GW_SEMIBOLD, gui_rgba_mul(TH->text, over ? 1.0f : 0.6f), GUI_CENTER, TH->tracking_caps, true, false, 0 };
+            gd_text(&t, body.x + body.w * 0.5f, body.y + body.h - gui_s(28), "Drop to equip");
+        }
+    }
+    // Drag on the character (not carrying anything): turn it.
+    GuiInteract ci = gui_interact(gui_id("inv_char"), body, 0);
+    if (ci.pressed && V.dd.state == IDD_IDLE) { V.char_drag = true; V.char_from = gui_mouse().x; }
+    if (V.char_drag) {
+        if (!gui_mouse_down(0)) V.char_drag = false;
+        else { V.char_yaw += (gui_mouse().x - V.char_from) * 0.01f; V.char_from = gui_mouse().x; }
+    } else {
+        V.char_yaw *= 1.0f - saturate(gui_dt() * 3.0f);   // eases back to facing the camera
+    }
+    // Discard zone: a solid pill (the panel colour near opaque, a danger-tinted edge).
+    GuiRect d = L->discard;
+    InvTarget dt = { IT_DISCARD, 0, 0, 0, 0, 0, 0, 0 };
+    hit_add(HK_DISCARD, d, d, dt, 0);
+    bool over = V.dd.state == IDD_DRAGGING && V.hover.kind == IT_DISCARD;
+    bool dragging = V.dd.state == IDD_DRAGGING;
+    u32 fill = min_alpha(over ? gui_rgba_lerp(TH->panel, TH->danger, 0.45f) : TH->panel, 0.95f);
+    u32 edge = over ? TH->danger : gui_rgba_lerp(TH->panel_border, TH->danger, dragging ? 0.8f : 0.45f);
+    gd_round_border(d, d.h * 0.5f, dragging ? fmaxf(1.0f, gui_s(1.5f)) : 1.0f, fill, edge);
+    gw_label_caps(d, "Discard", tpx(TH->t_label), over ? TH->text : dragging ? TH->text_dim : TH->text_faint, GUI_CENTER);
+}
+
+// ------------------------------------------------------------------ right: categories, loot, grid
+
+static void draw_cats(void) {
+    GuiRect r = V.L.cats;
+    float h = gui_s(24), gap = gui_s(6), x = r.x, y = r.y;
+    float fs = tpx(TH->t_tiny + 1);
+    GuiText t = { fs, GW_MEDIUM, 0, GUI_CENTER, TH->tracking_caps, true, false, 0 };
+    GuiRect cr = gui_rect(r.x + r.w - gui_s(92), r.y, gui_s(92), h);   // Compact, top right
+    for (int i = 0; i <= ICAT_COUNT; i++) {
+        const char *name = i ? cat_name(i - 1) : "All";
+        float w = gd_text_width(&t, name) + gui_s(20);
+        if (x + w > (y == r.y ? cr.x - gap : r.x + r.w)) { x = r.x; y += h + gap * 0.5f; }
+        GuiRect chip = { x, y, w, h };
+        GuiInteract in = gui_interact(gui_idi("inv_cat", i), chip, 0);
+        bool on = V.cat == i;
+        gd_round_border(chip, h * 0.5f, 1, on ? gui_rgba_mul(TH->select, 0.9f) : (in.hot ? TH->hover : gui_rgba_mul(TH->slot_bg, 0.8f)), on ? TH->select : TH->slot_border);
+        gw_label_caps(chip, name, fs, on ? TH->text_dark : (in.hot ? TH->text : TH->text_dim), GUI_CENTER);
+        if (in.clicked) { V.cat = on ? 0 : i; gui_sound(TH->snd_click); }
+        x += w + gap;
+    }
+    GuiInteract ci = gui_interact(gui_id("inv_compact"), cr, 0);
+    gd_round_border(cr, gui_s(TH->radius), 1, ci.hot ? TH->hover : gui_rgba_mul(TH->slot_bg, 0.8f), TH->slot_border);
+    gw_label_caps(cr, "Compact", fs, ci.hot ? TH->text : TH->text_dim, GUI_CENTER);
+    if (ci.hovered) gui_tooltip(gui_id("inv_compact"), "Pack the backpack: largest items first");
+    if (ci.clicked) {
+        InvIntent s;
+        memset(&s, 0, sizeof(s));
+        s.type = II_COMPACT;
+        s.dst_side = INV_SIDE_SELF;
+        inv_screen_send(s);
+    }
+}
+
+static const char *loot_name(void) {
+    Game *g = g_();
+    World *w = g->world;
+    EntityId e = game_loot_ent();
+    if (!ent_valid(w, e)) return "Container";
+    int i = (int)ENT_INDEX(e);
+    static char b[64];
+    switch (w->type[i]) {
+    case ET_CORPSE: snprintf(b, sizeof(b), "Body: %s", w->names[i][0] ? w->names[i] : "unknown"); return b;
+    case ET_VEHICLE: return "Trunk";
+    default: break;
+    }
+    InvTree *t = game_loot_tree();
+    const InvContainerDef *cd = t ? inv_root_def(t, items()) : NULL;
+    if (cd && !strcmp(cd->id, "cabinet")) return "Cabinet";
+    if (cd && !strcmp(cd->id, "wardrobe")) return "Wardrobe";
+    if (cd && !strcmp(cd->id, "stash")) return "Stash";
+    return "Crate";
+}
+
+static void cells_note(char *b, size_t n, const InvTree *t, u16 grid) {
+    const ItemDB *db = items();
+    int cc, cr;
+    inv_grid_size(t, db, &cc, &cr);
+    snprintf(b, n, "%d / %d cells", inv_cells_used(t, db, grid), cc * cr);
+}
+
+// The world container (above the player's grid): its name and Take all, a body's equipment row, its grid.
+static void draw_loot(float oy) {
+    InvLayout *L = &V.L;
+    InvTree *t = game_loot_tree();
+    const ItemDB *db = items();
+    GuiRect r = L->loot;
+    r.y += oy;
+    gw_panel(r, true);
+    GuiRect c = gui_rect(r.x + L->pad, r.y, r.w - 2 * L->pad, r.h);
+    if (!t) {
+        gw_label(c, "Opening\xE2\x80\xA6", tpx(TH->t_body), GW_REGULAR, TH->text_faint, GUI_CENTER);
+        return;
+    }
+    u16 grid = inv_grid(t, db);
+    char note[48] = "";
+    if (grid != INV_NO_GRID) cells_note(note, sizeof(note), t, grid);
+    panel_title(gui_rect(c.x, c.y, c.w, L->title_h), loot_name(), note);
+    float y = c.y + L->title_h;
+    if (inv_root_def(t, db)->equip) {
+        // A body: what it wears as tiles (a corpse is looted, not dressed).
+        float q = 1.6f * L->cell, x = c.x;
+        for (int sl = 0; sl < EQ_COUNT; sl++) {
+            const InvItem *it = inv_equipped_c(t, sl);
+            if (!it) continue;
+            if (x + q > c.x + c.w) break;
+            GuiRect er = { x, y, q, q };
+            InvTarget me = { IT_EQUIP, INV_SIDE_LOOT, 0, (i8)sl, 0, it->uid, 0, 0 };
+            hit_add(HK_EQUIP, er, L->view, me, 0);
+            if (gui_rect_contains(L->view, er.x + q * 0.5f, er.y + q * 0.5f)) pad_add(me, er, PR_LOOT);
+            draw_item_tile(er, it, INV_SIDE_LOOT, inv_cat_dims(V.cat, item_def(db, it->s.item)), me);
+            if (V.hover.kind == IT_EQUIP && V.hover.side == INV_SIDE_LOOT && V.hover.index == sl && V.dd.state == IDD_IDLE && !V.ctx.open)
+                tooltip_for(gui_idi("inv_leq", sl), it);
+            x += q + L->gap;
+        }
+        y += q + L->gap;
+    }
+    if (grid != INV_NO_GRID) draw_grid(gui_rect(c.x, y, 0, 0), L->view, INV_SIDE_LOOT, grid, inv_parent_def(t, db, grid), PR_LOOT);
+    GuiRect ta = { c.x + c.w - gui_s(120), r.y + r.h - gui_s(TH->button_h + 6), gui_s(120), gui_s(TH->button_h) };
+    if (gui_rect_contains(L->view, ta.x, ta.y) && gw_button(gui_id("inv_take_all"), ta, "Take all", GB_PRIMARY, true)) {
+        InvIntent in;
+        memset(&in, 0, sizeof(in));
+        in.type = II_TAKE_ALL;
+        in.src_side = in.dst_side = INV_SIDE_LOOT;
+        int left = 0;
+        int rr = dry_run_left(&in, &left);
+        // Take all takes what fits: say so when some of it stays (no room in the backpack).
+        if (inv_screen_send(in) == IIR_OK && rr == IIR_OK && left > 0) {
+            char msg[64];
+            if (left == 1) snprintf(msg, sizeof(msg), "No room for 1 item");
+            else snprintf(msg, sizeof(msg), "No room for %d items", left);
+            inv_screen_toast(msg);
+        }
+    }
+}
+
+// The player's grid: the worn backpack's, titled with its name and size.
+static void draw_own_grid(float oy) {
+    InvLayout *L = &V.L;
+    Player *p = game_local_player();
+    const ItemDB *db = items();
+    GuiRect r = L->grid;
+    r.y += oy;
+    gw_panel(r, true);
+    GuiRect c = gui_rect(r.x + L->pad, r.y, r.w - 2 * L->pad, r.h);
+    u16 grid = inv_grid(&p->inv.t, db);
+    if (grid == INV_NO_GRID) {
+        gw_label(c, "No backpack", tpx(TH->t_body), GW_REGULAR, TH->text_faint, GUI_CENTER);
+        return;
+    }
+    const InvItem *pk = inv_get_c(&p->inv.t, grid);
+    char note[48];
+    cells_note(note, sizeof(note), &p->inv.t, grid);
+    panel_title(gui_rect(c.x, c.y, c.w, L->title_h), pk ? item_def(db, pk->s.item)->name : "Backpack", note);
+    draw_grid(gui_rect(c.x, c.y + L->title_h, 0, 0), L->view, INV_SIDE_SELF, grid, inv_parent_def(&p->inv.t, db, grid), PR_GRID);
+}
+
+static void draw_right(void) {
+    InvLayout *L = &V.L;
+    Game *g = g_();
+    draw_cats();
+    gui_block_rect(L->right);
+    gw_scroll_begin(&V.right_scroll, gui_id("inv_right_scroll"), L->view);
+    float oy = gw_scroll_y(&V.right_scroll) - L->view.y;
+    if (g->container_open) draw_loot(oy);
+    draw_own_grid(oy);
+    gw_scroll_end(&V.right_scroll, L->content_h + gui_s(8));
 }
 
 // ------------------------------------------------------------------ context menu / split dialog
@@ -1056,20 +1007,20 @@ static void draw_context(void) {
     if (!V.ctx.open) return;
     const ItemDB *db = items();
     InvTarget at = V.ctx.at;
-    int side = at.kind == IT_HOT ? INV_SIDE_SELF : at.side;
+    int side = at.side;
     const InvItem *it = item_of(side, at.uid);
     if (!it) { V.ctx.open = false; return; }
     const ItemDef *d = item_def(db, it->s.item);
     const WeaponDef *wd = item_weapon(db, it->s.item);
-    Player *p = game_local_player();
     typedef struct Entry { const char *label; int type; int aux; int count; } Entry;
-    Entry e[14];
+    Entry e[16];
     int n = 0;
-    bool equipped = side == INV_SIDE_SELF && !it->parent && it->loc >= INV_LOC_EQUIP;
-    if (side == INV_SIDE_SELF && (d->kind == ITEM_CONSUMABLE || d->use_type != INV_USE_NONE) && !d->vehicle_use) e[n++] = (Entry){ "Use", II_USE, 0, 0 };
-    if (d->equip_slot != EQ_NONE && !equipped) e[n++] = (Entry){ "Equip", II_EQUIP, 255, 0 };
-    if (equipped) e[n++] = (Entry){ "Unequip", II_QUICK_MOVE, 0, 0 };
-    if (item_container(db, it->s.item) && !equipped) e[n++] = (Entry){ "Open", -1, 0, 0 };
+    bool equipped = !it->parent && it->loc >= INV_LOC_EQUIP;
+    bool mine = side == INV_SIDE_SELF;
+    if (mine && (d->kind == ITEM_CONSUMABLE || d->use_type != INV_USE_NONE) && !d->vehicle_use) e[n++] = (Entry){ "Use", II_USE, 0, 0 };
+    if (mine && inv_holdable(d)) e[n++] = in_hands(side, it->uid) ? (Entry){ "Put away", II_HOLD, 1, 0 } : (Entry){ "Hold", II_HOLD, 0, 0 };
+    if (d->equip_slot != EQ_NONE && !(mine && equipped) && !d->default_pack) e[n++] = (Entry){ "Equip", II_EQUIP, 255, 0 };
+    if (mine && equipped && !d->default_pack) e[n++] = (Entry){ "Unequip", II_MOVE, 0, 0 };
     e[n++] = (Entry){ "Inspect", -2, 0, 0 };
     if (d->fold_dw) e[n++] = (Entry){ (it->flags & INVF_FOLDED) ? "Unfold stock" : "Fold stock", II_FOLD, 0, 0 };
     if (wd && wd->kind != WPN_MELEE && it->s.ammo > 0) e[n++] = (Entry){ "Unload", II_UNLOAD, 0, 0 };
@@ -1080,10 +1031,11 @@ static void draw_context(void) {
     }
     if (d->rotatable && !equipped) e[n++] = (Entry){ "Rotate", II_ROTATE, 0, 0 };
     if (it->s.count > 1) e[n++] = (Entry){ "Split", II_SPLIT, 0, 0 };
-    if (side == INV_SIDE_SELF && p && !bound_key(p, it->uid) && inv_bindable(d)) e[n++] = (Entry){ "Bind to hotbar", II_BIND, 0, 0 };
-    if (side == INV_SIDE_LOOT || game_loot_tree()) e[n++] = (Entry){ side == INV_SIDE_LOOT ? "Take" : "Put in container", II_QUICK_MOVE, 0, 0 };
-    e[n++] = (Entry){ it->s.count > 1 ? "Discard one" : "Discard", II_DISCARD, 0, it->s.count > 1 ? 1 : 0 };
-    if (it->s.count > 1) e[n++] = (Entry){ "Discard all", II_DISCARD, 0, 0 };
+    if ((side == INV_SIDE_LOOT || game_loot_tree()) && !d->default_pack) e[n++] = (Entry){ side == INV_SIDE_LOOT ? "Take" : "Put in container", II_QUICK_MOVE, 0, 0 };
+    if (!d->default_pack) {
+        e[n++] = (Entry){ it->s.count > 1 ? "Discard one" : "Discard", II_DISCARD, 0, it->s.count > 1 ? 1 : 0 };
+        if (it->s.count > 1) e[n++] = (Entry){ "Discard all", II_DISCARD, 0, 0 };
+    }
     float ih = gui_s(28), w = gui_s(200);
     GuiRect r = { V.ctx.pos.x + gui_s(4), V.ctx.pos.y + gui_s(4), w, ih * (float)n + gui_s(33) };
     if (r.x + r.w > gui_w()) r.x = V.ctx.pos.x - r.w;
@@ -1112,9 +1064,15 @@ static void draw_context(void) {
         x.src = it->uid;
         x.aux = (u8)e[i].aux;
         x.count = (u16)e[i].count;
-        if (e[i].type == -1) { open_window(side, it->uid); break; }
-        if (e[i].type == -2) { open_inspect(side, it->uid); break; }
+        if (e[i].type == -2) { select_item(at); break; }
         if (e[i].type == II_EQUIP) x.dst_side = INV_SIDE_SELF;
+        if (e[i].type == II_MOVE) { x.dst = INV_AUTO; x.dst_side = INV_SIDE_SELF; }   // unequip: into the grid
+        if (e[i].type == II_HOLD) {
+            x.aux = 0;
+            if (e[i].aux) x.src = 0;   // put away
+            if (inv_screen_send(x) == IIR_OK && !e[i].aux) game_select(INV_SEL_HANDS);
+            break;
+        }
         if (e[i].type == II_SPLIT) {
             V.split.open = true;
             V.split.max = it->s.count - 1;
@@ -1122,11 +1080,6 @@ static void draw_context(void) {
             x.dst = INV_AUTO;
             V.split.in = x;
             break;
-        }
-        if (e[i].type == II_BIND) {
-            int k = 0;
-            while (k < INV_HOTBAR - 1 && p->inv.quick[k] && inv_get(&p->inv.t, p->inv.quick[k])) k++;
-            x.aux = (u8)k;
         }
         if (e[i].type == II_UNMOUNT) {
             for (int k = 0; k < ATT_SLOTS; k++)
@@ -1136,7 +1089,7 @@ static void draw_context(void) {
         if (e[i].type == II_DISCARD && !e[i].count) {
             InvDDOut o;
             memset(&o, 0, sizeof(o));
-            o.action = DG_MAX(1, d->max_stack) <= 1 && (wd || item_container(db, it->s.item) || d->equip_slot != EQ_NONE) ? IDA_CONFIRM : IDA_INTENT;
+            o.action = DG_MAX(1, d->max_stack) <= 1 && (wd || d->equip_slot != EQ_NONE) ? IDA_CONFIRM : IDA_INTENT;
             o.in = x;
             o.at = at;
             apply(&o);
@@ -1206,6 +1159,7 @@ static InvTarget hit_test(vec2 m) {
         }
     }
     InvLayout *L = &V.L;
+    // The columns and the panels: dropping on them does nothing (only outside the screen's body discards).
     GuiRect body = { L->left.x, L->header.y, L->right.x + L->right.w - L->left.x, L->footer.y + L->footer.h - L->header.y };
     if (gui_rect_contains(body, m.x, m.y)) none.kind = IT_PANEL;
     return none;
@@ -1221,16 +1175,22 @@ static void pad_input(void) {
         if (!gui_nav(dirs[d])) continue;
         gui_nav_consume(dirs[d]);
         int nx = inv_nav_step(V.pad_r, V.pad_n, V.pad_cur, d);
-        if (nx >= 0) V.pad_cur = nx;
+        if (nx >= 0) {
+            V.pad_cur = nx;
+            if (V.pad_region[nx] == PR_GRID || V.pad_region[nx] == PR_LOOT) {   // keep the cursor in view
+                GuiRect r = V.pad_r[nx];
+                gw_scroll_to(&V.right_scroll, r.y - gw_scroll_y(&V.right_scroll), r.h);
+            }
+        }
     }
-    // LB / RB: the first target of the previous / next region (grids, equipment, hotbar, loot, windows).
+    // LB / RB: the first target of the previous / next region (slots, chips, loot, grid, inspect).
     for (int dir = -1; dir <= 1; dir += 2) {
         int nav = dir < 0 ? NAV_TAB_PREV : NAV_TAB_NEXT;
         if (!gui_nav(nav)) continue;
         gui_nav_consume(nav);
         int cur = V.pad_region[V.pad_cur];
-        for (int step = 1; step <= 8; step++) {
-            int want = (cur + dir * step + 8 * 8) % 8;
+        for (int step = 1; step <= PR_COUNT; step++) {
+            int want = (cur + dir * step + PR_COUNT * 4) % PR_COUNT;
             int found = -1;
             for (int i = 0; i < V.pad_n && found < 0; i++) if (V.pad_region[i] == want) found = i;
             if (found >= 0) { V.pad_cur = found; break; }
@@ -1254,7 +1214,7 @@ static void pad_input(void) {
             gui_set_focus(0);
         }
     }
-    if (gui_nav(NAV_ALT2) && ft.uid && !V.dd.carry && ft.kind != IT_HOT && ft.kind != IT_ATTACH) {
+    if (gui_nav(NAV_ALT2) && ft.uid && !V.dd.carry && ft.kind != IT_ATTACH) {
         gui_nav_consume(NAV_ALT2);
         InvIntent q;
         memset(&q, 0, sizeof(q));
@@ -1264,7 +1224,7 @@ static void pad_input(void) {
         inv_screen_send(q);
     }
     if (gui_nav(NAV_BACK) && V.dd.carry) { gui_nav_consume(NAV_BACK); idd_reset(&V.dd); }
-    if (ft.uid) V.sel = ft;
+    if (ft.uid && ft.kind != IT_ATTACH && (V.sel.uid != ft.uid || V.sel.side != ft.side)) select_item(ft);
 }
 
 static void draw_ghost(void) {
@@ -1284,7 +1244,6 @@ static void draw_ghost(void) {
             inv_base_size(db, &it->s, it->flags, &bw, &bh);
             w = V.dd.rot ? bh : bw;
             h = V.dd.rot ? bw : bh;
-            if (V.dd.src.kind == IT_HOT) w = h = 1;
         }
     }
     if (!s.item) return;
@@ -1313,29 +1272,33 @@ static void draw_ghost(void) {
 
 // ------------------------------------------------------------------ scripted pointer (tests)
 // ui_inv_* commands queue pointer steps, one per frame, injected as SDL events before the screen
-// reads its input (tools/tests/inv_*.cfg). Targets: c:<self|loot>:<parent uid|pockets|rig|backpack|secure>:<loc>:<x>:<y>,
-// e:<equipment slot>, h:<1-6>, a:<attachment slot> (the inspect window), discard, out.
+// reads its input (tools/tests/ui_inventory.cfg). Targets: c:<self|loot>:<grid|parent uid>:<loc>:<x>:<y>,
+// e:<equipment slot>, a1:<attachment slot> / a2:<attachment slot> (the primary's / secondary's chips),
+// a:<attachment slot> (the inspect panel's), char (the character), discard, out.
 
-typedef struct PStep { int kind; InvTarget t; bool out; bool shift, ctrl, alt, rot; } PStep;   // kind: 0 move, 1 down, 2 up, 3 rdown, 4 rup, 5 mods, 6 dclick
+typedef struct PStep { int kind; InvTarget t; bool out; bool shift, ctrl, alt, rot; u8 chip_row; } PStep;   // kind: 0 move, 1 down, 2 up, 3 rdown, 4 rup, 5 mods, 6 dclick
 static PStep g_steps[128];
 static int g_step_head, g_step_tail;
 
-static bool parse_target(const char *s, InvTarget *t, bool *out) {
+static bool parse_target(const char *s, InvTarget *t, bool *out, u8 *chip_row) {
     memset(t, 0, sizeof(*t));
     *out = false;
+    *chip_row = 0;
     if (!strcmp(s, "out")) { *out = true; return true; }
     if (!strcmp(s, "discard")) { t->kind = IT_DISCARD; return true; }
+    if (!strcmp(s, "char")) { t->kind = IT_CHAR; return true; }
     char side[8], par[16];
-    int loc, x, y, k;
+    int loc, x, y;
     if (sscanf(s, "c:%7[a-z]:%15[a-z0-9]:%d:%d:%d", side, par, &loc, &x, &y) == 5) {
         t->kind = IT_CELL;
         t->side = !strcmp(side, "loot") ? INV_SIDE_LOOT : INV_SIDE_SELF;
-        // The parent: a uid, or the worn container by name (pockets = the root).
+        // The parent: a uid, or "grid": that side's grid (the worn backpack, a world container's root).
         u16 parent = (u16)atoi(par);
-        Player *p = game_local_player();
-        InvQuickTarget q = !strcmp(par, "pockets") ? IQ_POCKETS : !strcmp(par, "rig") ? IQ_RIG : !strcmp(par, "backpack") ? IQ_BACKPACK
-                         : !strcmp(par, "secure") ? IQ_SECURE : IQ_COUNT;
-        if (q != IQ_COUNT && (!p || !inv_quick_parent(&p->inv.t, q, &parent))) return false;
+        if (!strcmp(par, "grid")) {
+            InvTree *tr = inv_screen_tree(t->side);
+            if (!tr || !items()) return false;
+            parent = inv_grid(tr, items());
+        }
         t->parent = parent;
         t->loc = (u8)loc;
         t->x = (i16)x;
@@ -1343,22 +1306,39 @@ static bool parse_target(const char *s, InvTarget *t, bool *out) {
         return true;
     }
     if (!strncmp(s, "e:", 2)) { t->kind = IT_EQUIP; t->index = (i8)equip_slot_from_name(s + 2); return t->index != (i8)EQ_NONE && t->index >= 0; }
-    if (sscanf(s, "h:%d", &k) == 1) { t->kind = IT_HOT; t->index = (i8)DG_CLAMP(k - 1, 0, INV_HOTBAR - 1); return true; }
+    if (!strncmp(s, "a1:", 3) || !strncmp(s, "a2:", 3)) {
+        t->kind = IT_ATTACH;
+        *chip_row = (u8)(s[1] - '0');
+        t->index = (i8)attach_slot_from_name(s + 3);
+        return t->index >= 0;
+    }
     if (!strncmp(s, "a:", 2)) { t->kind = IT_ATTACH; t->index = (i8)attach_slot_from_name(s + 2); return t->index >= 0; }
     return false;
 }
 
 static bool target_pos(const PStep *st, vec2 *p) {
     if (st->out) { *p = v2(gui_w() - 2, gui_h() - 2); return true; }
+    Player *pl = game_local_player();
     for (int i = 0; i < V.hit_n; i++) {
         const Hit *h = &V.hits[i];
         if (st->t.kind == IT_CELL && h->kind == HK_GRID && h->t.side == st->t.side && h->t.parent == st->t.parent && h->t.loc == st->t.loc) {
             *p = v2(h->r.x + ((float)st->t.x + 0.5f) * h->cell, h->r.y + ((float)st->t.y + 0.5f) * h->cell);
             return true;
         }
-        bool k = (st->t.kind == IT_EQUIP && h->kind == HK_EQUIP) || (st->t.kind == IT_HOT && h->kind == HK_HOT) || (st->t.kind == IT_ATTACH && h->kind == HK_ATTACH);
-        if (k && h->t.index == st->t.index) { *p = v2(h->r.x + h->r.w * 0.5f, h->r.y + h->r.h * 0.5f); return true; }
-        if (st->t.kind == IT_DISCARD && h->kind == HK_DISCARD) { *p = v2(h->r.x + h->r.w * 0.5f, h->r.y + h->r.h * 0.5f); return true; }
+        if (st->t.kind == IT_EQUIP && h->kind == HK_EQUIP && h->t.side == INV_SIDE_SELF && h->t.index == st->t.index) { *p = v2(h->r.x + h->r.w * 0.5f, h->r.y + h->r.h * 0.5f); return true; }
+        if (st->t.kind == IT_ATTACH && h->kind == HK_ATTACH && h->t.index == st->t.index) {
+            // a1 / a2: the chip of the weapon in the primary / secondary slot; a: the inspect panel's (the last).
+            const InvItem *w = st->chip_row && pl ? inv_equipped_c(&pl->inv.t, st->chip_row == 1 ? EQ_PRIMARY : EQ_SECONDARY) : NULL;
+            if (st->chip_row && (!w || h->t.uid != w->uid || h->t.side != INV_SIDE_SELF)) continue;
+            if (!st->chip_row) {
+                bool later = false;
+                for (int j = i + 1; j < V.hit_n; j++) later |= V.hits[j].kind == HK_ATTACH && V.hits[j].t.index == st->t.index;
+                if (later) continue;
+            }
+            *p = v2(h->r.x + h->r.w * 0.5f, h->r.y + h->r.h * 0.5f);
+            return true;
+        }
+        if ((st->t.kind == IT_DISCARD && h->kind == HK_DISCARD) || (st->t.kind == IT_CHAR && h->kind == HK_CHAR)) { *p = v2(h->r.x + h->r.w * 0.5f, h->r.y + h->r.h * 0.5f); return true; }
     }
     return false;
 }
@@ -1372,7 +1352,7 @@ static void push_step(int kind, const char *target, bool shift, bool ctrl, bool 
     s.ctrl = ctrl;
     s.alt = alt;
     s.rot = rot;
-    if (target && !parse_target(target, &s.t, &s.out)) { log_warn("ui_inv: bad target '%s'", target); return; }
+    if (target && !parse_target(target, &s.t, &s.out, &s.chip_row)) { log_warn("ui_inv: bad target '%s'", target); return; }
     g_steps[g_step_tail++] = s;
 }
 
@@ -1412,7 +1392,7 @@ static bool has(int argc, const char **argv, const char *w) {
 }
 
 static void cmd_drag(int argc, const char **argv) {
-    if (argc < 3) { log_info("usage: ui_inv_drag <from> <to> [shift] [rot]  (targets: c:self:<parent uid|pockets|rig|backpack|secure>:<loc>:<x>:<y>, e:<slot>, h:<1-6>, a:<slot>, discard, out)"); return; }
+    if (argc < 3) { log_info("usage: ui_inv_drag <from> <to> [shift] [rot]  (targets: c:<self|loot>:<grid|parent uid>:<loc>:<x>:<y>, e:<slot>, a1:/a2:/a:<attachment slot>, char, discard, out)"); return; }
     bool shift = has(argc, argv, "shift"), rot = has(argc, argv, "rot");
     push_step(0, argv[1], shift, false, false, false);
     push_step(1, argv[1], shift, false, false, false);
@@ -1439,11 +1419,28 @@ static void cmd_click(int argc, const char **argv) {
     push_step(5, NULL, false, false, false, false);
 }
 
+// ui_inv_cat <all|weapons|...>: the category bar (tests); logs which items stay lit.
+static void cmd_cat(int argc, const char **argv) {
+    if (argc < 2) { log_info("usage: ui_inv_cat <all|weapons|attachments|medical|throwables|tools|misc>"); return; }
+    int c = inv_category_from_name(argv[1]);
+    V.cat = c >= 0 ? c + 1 : 0;
+    Player *p = game_local_player();
+    const ItemDB *db = items();
+    if (!p || !db) return;
+    int lit = 0, dim = 0;
+    for (int i = 0; i < INV_MAX_ITEMS; i++) {
+        const InvItem *it = &p->inv.t.items[i];
+        if (!inv_alive(it) || it->loc >= INV_LOC_EQUIP) continue;
+        if (inv_cat_dims(V.cat, item_def(db, it->s.item))) dim++;
+        else lit++;
+    }
+    log_info("ui_inv_cat %s: %d lit, %d dimmed", V.cat ? argv[1] : "all", lit, dim);
+}
+
 void inventory_register_commands(void) {
-    cmd_register("ui_inv_drag", cmd_drag, "ui_inv_drag <from> <to> [shift] [rot]: scripted inventory drag (targets: c:self:<parent>:<loc>:<x>:<y>, e:<slot>, h:<1-6>, a:<slot>, discard, out)");
+    cmd_register("ui_inv_drag", cmd_drag, "ui_inv_drag <from> <to> [shift] [rot]: scripted inventory drag (targets: c:<self|loot>:<grid|uid>:<loc>:<x>:<y>, e:<slot>, a1:/a2:/a:<attachment slot>, char, discard, out)");
     cmd_register("ui_inv_click", cmd_click, "ui_inv_click <target> [ctrl|alt|shift|right|double]: scripted inventory click");
-    V.showcase = cvar_reg_bool("inv_showcase", true, CVAR_ARCHIVE | CVAR_EDITABLE, "inventory: the camera turns to face the player while the screen is open (docs/INVENTORY.md)");
-    V.order = cvar_reg_string("inv_quick_order", "rig,backpack,pockets", CVAR_ARCHIVE | CVAR_EDITABLE, "inventory: quick-move / pickup order of the player's containers (rig, backpack, pockets, secure)");
+    cmd_register("ui_inv_cat", cmd_cat, "ui_inv_cat <category|all>: the inventory category bar (highlight only, tests)");
     inv_cells_init();
     inv_editor_init();
 }
@@ -1455,20 +1452,18 @@ void inventory_open(void) {
     V.ctx.open = V.split.open = false;
     memset(&V.sel, 0, sizeof(V.sel));
     V.toast[0] = 0;
+    V.char_yaw = 0;
     gui_anim_restart(gui_id("inv_open"));
 }
 
 void inventory_close(void) {
     idd_reset(&V.dd);
-    V.ctx.open = V.split.open = V.insp.open = false;
-    for (int i = 0; i < MAX_WINS; i++) V.win[i].open = false;
+    V.ctx.open = V.split.open = false;
+    V.char_drag = false;
 }
 
-// Floating windows don't hold the screen open: Esc closes them first (inventory_draw consumes
-// it), Tab / I closes everything.
+// Esc / B closes the context menu or the split dialog first; Tab / I close everything.
 bool inventory_wants_back(void) { return V.dd.state == IDD_IDLE && !V.dd.carry && !V.ctx.open && !V.split.open; }
-
-bool inventory_showcase(void) { return V.showcase && V.showcase->i; }
 
 bool inventory_draw(GuiRect area, bool as_modal) {
     Game *g = g_();
@@ -1480,24 +1475,19 @@ bool inventory_draw(GuiRect area, bool as_modal) {
     (void)as_modal;
     icons_tick();
     inv_cells_tick();
-    if (V.order) inv_set_order(inv_order_parse(V.order->str));
     run_step();
     // Layout.
-    PanelSrc ps[INV_UI_MAX_PANELS];
-    int pn = player_panels(ps);
     InvLayoutIn li;
     memset(&li, 0, sizeof(li));
     LayoutParams lp = gui_layout_params();
     li.safe = gui_layout_safe_rect(&lp);
     li.scale = gui_scale();
+    inv_grid_size(&p->inv.t, db, &li.grid_cols, &li.grid_rows);
     InvTree *lt = game_loot_tree();
     li.loot = g->container_open;
-    if (lt) inv_container_extent(inv_root_def(lt, db), &li.loot_cols, &li.loot_rows);
-    else { li.loot_cols = 6; li.loot_rows = 4; }
-    li.panel_n = pn;
-    for (int i = 0; i < pn; i++) {
-        inv_container_extent(ps[i].cd, &li.panel[i].cols, &li.panel[i].rows);
-        li.panel[i].cols += ps[i].cd->comp_count > 1 ? 1 : 0;   // pouch gaps
+    if (lt) {
+        inv_grid_size(lt, db, &li.loot_cols, &li.loot_rows);
+        li.loot_body = inv_root_def(lt, db)->equip;
     }
     inv_layout(&li, &V.L);
     InvLayout *L = &V.L;
@@ -1505,28 +1495,21 @@ bool inventory_draw(GuiRect area, bool as_modal) {
     V.pad_n = 0;
     float a = gui_ease_out(gui_anim_t(gui_id("inv_open")) / TH->modal_in);
     gd_alpha_push(a);
-    // Header: title, total weight (informational), sync state.
+    // The game keeps rendering behind (first person, the camera unmoved) under the UI blur.
+    gd_backdrop(gui_rect(0, 0, gui_w(), gui_h()), WHITE);
+    gd_rect(gui_rect(0, 0, gui_w(), gui_h()), TH->scrim);
+    draw_character();
+    // Header: title, sync state.
     GuiText title = { tpx(TH->t_title), GW_SEMIBOLD, TH->text, GUI_LEFT, 0.02f, true, true, 0 };
     gd_text(&title, L->header.x, L->header.y + gui_s(6), "Inventory");
-    char hb[96];
-    snprintf(hb, sizeof(hb), "%.1f kg carried%s", inv_tree_weight(&p->inv.t, db), game_inv_pending() ? "   \xC2\xB7   syncing\xE2\x80\xA6" : "");
-    GuiText ht = { tpx(TH->t_small + 1), GW_MEDIUM, TH->text_dim, GUI_RIGHT, 0, false, true, 0 };
-    gd_text(&ht, L->header.x + L->header.w, L->header.y + gui_s(14), hb);
+    if (game_inv_pending()) {
+        GuiText ht = { tpx(TH->t_small + 1), GW_MEDIUM, TH->text_dim, GUI_RIGHT, 0, false, true, 0 };
+        gd_text(&ht, L->header.x + L->header.w, L->header.y + gui_s(14), "syncing\xE2\x80\xA6");
+    }
     gd_rect(gui_rect(L->header.x, L->header.y + L->header.h - 1, L->header.w, 1), gui_rgba_mul(TH->panel_border, 0.8f));
     // Columns.
-    draw_left(ps, pn);
-    draw_equip();
-    draw_hotbar();
-    if (g->container_open) draw_loot();
-    draw_windows();
-    draw_inspect();
-    // Esc / B closes the floating windows first (the inspect window, then the newest container window).
-    if (gui_nav(NAV_BACK) && V.dd.state == IDD_IDLE && !V.dd.carry && !V.ctx.open && !V.split.open) {
-        int top = -1;
-        for (int i = 0; i < MAX_WINS; i++) if (V.win[i].open) top = i;
-        if (V.insp.open) { V.insp.open = false; gui_nav_consume(NAV_BACK); }
-        else if (top >= 0) { V.win[top].open = false; gui_nav_consume(NAV_BACK); }
-    }
+    draw_left();
+    draw_right();
     // Input: the hover target from this frame's rects (drawn above).
     InvDDIn in;
     memset(&in, 0, sizeof(in));
@@ -1562,8 +1545,8 @@ bool inventory_draw(GuiRect area, bool as_modal) {
         GuiText t = { tpx(TH->t_small + 1), GW_SEMIBOLD, gui_rgba_mul(TH->danger, ta), GUI_LEFT, 0, false, true, 0 };
         gd_text(&t, L->footer.x, L->footer.y + gui_s(2), V.toast);
     }
-    screens_footer_hint(L->footer, gui_nav_mode() ? "A  pick up / place    X  rotate / menu    Y  quick move    LB RB  panels    B  back"
-                                                  : "Drag  move    R  rotate    Ctrl+click  quick move    Alt+click  equip    Shift+drag  split    Double click  open    Tab  close");
+    screens_footer_hint(L->footer, gui_nav_mode() ? "A  pick up / place    X  rotate / menu    Y  quick move    LB RB  regions    B  back"
+                                                  : "Drag  move    R  rotate    Ctrl+click  quick move    Alt+click  equip    Shift+drag  split    Right click  menu    Tab  close");
     draw_context();
     draw_split();
     gd_alpha_pop();

@@ -221,27 +221,22 @@ static bool open_kind(int kind) { return open_def(kind, def_for(kind)); }
 
 // ------------------------------------------------------------------ actions
 
-// Selects the hotbar slot bound to an item, or binds its first stack to a free hotbar slot (the
-// selected one when all are taken) and selects that (docs/INVENTORY.md: binds are to instances).
+// Takes an item out of the grid into the hands (II_HOLD: its first stack, unless the hands hold one
+// already) and selects the hands (docs/INVENTORY.md "Selection").
 static bool equip_item(u16 item) {
     Player *p = game_local_player();
     if (!p || !item) return false;
-    int at = inv_hot_find(&p->inv, item);
-    if (at < 0) {
+    if (inv_sel_c(&p->inv, INV_SEL_HANDS)->item != item) {
         InvItem *it = inv_find(&p->inv, item);
         if (!it) return false;
-        int to = G->hotbar_slot;
-        for (int k = INV_HOTBAR - 1; k >= 0; k--) if (!inv_hot_c(&p->inv, k)->item) to = k;
         InvIntent in;
         memset(&in, 0, sizeof(in));
-        in.type = II_BIND;
+        in.type = II_HOLD;
+        in.src_side = INV_SIDE_SELF;
         in.src = it->uid;
-        in.aux = (u8)to;
         if (game_inv_intent(&in) != IIR_OK) return false;
-        at = to;
     }
-    G->hotbar_slot = (u8)at;
-    G->phone_out = false;
+    game_select(INV_SEL_HANDS);
     return true;
 }
 
@@ -285,7 +280,7 @@ static void tap(int kind) {
     switch (kind) {
     case WK_HEAL: quick_heal(); break;
     case WK_THROW:
-        if (!G->phone_out) game_rpc(RPC_INV_DROP, G->hotbar_slot, 0, 0);   // the held item (the phone is built in)
+        if (!G->phone_out) game_rpc(RPC_INV_DROP, G->sel_slot, 0, 0);   // the held item (the phone is built in)
         break;
     case WK_PING: game_ping_request(-1); break;
     case WK_DOOR: W.use_pulse = true; break;

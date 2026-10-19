@@ -9,30 +9,19 @@ enum { SIDE_HAND = INV_SIDES, SIDE_DROP, WORK_SIDES };
 
 typedef struct Work {
     InvTree *t[WORK_SIDES];
-    u16 quick[16];
-    int quick_n;
+    u16 hands;
+    bool has_hands;
     const ItemDB *db;
-    InvOrder order;
     InvEffect *fx;
     u16 last_uid;      // the last transfer's new uid
     int last_side;
-    u16 arrived[INV_MAX_ITEMS];   // self uids that came over from the loot side (bound on commit, like a pickup)
-    int arrived_n;
-    bool hand_arrives;            // a pickup with contents (inv_give_with): what comes out of the hand binds too
 } Work;
-
-// Records a self uid that came over (a world container's item, a picked-up container's contents):
-// bound on commit by the pickup rule (finish).
-static void arrive(Work *W, int s, int d, u16 uid) {
-    if (d != INV_SIDE_SELF || !(s == INV_SIDE_LOOT || (s == SIDE_HAND && W->hand_arrives))) return;
-    if (W->arrived_n < INV_MAX_ITEMS) W->arrived[W->arrived_n++] = uid;
-}
 
 static InvTree g_scratch[WORK_SIDES];
 
 const char *inv_intent_name(int type) {
-    static const char *n[II_COUNT] = { "none", "move", "insert", "rotate", "equip", "quick_move", "split", "discard", "use",
-                                       "mount", "unmount", "fold", "unload", "bind", "take_all", "sort" };
+    static const char *n[II_COUNT] = { "none", "move", "rotate", "equip", "quick_move", "split", "discard", "use",
+                                       "mount", "unmount", "fold", "unload", "hold", "take_all", "compact" };
     return type >= 0 && type < II_COUNT ? n[type] : "?";
 }
 
@@ -41,15 +30,13 @@ int inv_intent_from_name(const char *s) {
     return II_NONE;
 }
 
-InvCtx inv_ctx_make(const ItemDB *db, InvTree *self, u16 *quick, int quick_n, InvTree *loot) {
+InvCtx inv_ctx_make(const ItemDB *db, InvTree *self, u16 *hands, InvTree *loot) {
     InvCtx c;
     memset(&c, 0, sizeof(c));
     c.tree[INV_SIDE_SELF] = self;
     c.tree[INV_SIDE_LOOT] = loot;
-    c.quick = quick;
-    c.quick_n = quick_n;
+    c.hands = hands;
     c.db = db;
-    c.order = inv_order_default();
     c.loot_reachable = true;
     return c;
 }
@@ -71,15 +58,22 @@ static void set_place(InvItem *it, InvPlace p) {
     it->flags = (u8)((it->flags & ~INVF_ROT) | (p.rot ? INVF_ROT : 0));
 }
 
-// Placement check of a (living on side as) at p on side d: a foreign item has no uid there.
+static bool is_default_pack(const Work *W, const InvItem *it) { return it->s.item && it->s.item == W->db->default_backpack; }
+static bool is_worn(const InvItem *it, int slot) { return !it->parent && it->loc == INV_LOC_EQUIP + slot; }
+
+// Placement check of a (living on side as) at p on side d: a foreign item has no uid there, so its
+// contents are checked here (a full backpack never leaves its back).
 static int check(Work *W, int d, const InvItem *a, int as, InvPlace p, u16 ignore, u16 *blocker) {
     InvItem tmp = *a;
-    if (as != d) tmp.uid = 0;
+    if (as != d) {
+        if (item_container(W->db, a->s.item) && inv_child_count(W->t[as], a->uid)) return IIR_NOT_EMPTY;
+        tmp.uid = 0;
+    }
     return inv_check_place(W->t[d], W->db, &tmp, p, ignore, blocker);
 }
 
-// Moves uid's subtree from side s to side d at p (checked by the caller). The top keeps its uid
-// inside a tree; across trees every item gets a new uid. Returns the top's uid (0: pool full).
+// Moves uid (with its contents) from side s to side d at p (checked by the caller). The top keeps
+// its uid inside a tree; across trees every item gets a new uid. Returns the top's uid (0: pool full).
 static u16 transfer(Work *W, int s, u16 uid, int d, InvPlace p) {
     InvTree *S = W->t[s], *D = W->t[d];
     if (s == d) {
@@ -112,13 +106,11 @@ static u16 transfer(Work *W, int s, u16 uid, int d, InvPlace p) {
     for (int k = 0; k < n; k++) memset(&S->items[idx[k]], 0, sizeof(InvItem));
     W->last_uid = new_uid[0];
     W->last_side = d;
-    // The whole subtree arrives: a corpse's rig brings its medkits / grenades bound, not only the rig.
-    for (int k = 0; k < n; k++) arrive(W, s, d, new_uid[k]);
     return new_uid[0];
 }
 
 // A part of a stack (n of a) as a new instance at p on side d (checked by the caller).
-static u16 place_part(Work *W, int s, InvItem *a, int d, InvPlace p, int n) {
+static u16 place_part(Work *W, InvItem *a, int d, InvPlace p, int n) {
     InvSlot part = a->s;
     part.count = (u16)n;
     u16 dur = a->dur;
@@ -129,7 +121,6 @@ static u16 place_part(Work *W, int s, InvItem *a, int d, InvPlace p, int n) {
     a->s.count = (u16)(a->s.count - n);   // n < a's count (callers): a stays alive
     W->last_uid = it->uid;
     W->last_side = d;
-    arrive(W, s, d, it->uid);
     return it->uid;
 }
 
@@ -145,38 +136,154 @@ static int merge(Work *W, InvItem *a, InvItem *b, int want) {
     return n;
 }
 
-// Merges a's stack into same-def stacks on side d (a may be on another side). Returns moved.
-static int merge_anywhere(Work *W, InvItem *a, int d, bool root_only) {
+// Merges a's stack into same-def stacks in side d's grid (a may be on another side). Returns moved.
+static int merge_anywhere(Work *W, InvItem *a, int d) {
     if (max_stack(W, a->s.item) <= 1) return 0;
     int moved = 0;
     InvTree *D = W->t[d];
+    u16 g = inv_grid(D, W->db);
     for (int i = 0; i < INV_MAX_ITEMS && inv_alive(a); i++) {
         InvItem *b = &D->items[i];
-        if (!inv_alive(b) || b == a || b->s.item != a->s.item || (root_only && b->parent)) continue;
+        if (!inv_alive(b) || b == a || b->s.item != a->s.item || b->parent != g || b->loc >= INV_LOC_EQUIP) continue;
         moved += merge(W, a, b, a->s.count);
     }
     return moved;
 }
 
-// A free place for a (on side as) on side d: self = the containers in order, else the root.
+// A free place in side d's grid for a (living on side as).
 static bool find_space(Work *W, int d, const InvItem *a, int as, InvPlace *out) {
     InvItem tmp = *a;
     if (as != d) tmp.uid = 0;
-    if (d == INV_SIDE_SELF) return inv_find_space_order(W->t[d], W->db, &tmp, W->order, out);
-    return inv_find_space(W->t[d], W->db, &tmp, 0, out);
+    return inv_find_grid_space(W->t[d], W->db, &tmp, out);
 }
 
-// The pickup rule into self: merge, equip into a free slot, first space in the order.
+// ------------------------------------------------------------------ backpacks
+
+// The children of backpack from (side) into backpack to's grid (both on side, to worn): every
+// item in its own cell when that is inside the new grid and free, the rest into the first free
+// cells, largest first. All or nothing (the intent fails with IIR_NO_ROOM).
+static const ItemDB *g_cmp_db;
+static const InvTree *g_cmp_t;
+static int area_cmp(const void *pa, const void *pb) {
+    const InvItem *a = &g_cmp_t->items[*(const int *)pa], *b = &g_cmp_t->items[*(const int *)pb];
+    int wa, ha, wb, hb;
+    inv_item_size(g_cmp_db, a, &wa, &ha);
+    inv_item_size(g_cmp_db, b, &wb, &hb);
+    if (wa * ha != wb * hb) return wb * hb - wa * ha;
+    if (a->y != b->y) return (int)a->y - (int)b->y;
+    if (a->x != b->x) return (int)a->x - (int)b->x;
+    return (int)a->uid - (int)b->uid;
+}
+
+static void sort_by_area(const ItemDB *db, const InvTree *t, int *idx, int n) {
+    g_cmp_db = db;
+    g_cmp_t = t;
+    qsort(idx, (size_t)n, sizeof(int), area_cmp);
+}
+
+static int move_contents(Work *W, int side, u16 from, u16 to) {
+    InvTree *T = W->t[side];
+    int idx[INV_MAX_ITEMS], n = 0;
+    for (int i = 0; i < INV_MAX_ITEMS; i++)
+        if (inv_alive(&T->items[i]) && T->items[i].parent == from) idx[n++] = i;
+    for (int k = 0; k < n; k++) T->items[idx[k]].loc = INV_LOC_NONE;   // detached: none blocks another
+    int left[INV_MAX_ITEMS], ln = 0;
+    for (int k = 0; k < n; k++) {
+        InvItem *it = &T->items[idx[k]];
+        InvPlace p = { to, 0, it->x, it->y, (u8)((it->flags & INVF_ROT) ? 1 : 0) };
+        if (inv_check_place(T, W->db, it, p, 0, NULL) == IIR_OK) set_place(it, p);
+        else left[ln++] = idx[k];
+    }
+    sort_by_area(W->db, T, left, ln);
+    for (int k = 0; k < ln; k++) {
+        InvItem *it = &T->items[left[k]];
+        InvItem tmp = *it;
+        tmp.flags &= (u8)~INVF_ROT;
+        InvPlace p;
+        if (!inv_find_space(T, W->db, &tmp, to, &p)) return IIR_NO_ROOM;
+        set_place(it, p);
+    }
+    return IIR_OK;
+}
+
+// Takes the worn backpack a off side s's back: its contents move into a new default bag (the bag
+// everyone wears when they wear no other). a stays detached (loc INV_LOC_NONE) for the caller to
+// place. *grid: the new bag's uid. Another tree's worn pack (a corpse's) only comes off empty.
+static int pack_off(Work *W, int s, InvItem *a, u16 *grid) {
+    if (is_default_pack(W, a)) return IIR_DEFAULT_PACK;
+    InvTree *T = W->t[s];
+    *grid = INV_NO_GRID;
+    if (s != INV_SIDE_SELF || !W->db->default_backpack) {
+        if (inv_child_count(T, a->uid)) return IIR_NOT_EMPTY;
+        a->loc = INV_LOC_NONE;
+        return IIR_OK;
+    }
+    u16 au = a->uid;
+    a->loc = INV_LOC_NONE;
+    InvSlot ds = { W->db->default_backpack, 1, 0, { 0 }, 0 };
+    InvItem *np = inv_alloc(T, W->db, &ds);
+    if (!np) return IIR_FULL;
+    np->loc = INV_LOC_EQUIP + EQ_BACKPACK;
+    *grid = np->uid;
+    return move_contents(W, s, au, np->uid);
+}
+
+// Puts backpack a (side s; empty unless it is self's grid's owner) on self's back: the worn pack's
+// contents move into it, the old pack goes where a was (or into the new grid); the default bag is
+// simply gone (it comes back when a pack comes off).
+static int equip_pack(Work *W, int s, InvItem *a) {
+    InvTree *T = W->t[INV_SIDE_SELF];
+    if (is_default_pack(W, a)) return IIR_DEFAULT_PACK;
+    InvItem *old = inv_pack(T);
+    if (s == INV_SIDE_SELF && old == a) return IIR_NOOP;
+    if (inv_child_count(W->t[s], a->uid)) return IIR_NOT_EMPTY;
+    InvPlace from = place_of(a);
+    u16 ou = old ? old->uid : 0;
+    if (old) old->loc = INV_LOC_NONE;   // off the back: the slot is free
+    InvPlace p = { 0, (u8)(INV_LOC_EQUIP + EQ_BACKPACK), 0, 0, 0 };
+    int r = check(W, INV_SIDE_SELF, a, s, p, 0, NULL);
+    if (r != IIR_OK) return r;
+    u16 nu = transfer(W, s, a->uid, INV_SIDE_SELF, p);
+    if (!nu) return IIR_FULL;
+    if (!ou) return IIR_OK;
+    r = move_contents(W, INV_SIDE_SELF, ou, nu);
+    if (r != IIR_OK) return r;
+    InvItem *o = inv_get(T, ou);
+    if (!o) return IIR_INVALID;
+    if (is_default_pack(W, o)) { memset(o, 0, sizeof(*o)); W->last_uid = nu; W->last_side = INV_SIDE_SELF; return IIR_OK; }
+    // The old pack (empty now): where the new one was, unless that was inside the old pack's grid.
+    bool back = (s == INV_SIDE_SELF || s == INV_SIDE_LOOT) && !(s == INV_SIDE_SELF && from.parent == ou);
+    if (back && check(W, s, o, INV_SIDE_SELF, from, 0, NULL) == IIR_OK) {
+        if (!transfer(W, INV_SIDE_SELF, ou, s, from)) return IIR_FULL;
+    } else {
+        InvPlace q;
+        if (!find_space(W, INV_SIDE_SELF, o, INV_SIDE_SELF, &q)) return IIR_NO_ROOM;
+        transfer(W, INV_SIDE_SELF, ou, INV_SIDE_SELF, q);
+    }
+    W->last_uid = nu;
+    W->last_side = INV_SIDE_SELF;
+    return IIR_OK;
+}
+
+// ------------------------------------------------------------------ pickup rule
+
+// Into self: merge, a weapon into a free slot, a bigger pack over the default bag, the first space.
 static int auto_into_self(Work *W, int s, u16 uid, bool allow_equip) {
     InvItem *a = inv_get(W->t[s], uid);
     if (!a) return IIR_GONE;
-    int merged = merge_anywhere(W, a, INV_SIDE_SELF, false);
+    if (is_default_pack(W, a)) return IIR_DEFAULT_PACK;
+    if (s != INV_SIDE_SELF && item_container(W->db, a->s.item) && inv_child_count(W->t[s], uid)) return IIR_NOT_EMPTY;
+    int merged = merge_anywhere(W, a, INV_SIDE_SELF);
     if (!inv_alive(a)) return IIR_OK;
     if (allow_equip) {
+        InvTree *T = W->t[INV_SIDE_SELF];
         InvItem tmp = *a;
         if (s != INV_SIDE_SELF) tmp.uid = 0;
-        int slot = inv_equip_target(W->t[INV_SIDE_SELF], W->db, &tmp);
-        if (slot != EQ_NONE && !inv_equipped(W->t[INV_SIDE_SELF], slot)) {
+        int slot = inv_equip_target(T, W->db, &tmp);
+        if (slot == EQ_BACKPACK) {
+            const InvItem *pk = inv_pack_c(T);
+            if (!pk || is_default_pack(W, pk)) return equip_pack(W, s, a);
+        } else if (slot != EQ_NONE && !inv_equipped(T, slot)) {
             InvPlace p = { 0, (u8)(INV_LOC_EQUIP + slot), 0, 0, 0 };
             if (check(W, INV_SIDE_SELF, a, s, p, 0, NULL) == IIR_OK) return transfer(W, s, uid, INV_SIDE_SELF, p) ? IIR_OK : IIR_FULL;
         }
@@ -186,15 +293,23 @@ static int auto_into_self(Work *W, int s, u16 uid, bool allow_equip) {
     return merged ? IIR_OK : IIR_NO_ROOM;
 }
 
-// Into a world container's root: merge into its root stacks, then the first space.
+// Into a world container's root grid: merge into its stacks, then the first space.
 static int auto_into_root(Work *W, int s, u16 uid, int d) {
     InvItem *a = inv_get(W->t[s], uid);
     if (!a) return IIR_GONE;
-    int merged = merge_anywhere(W, a, d, true);
+    if (s == INV_SIDE_SELF && is_worn(a, EQ_BACKPACK)) {
+        u16 g;
+        int r = pack_off(W, s, a, &g);
+        if (r != IIR_OK) return r;
+        a = inv_get(W->t[s], uid);
+    }
+    int merged = merge_anywhere(W, a, d);
     if (!inv_alive(a)) return IIR_OK;
     InvPlace p;
+    int why = check(W, d, a, s, (InvPlace){ inv_grid(W->t[d], W->db), 0, 0, 0, 0 }, 0, NULL);
     if (find_space(W, d, a, s, &p)) return transfer(W, s, uid, d, p) ? IIR_OK : IIR_FULL;
-    return merged ? IIR_OK : IIR_NO_ROOM;
+    if (merged) return IIR_OK;
+    return why == IIR_FILTER || why == IIR_NOT_EMPTY ? why : IIR_NO_ROOM;
 }
 
 // A new stack (ammo, a removed attachment) into side d: merge, then the first space.
@@ -219,8 +334,8 @@ static int add_stack(Work *W, int d, const InvSlot *s) {
 // first space on its side). Both are detached while the places are checked.
 static int swap(Work *W, int s, InvItem *a, int d, InvItem *b, InvPlace target) {
     if (a == b) return IIR_NOOP;
+    if (is_default_pack(W, b) || (item_container(W->db, b->s.item) && inv_child_count(W->t[d], b->uid))) return IIR_NO_ROOM;
     u16 au = a->uid, bu = b->uid;
-    if (s == d && (inv_is_ancestor(W->t[s], au, bu) || inv_is_ancestor(W->t[s], bu, au))) return IIR_NESTING;
     InvPlace pa = place_of(a);
     a->loc = INV_LOC_NONE;
     b->loc = INV_LOC_NONE;
@@ -286,83 +401,36 @@ static void consume_one(Work *W, InvItem *a) {
     if (--a->s.count == 0) memset(a, 0, sizeof(*a));
 }
 
-// What a hotbar slot may hold: things used from the hands. Never a worn container (a bound backpack
-// would be "held" and dropped on downed) and never the built-in phone (its own key, WPN_SLOT_PHONE).
-bool inv_bindable(const ItemDef *d) {
+bool inv_holdable(const ItemDef *d) {
     if (d->builtin) return false;
-    return d->kind == ITEM_WEAPON || d->kind == ITEM_CONSUMABLE || d->kind == ITEM_THROWABLE || d->camera || d->hotbar;   // "hotbar": a held tool (the flashlight)
+    return d->kind == ITEM_CONSUMABLE || d->kind == ITEM_THROWABLE || d->hands;
 }
 
-// Binds a self item to the first free hotbar slot (the pickup rule), unless it is bound already or
-// not bindable.
-static void auto_bind(Work *W, u16 uid) {
-    InvTree *T = W->t[INV_SIDE_SELF];
-    InvItem *it = T ? inv_get(T, uid) : NULL;
-    if (!it || !inv_bindable(item_def(W->db, it->s.item))) return;
-    for (int k = 0; k < W->quick_n; k++) if (W->quick[k] == uid) return;
-    for (int k = 0; k < W->quick_n; k++)
-        if (!W->quick[k] || !inv_get(T, W->quick[k])) { W->quick[k] = uid; return; }
-}
-
-// Why a can't go into container b (no free space found): its filter, the nesting rule, or room.
-static int insert_why(Work *W, const InvItem *a, const InvItem *b) {
-    const InvContainerDef *bc = item_container(W->db, b->s.item);
-    int w, h;
-    inv_base_size(W->db, &a->s, a->flags, &w, &h);
-    int why = inv_accepts(W->db, bc, &a->s, w, h);
-    const InvContainerDef *own = item_container(W->db, a->s.item);
-    if (why == IIR_OK && own && own->capacity >= bc->capacity) why = IIR_NESTING;
-    return why != IIR_OK ? why : IIR_NO_ROOM;
-}
-
-// Sort keys: kind then id, weight (heaviest first), size (largest first); ties keep the uid order.
-static const Work *g_sort_w;
-static int g_sort_key;
-static InvTree *g_sort_t;
-static int sort_cmp(const void *pa, const void *pb) {
-    const InvItem *a = &g_sort_t->items[*(const int *)pa], *b = &g_sort_t->items[*(const int *)pb];
-    const ItemDef *da = item_def(g_sort_w->db, a->s.item), *db = item_def(g_sort_w->db, b->s.item);
-    int wa, ha, wb, hb;
-    inv_base_size(g_sort_w->db, &a->s, a->flags, &wa, &ha);
-    inv_base_size(g_sort_w->db, &b->s, b->flags, &wb, &hb);
-    float ka = 0, kb = 0;
-    switch (g_sort_key) {
-    case 1: ka = -inv_item_weight(g_sort_t, g_sort_w->db, a); kb = -inv_item_weight(g_sort_t, g_sort_w->db, b); break;
-    case 2: ka = (float)-(wa * ha); kb = (float)-(wb * hb); break;
-    default: ka = (float)da->kind; kb = (float)db->kind; break;
-    }
-    if (ka != kb) return ka < kb ? -1 : 1;
-    int c = strcmp(da->id, db->id);
-    if (c) return c;
-    if (wa * ha != wb * hb) return wb * hb - wa * ha;
-    return (int)a->uid - (int)b->uid;
-}
-
-// Re-packs the direct contents of one container (all compartments): everything detached, then
-// placed in key order at the first free space (unrotated first). All or nothing.
-static int sort_container(Work *W, int side, u16 parent, int key) {
+// Re-packs side's grid: everything detached, then placed largest first (reading order kept among
+// equal sizes) at the first free space, unrotated first. All or nothing.
+static int compact(Work *W, int side) {
     InvTree *T = W->t[side];
-    if (parent && (!inv_get(T, parent) || !item_container(W->db, inv_get(T, parent)->s.item))) return IIR_INVALID;
+    u16 g = inv_grid(T, W->db);
+    if (g == INV_NO_GRID) return IIR_INVALID;
     int idx[INV_MAX_ITEMS], n = 0;
     for (int i = 0; i < INV_MAX_ITEMS; i++) {
         InvItem *it = &T->items[i];
-        if (inv_alive(it) && it->parent == parent && it->loc < INV_LOC_EQUIP) idx[n++] = i;
+        if (inv_alive(it) && it->parent == g && it->loc < INV_LOC_EQUIP) idx[n++] = i;
     }
-    if (n < 2) return IIR_NOOP;
-    g_sort_w = W;
-    g_sort_t = T;
-    g_sort_key = key;
-    qsort(idx, (size_t)n, sizeof(int), sort_cmp);
+    if (n < 1) return IIR_NOOP;
+    InvItem before[INV_MAX_ITEMS];
+    memcpy(before, T->items, sizeof(before));
+    sort_by_area(W->db, T, idx, n);
     for (int k = 0; k < n; k++) T->items[idx[k]].loc = INV_LOC_NONE;
     for (int k = 0; k < n; k++) {
         InvItem *it = &T->items[idx[k]];
         InvItem tmp = *it;
         tmp.flags &= (u8)~INVF_ROT;
         InvPlace p;
-        if (!inv_find_space(T, W->db, &tmp, parent, &p)) return IIR_NO_ROOM;
+        if (!inv_find_space(T, W->db, &tmp, g, &p)) return IIR_NO_ROOM;
         set_place(it, p);
     }
-    return IIR_OK;
+    return memcmp(before, T->items, sizeof(before)) ? IIR_OK : IIR_NOOP;
 }
 
 // ------------------------------------------------------------------ apply
@@ -374,78 +442,65 @@ static bool side_ok(const Work *W, const InvCtx *ctx, int side) {
 static int quick_move(Work *W, int s, u16 uid) {
     InvItem *a = inv_get(W->t[s], uid);
     if (!a) return IIR_GONE;
-    bool loot = W->t[INV_SIDE_LOOT] != NULL;
     if (s == INV_SIDE_LOOT) return auto_into_self(W, s, uid, true);
-    if (loot) return auto_into_root(W, s, uid, INV_SIDE_LOOT);
+    if (W->t[INV_SIDE_LOOT]) return auto_into_root(W, s, uid, INV_SIDE_LOOT);
+    // No loot open: between the equipment slots and the grid.
     InvTree *T = W->t[s];
-    // In an equipment slot: into the containers. Else: equip into a free slot, else the next
-    // container in the order that doesn't hold it already.
-    if (a->loc < INV_LOC_EQUIP || a->parent) {
-        int slot = inv_equip_target(T, W->db, a);
-        if (slot != EQ_NONE && !inv_equipped(T, slot)) {
-            InvPlace p = { 0, (u8)(INV_LOC_EQUIP + slot), 0, 0, 0 };
-            if (check(W, s, a, s, p, 0, NULL) == IIR_OK) return transfer(W, s, uid, s, p) ? IIR_OK : IIR_FULL;
+    if (is_worn(a, EQ_BACKPACK)) return IIR_NOOP;
+    InvPlace p;
+    if (a->loc >= INV_LOC_EQUIP) {
+        if (!find_space(W, s, a, s, &p)) return IIR_NO_ROOM;
+        return transfer(W, s, uid, s, p) ? IIR_OK : IIR_FULL;
+    }
+    int slot = inv_equip_target(T, W->db, a);
+    if (slot == EQ_NONE || slot == EQ_BACKPACK || inv_equipped(T, slot)) return IIR_NOOP;
+    InvPlace e = { 0, (u8)(INV_LOC_EQUIP + slot), 0, 0, 0 };
+    int r = check(W, s, a, s, e, 0, NULL);
+    if (r != IIR_OK) return r;
+    return transfer(W, s, uid, s, e) ? IIR_OK : IIR_FULL;
+}
+
+static int take_all(Work *W, const InvCtx *ctx) {
+    if (!W->t[INV_SIDE_LOOT]) return IIR_GONE;
+    if (!ctx->loot_reachable) return IIR_TOO_FAR;
+    InvTree *L = W->t[INV_SIDE_LOOT];
+    int moved = 0, last = IIR_NOOP;
+    // The grid first (a crate's root, a corpse's backpack), then what a corpse wears: its weapons, its
+    // emptied backpack.
+    u16 g = inv_grid(L, W->db);
+    for (int pass = 0; pass < 3; pass++)
+        for (int i = 0; i < INV_MAX_ITEMS; i++) {
+            InvItem *a = &L->items[i];
+            if (!inv_alive(a)) continue;
+            bool grid = a->parent == g && a->loc < INV_LOC_EQUIP;
+            bool weapon = !a->parent && a->loc >= INV_LOC_EQUIP && a->loc != INV_LOC_EQUIP + EQ_BACKPACK;
+            bool pack = is_worn(a, EQ_BACKPACK);
+            if (!(pass == 0 ? grid : pass == 1 ? weapon : pack)) continue;
+            if (pack && (is_default_pack(W, a) || inv_child_count(L, a->uid))) continue;
+            int r = auto_into_self(W, INV_SIDE_LOOT, a->uid, true);
+            if (r == IIR_OK) moved++;
+            else last = r;
         }
-    }
-    u16 cur = a->loc >= INV_LOC_EQUIP && !a->parent ? 0xFFFE : a->parent;
-    for (int i = 0; i < W->order.n; i++) {
-        u16 parent;
-        if (!inv_quick_parent(T, (InvQuickTarget)W->order.t[i], &parent) || parent == cur) continue;
-        if (parent && inv_is_ancestor(T, uid, parent)) continue;
-        InvPlace p;
-        if (inv_find_space(T, W->db, a, parent, &p)) return transfer(W, s, uid, s, p) ? IIR_OK : IIR_FULL;
-    }
-    return IIR_NO_ROOM;
+    return moved ? IIR_OK : last;
 }
 
 static int apply(Work *W, const InvCtx *ctx, const InvIntent *in) {
     const ItemDB *db = W->db;
     int s = in->src_side, d = in->dst_side;
-    if (in->type == II_TAKE_ALL) {
-        if (!W->t[INV_SIDE_LOOT]) return IIR_GONE;
-        if (!ctx->loot_reachable) return IIR_TOO_FAR;
-        InvTree *L = W->t[INV_SIDE_LOOT];
-        int moved = 0, last = IIR_NOOP;
-        bool tried[INV_MAX_ITEMS] = { false };   // by pool index (entries never move inside a tree)
-        for (int i = 0; i < INV_MAX_ITEMS; i++) {
-            InvItem *a = &L->items[i];
-            if (!inv_alive(a) || a->parent) continue;
-            tried[i] = true;
-            int r = auto_into_self(W, INV_SIDE_LOOT, a->uid, true);
-            if (r == IIR_OK) moved++;
-            else last = r;
-        }
-        // A container that stayed behind (a corpse's backpack when the player wears one): its
-        // contents one by one, top down (a pouch inside it after the pouch itself was tried).
-        for (bool progress = true; progress;) {
-            progress = false;
-            for (int i = 0; i < INV_MAX_ITEMS; i++) {
-                InvItem *a = &L->items[i];
-                if (tried[i] || !inv_alive(a) || !a->parent) continue;
-                const InvItem *c = inv_get_c(L, a->parent);
-                if (!c || !tried[c - L->items]) continue;
-                tried[i] = true;
-                progress = true;
-                int r = auto_into_self(W, INV_SIDE_LOOT, a->uid, true);
-                if (r == IIR_OK) moved++;
-                else last = r;
-            }
-        }
-        return moved ? IIR_OK : last;
-    }
-    if (in->type == II_SORT) {
+    if (in->type == II_TAKE_ALL) return take_all(W, ctx);
+    if (in->type == II_COMPACT) {
         if (d >= INV_SIDES || !W->t[d]) return IIR_GONE;
         if (!side_ok(W, ctx, d)) return IIR_TOO_FAR;
-        return sort_container(W, d, in->dst, in->aux);
+        return compact(W, d);
     }
-    if (in->type == II_BIND) {
-        if (!W->quick_n || in->aux >= W->quick_n) return IIR_INVALID;
-        if (!in->src) { if (!W->quick[in->aux]) return IIR_NOOP; W->quick[in->aux] = 0; return IIR_OK; }
+    if (in->type == II_HOLD) {
+        if (!W->has_hands) return IIR_INVALID;
+        if (!in->src) { if (!W->hands) return IIR_NOOP; W->hands = 0; return IIR_OK; }
         const InvItem *b = inv_get(W->t[INV_SIDE_SELF], in->src);
         if (!b) return IIR_GONE;
-        if (!inv_bindable(item_def(db, b->s.item))) return IIR_NOT_USABLE;
-        for (int k = 0; k < W->quick_n; k++) if (W->quick[k] == in->src) W->quick[k] = 0;
-        W->quick[in->aux] = in->src;
+        if (!inv_holdable(item_def(db, b->s.item))) return IIR_NOT_USABLE;
+        if (W->hands == in->src) return IIR_NOOP;
+        W->hands = in->src;
         return IIR_OK;
     }
     if (s >= INV_SIDES || !W->t[s]) return IIR_GONE;
@@ -457,13 +512,25 @@ static int apply(Work *W, const InvCtx *ctx, const InvIntent *in) {
     case II_MOVE: {
         if (d >= INV_SIDES || !W->t[d]) return IIR_GONE;
         if (!side_ok(W, ctx, d)) return IIR_TOO_FAR;
+        if (d == INV_SIDE_LOOT && in->loc >= INV_LOC_EQUIP) return IIR_EQUIP;   // a corpse is looted, not dressed
+        if (d == INV_SIDE_SELF && in->loc == INV_LOC_EQUIP + EQ_BACKPACK && in->dst != INV_AUTO) return equip_pack(W, s, a);
         bool partial = in->count && in->count < a->s.count && max_stack(W, a->s.item) > 1;
-        if (in->dst == INV_AUTO) {
+        u16 dst = in->dst;
+        bool off = !a->parent && a->loc == INV_LOC_EQUIP + EQ_BACKPACK;   // a worn backpack comes off
+        if (off) {
+            u16 g;
+            u16 au = a->uid;
+            int r = pack_off(W, s, a, &g);
+            if (r != IIR_OK) return r;
+            a = inv_get(W->t[s], au);
+            if (s == d && in->dst == au && in->loc < INV_LOC_EQUIP) dst = g;   // into its own grid: the new bag's
+        }
+        if (dst == INV_AUTO) {
             if (partial) return IIR_INVALID;
             return d == INV_SIDE_SELF ? auto_into_self(W, s, a->uid, false) : auto_into_root(W, s, a->uid, d);
         }
-        InvPlace p = { in->dst, in->loc, in->x, in->y, (u8)(in->rot ? 1 : 0) };
-        if (s == d && !partial) {
+        InvPlace p = { dst, in->loc, in->x, in->y, (u8)(in->rot ? 1 : 0) };
+        if (s == d && !partial && !off) {
             InvPlace cur = place_of(a);
             if (!memcmp(&cur, &p, sizeof(p))) return IIR_NOOP;
         }
@@ -472,7 +539,7 @@ static int apply(Work *W, const InvCtx *ctx, const InvIntent *in) {
         if (partial) chk.uid = 0;   // a split: the source stack keeps its cells
         int r = check(W, d, &chk, partial ? d : s, p, 0, &blk);
         if (r == IIR_OK) {
-            if (partial) return place_part(W, s, a, d, p, in->count) ? IIR_OK : IIR_FULL;
+            if (partial) return place_part(W, a, d, p, in->count) ? IIR_OK : IIR_FULL;
             return transfer(W, s, a->uid, d, p) ? IIR_OK : IIR_FULL;
         }
         if (r != IIR_NO_ROOM || !blk) return r;
@@ -484,34 +551,11 @@ static int apply(Work *W, const InvCtx *ctx, const InvIntent *in) {
             if (merge(W, a, b, want) > 0) { W->last_uid = b->uid; W->last_side = d; return IIR_OK; }
             if (partial) return IIR_FULL;
         }
-        // Onto a container: into its first free space.
-        if (item_container(db, b->s.item) && !(s == d && inv_is_ancestor(W->t[s], a->uid, b->uid))) {
-            InvItem tmp = *a;
-            if (s != d) tmp.uid = 0;
-            if (partial) tmp.s.count = in->count;
-            InvPlace ip;
-            if (!inv_find_space(W->t[d], db, &tmp, b->uid, &ip)) return insert_why(W, a, b);
-            if (partial) return place_part(W, s, a, d, ip, in->count) ? IIR_OK : IIR_FULL;
-            return transfer(W, s, a->uid, d, ip) ? IIR_OK : IIR_FULL;
-        }
-        if (partial) return IIR_NO_ROOM;
+        if (partial || off) return IIR_NO_ROOM;
         // A different single item: swap.
         InvPlace target = p.loc >= INV_LOC_EQUIP ? p : place_of(b);
         if (p.loc < INV_LOC_EQUIP) target.rot = p.rot;
         return swap(W, s, a, d, b, target);
-    }
-    case II_INSERT: {
-        if (d >= INV_SIDES || !W->t[d]) return IIR_GONE;
-        if (!side_ok(W, ctx, d)) return IIR_TOO_FAR;
-        InvItem *b = inv_get(W->t[d], in->dst);
-        if (!b) return IIR_GONE;
-        if (!item_container(db, b->s.item)) return IIR_INVALID;
-        if (s == d && inv_is_ancestor(W->t[s], a->uid, b->uid)) return IIR_NESTING;
-        InvItem tmp = *a;
-        if (s != d) tmp.uid = 0;
-        InvPlace ip;
-        if (!inv_find_space(W->t[d], db, &tmp, b->uid, &ip)) return insert_why(W, a, b);
-        return transfer(W, s, a->uid, d, ip) ? IIR_OK : IIR_FULL;
     }
     case II_ROTATE: {
         if (a->loc >= INV_LOC_EQUIP) return IIR_NOOP;
@@ -529,6 +573,10 @@ static int apply(Work *W, const InvCtx *ctx, const InvIntent *in) {
         if (s != INV_SIDE_SELF) tmp.uid = 0;
         int slot = in->aux == 255 ? inv_equip_target(W->t[INV_SIDE_SELF], db, &tmp) : in->aux;
         if (slot == EQ_NONE || slot >= EQ_COUNT) return IIR_EQUIP;
+        if (slot == EQ_BACKPACK) {
+            if (!inv_equip_accepts(slot, ad)) return IIR_EQUIP;
+            return equip_pack(W, s, a);
+        }
         InvPlace p = { 0, (u8)(INV_LOC_EQUIP + slot), 0, 0, 0 };
         if (s == INV_SIDE_SELF && a->loc == p.loc && !a->parent) return IIR_NOOP;
         u16 blk = 0;
@@ -548,24 +596,22 @@ static int apply(Work *W, const InvCtx *ctx, const InvIntent *in) {
         if (n <= 0) return IIR_NOOP;
         InvItem tmp = *a;
         tmp.s.count = (u16)n;
-        if (s != d) tmp.uid = 0;
+        tmp.uid = 0;   // the new stack: a's own cells stay taken
         InvPlace p = { in->dst, in->loc, in->x, in->y, (u8)(in->rot ? 1 : 0) };
         if (in->dst == INV_AUTO) {
-            tmp.uid = 0;   // the new stack: a's own cells stay taken
-            bool ok = d == INV_SIDE_SELF ? inv_find_space_order(W->t[d], db, &tmp, W->order, &p) : inv_find_space(W->t[d], db, &tmp, 0, &p);
-            if (!ok) return IIR_NO_ROOM;
+            if (!inv_find_grid_space(W->t[d], db, &tmp, &p)) return IIR_NO_ROOM;
         } else {
-            tmp.uid = 0;
             int r = inv_check_place(W->t[d], db, &tmp, p, 0, NULL);
             if (r != IIR_OK) return r;
         }
-        return place_part(W, s, a, d, p, n) ? IIR_OK : IIR_FULL;
+        return place_part(W, a, d, p, n) ? IIR_OK : IIR_FULL;
     }
     case II_DISCARD: {
-        // Into the effect's drop tree as it was: a container keeps its contents and their layout (the
-        // host spawns it as one pickup), however many entries the subtree has.
+        // Into the effect's drop tree (the host spawns it as a pickup). A worn backpack comes off
+        // first: its contents stay with the player, in the default bag.
         InvTree *D = W->t[SIDE_DROP];
         if (!D) return IIR_INVALID;
+        if (is_default_pack(W, a)) return IIR_DEFAULT_PACK;
         u16 lu = W->last_uid;
         int ls = W->last_side;
         if (in->count && in->count < a->s.count) {
@@ -576,6 +622,12 @@ static int apply(Work *W, const InvCtx *ctx, const InvIntent *in) {
             o->dur = a->dur;
             a->s.count = (u16)(a->s.count - in->count);
             return IIR_OK;
+        }
+        if (is_worn(a, EQ_BACKPACK)) {
+            u16 g, au = a->uid;
+            int r = pack_off(W, s, a, &g);
+            if (r != IIR_OK) return r;
+            a = inv_get(W->t[s], au);
         }
         InvPlace p = { 0, 0, 0, 0, 0 };
         u16 top = transfer(W, s, a->uid, SIDE_DROP, p);
@@ -675,21 +727,25 @@ static int apply(Work *W, const InvCtx *ctx, const InvIntent *in) {
     }
 }
 
+bool inv_ensure_pack(InvTree *t, const ItemDB *db) {
+    if (!db->default_backpack || !inv_root_def(t, db)->equip || inv_pack(t)) return false;
+    InvSlot ds = { db->default_backpack, 1, 0, { 0 }, 0 };
+    InvItem *it = inv_alloc(t, db, &ds);
+    if (!it) return false;
+    it->loc = INV_LOC_EQUIP + EQ_BACKPACK;
+    return true;
+}
+
 static void finish(Work *W) {
     for (int i = 0; i < INV_SIDES; i++) if (W->t[i]) inv_normalize(W->t[i], W->db);
-    for (int k = 0; k < W->quick_n; k++)
-        if (W->quick[k] && (!W->t[INV_SIDE_SELF] || !inv_get(W->t[INV_SIDE_SELF], W->quick[k]))) W->quick[k] = 0;
-    // Weapons / consumables / throwables taken from a world container (a container's contents with it)
-    // or picked up inside a dropped container bind like a pickup, in tree order until the hotbar is
-    // full (after the stale binds cleared: a swap's outgoing item frees its slot first).
-    for (int k = 0; k < W->arrived_n; k++) auto_bind(W, W->arrived[k]);
+    inv_ensure_pack(W->t[INV_SIDE_SELF], W->db);
+    if (W->hands && !inv_get(W->t[INV_SIDE_SELF], W->hands)) W->hands = 0;
 }
 
 // Scratch copies of the sides the context has; committed back by commit().
 static void work_begin(Work *W, InvCtx *ctx, InvEffect *fx) {
     memset(W, 0, sizeof(*W));
     W->db = ctx->db;
-    W->order = ctx->order.n ? ctx->order : inv_order_default();
     W->fx = fx;
     for (int i = 0; i < INV_SIDES; i++) {
         if (!ctx->tree[i]) continue;
@@ -702,14 +758,14 @@ static void work_begin(Work *W, InvCtx *ctx, InvEffect *fx) {
         inv_tree_init(&fx->dropped, -1);
         W->t[SIDE_DROP] = &fx->dropped;
     }
-    W->quick_n = DG_MIN(ctx->quick_n, (int)ARRAY_COUNT(W->quick));
-    if (ctx->quick) memcpy(W->quick, ctx->quick, sizeof(u16) * (size_t)W->quick_n);
+    W->has_hands = ctx->hands != NULL;
+    W->hands = ctx->hands ? *ctx->hands : 0;
 }
 
 static void commit(Work *W, InvCtx *ctx) {
     finish(W);
     for (int i = 0; i < INV_SIDES; i++) if (ctx->tree[i]) *ctx->tree[i] = *W->t[i];
-    if (ctx->quick) memcpy(ctx->quick, W->quick, sizeof(u16) * (size_t)W->quick_n);
+    if (ctx->hands) *ctx->hands = W->hands;
 }
 
 int inv_intent_apply(InvCtx *ctx, const InvIntent *in, InvEffect *fx) {
@@ -736,6 +792,7 @@ int inv_give(InvCtx *ctx, const InvSlot *s) {
     InvEffect fx;
     memset(&fx, 0, sizeof(fx));
     work_begin(&W, ctx, &fx);
+    inv_ensure_pack(W.t[INV_SIDE_SELF], W.db);   // a fresh tree: the default bag first
     InvTree *H = W.t[SIDE_HAND];
     int ms = max_stack(&W, s->item);
     int left = s->count;
@@ -744,63 +801,17 @@ int inv_give(InvCtx *ctx, const InvSlot *s) {
         part.count = (u16)DG_MIN(left, ms);
         InvItem *h = inv_alloc(H, W.db, &part);
         if (!h) break;
-        W.last_uid = 0;
         auto_into_self(&W, SIDE_HAND, h->uid, true);
         int stuck = inv_alive(h) ? h->s.count : 0;
         left -= part.count - stuck;
-        if (W.last_uid && W.last_side == INV_SIDE_SELF) auto_bind(&W, W.last_uid);
         if (stuck) break;
     }
     commit(&W, ctx);
     return left;
 }
 
-int inv_give_with(InvCtx *ctx, const InvSlot *s, const InvTree *contents) {
-    if (!s->item || !s->count || !ctx->tree[INV_SIDE_SELF]) return s->count;
-    if (!contents || !inv_live_count(contents)) return inv_give(ctx, s);
-    Work W;
-    InvEffect fx;
-    memset(&fx, 0, sizeof(fx));
-    work_begin(&W, ctx, &fx);
-    InvTree *H = W.t[SIDE_HAND];
-    InvItem *top = inv_alloc(H, W.db, s);
-    if (!top) return s->count;
-    u16 tu = top->uid;
-    // The contents under the new top, every entry with its compartment / cell / rotation: uids mapped
-    // (the drop tree's root level is the container itself).
-    u16 old_uid[INV_MAX_ITEMS], new_uid[INV_MAX_ITEMS];
-    int n = 0;
-    for (int i = 0; i < INV_MAX_ITEMS; i++) {
-        const InvItem *c = &contents->items[i];
-        if (!inv_alive(c)) continue;
-        InvItem *h = inv_alloc(H, W.db, &c->s);
-        if (!h) return s->count;
-        h->dur = c->dur;
-        h->flags = c->flags;
-        h->loc = c->loc;
-        h->x = c->x;
-        h->y = c->y;
-        h->parent = c->parent;   // remapped below
-        old_uid[n] = c->uid;
-        new_uid[n++] = h->uid;
-    }
-    for (int i = 0; i < INV_MAX_ITEMS; i++) {
-        InvItem *h = &H->items[i];
-        if (!inv_alive(h) || h->uid == tu) continue;
-        u16 np = tu;
-        for (int k = 0; k < n && h->parent; k++) if (old_uid[k] == h->parent) np = new_uid[k];
-        h->parent = np;
-    }
-    W.last_uid = 0;
-    W.hand_arrives = true;   // the container and every bindable entry in it bind (a dropped rig's medkits come back bound)
-    int r = auto_into_self(&W, SIDE_HAND, tu, true);
-    if (r != IIR_OK || inv_get(H, tu)) return s->count;   // nothing committed
-    commit(&W, ctx);
-    return 0;
-}
-
 int inv_give_root(InvTree *t, const ItemDB *db, const InvSlot *s) {
-    InvCtx ctx = inv_ctx_make(db, t, NULL, 0, NULL);
+    InvCtx ctx = inv_ctx_make(db, t, NULL, NULL);
     Work W;
     work_begin(&W, &ctx, NULL);
     InvTree *H = W.t[SIDE_HAND];
@@ -820,19 +831,18 @@ int inv_give_root(InvTree *t, const ItemDB *db, const InvSlot *s) {
     return left;
 }
 
-void inv_strip_to_corpse(InvTree *body, u16 *quick, int quick_n, InvTree *corpse, const ItemDB *db) {
-    InvCtx ctx = inv_ctx_make(db, body, quick, quick_n, corpse);
+void inv_strip_to_corpse(InvTree *body, u16 *hands, InvTree *corpse, const ItemDB *db) {
+    InvCtx ctx = inv_ctx_make(db, body, hands, corpse);
     Work W;
     work_begin(&W, &ctx, NULL);
+    InvTree *B = W.t[INV_SIDE_SELF], *C = W.t[INV_SIDE_LOOT];
     for (int i = 0; i < INV_MAX_ITEMS; i++) {
-        InvItem *it = &W.t[INV_SIDE_SELF]->items[i];
-        if (!inv_alive(it) || it->parent || it->loc == INV_LOC_EQUIP + EQ_SECURE) continue;
-        InvPlace p = place_of(it);
-        if (check(&W, INV_SIDE_LOOT, it, INV_SIDE_SELF, p, 0, NULL) != IIR_OK && !find_space(&W, INV_SIDE_LOOT, it, INV_SIDE_SELF, &p)) {
-            inv_free_subtree(W.t[INV_SIDE_SELF], it->uid);   // the corpse is full: lost
-            continue;
-        }
-        transfer(&W, INV_SIDE_SELF, it->uid, INV_SIDE_LOOT, p);
+        InvItem *it = &B->items[i];
+        if (!inv_alive(it) || it->parent) continue;
+        // What it wears, in the same slots (the backpack with its contents); a detached dev item is lost.
+        int slot = it->loc - INV_LOC_EQUIP;
+        bool ok = it->loc >= INV_LOC_EQUIP && slot < EQ_COUNT && inv_root_def(C, db)->equip && !inv_equipped(C, slot);
+        if (!ok || !transfer(&W, INV_SIDE_SELF, it->uid, INV_SIDE_LOOT, place_of(it))) inv_free_subtree(B, it->uid);
     }
     commit(&W, &ctx);
 }

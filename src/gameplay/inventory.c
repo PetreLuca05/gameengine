@@ -2,15 +2,11 @@
 #include "attachments.h"
 #include <string.h>
 
-static InvOrder g_order;
-
-void inv_set_order(InvOrder order) { g_order = order; }
-InvOrder inv_get_order(void) { return g_order.n ? g_order : inv_order_default(); }
-
 void inv_init(Inventory *inv, const ItemDB *db) {
     u32 rev = inv->revision;
     memset(inv, 0, sizeof(*inv));
     inv_tree_init(&inv->t, db ? container_find(db, "body") : 0);
+    if (db) inv_ensure_pack(&inv->t, db);
     inv->revision = rev + 1;
 }
 
@@ -23,11 +19,7 @@ void inv_clear(Inventory *inv) {
     inv->revision = rev + 1;
 }
 
-InvCtx inv_ctx(Inventory *inv, const ItemDB *db, InvTree *loot) {
-    InvCtx c = inv_ctx_make(db, &inv->t, inv->quick, INV_HOTBAR, loot);
-    c.order = inv_get_order();
-    return c;
-}
+InvCtx inv_ctx(Inventory *inv, const ItemDB *db, InvTree *loot) { return inv_ctx_make(db, &inv->t, &inv->hands, loot); }
 
 int inv_add(Inventory *inv, const ItemDB *db, u16 item, int count, i16 ammo) { return inv_add_att(inv, db, item, count, ammo, NULL); }
 
@@ -46,14 +38,6 @@ int inv_add_att(Inventory *inv, const ItemDB *db, u16 item, int count, i16 ammo,
     return left;
 }
 
-int inv_add_with(Inventory *inv, const ItemDB *db, const InvSlot *s, const InvTree *contents) {
-    if (!s->item || s->item >= db->item_count || !s->count) return s->count;
-    InvCtx c = inv_ctx(inv, db, NULL);
-    int left = inv_give_with(&c, s, contents);
-    if (left != s->count) inv->revision++;
-    return left;
-}
-
 int inv_count(const Inventory *inv, u16 item) {
     int c = 0;
     for (int i = 0; i < INV_MAX_ITEMS; i++) {
@@ -65,42 +49,46 @@ int inv_count(const Inventory *inv, u16 item) {
 
 bool inv_has(const Inventory *inv, u16 item) { return inv_count(inv, item) > 0; }
 
-static bool bound(const Inventory *inv, u16 uid) {
-    for (int k = 0; k < INV_HOTBAR; k++) if (inv->quick[k] == uid) return true;
-    return false;
-}
-
 int inv_remove(Inventory *inv, u16 item, int count) {
     int removed = 0;
-    // Unbound stacks first so the hotbar keeps its items.
+    // Stacks not in the hands first so the held one stays.
     for (int pass = 0; pass < 2; pass++)
         for (int i = INV_MAX_ITEMS - 1; i >= 0 && removed < count; i--) {
             InvItem *it = &inv->t.items[i];
-            if (!inv_alive(it) || it->s.item != item || bound(inv, it->uid) != (pass == 1)) continue;
+            if (!inv_alive(it) || it->s.item != item || (inv->hands == it->uid) != (pass == 1)) continue;
             int take = DG_MIN((int)it->s.count, count - removed);
             it->s.count = (u16)(it->s.count - take);
             removed += take;
             if (!it->s.count) memset(it, 0, sizeof(*it));
         }
-    if (removed) inv->revision++;
+    if (removed) {
+        if (inv->hands && !inv_get(&inv->t, inv->hands)) inv->hands = 0;
+        inv->revision++;
+    }
     return removed;
 }
 
-InvSlot *inv_hot(Inventory *inv, int k) {
-    InvItem *it = k >= 0 && k < INV_HOTBAR ? inv_get(&inv->t, inv->quick[k]) : NULL;
+static InvItem *sel_item(Inventory *inv, int k) {
+    if (k >= 0 && k < INV_SEL_WEAPONS) return inv_equipped(&inv->t, k);
+    if (k == INV_SEL_HANDS) return inv_get(&inv->t, inv->hands);
+    return NULL;
+}
+
+InvSlot *inv_sel(Inventory *inv, int k) {
+    InvItem *it = sel_item(inv, k);
     if (it) return &it->s;
     memset(&inv->none, 0, sizeof(inv->none));
     return &inv->none;
 }
 
-const InvSlot *inv_hot_c(const Inventory *inv, int k) {
+const InvSlot *inv_sel_c(const Inventory *inv, int k) {
     static const InvSlot empty;
-    const InvItem *it = k >= 0 && k < INV_HOTBAR ? inv_get_c(&inv->t, inv->quick[k]) : NULL;
+    const InvItem *it = sel_item((Inventory *)inv, k);
     return it ? &it->s : &empty;
 }
 
-int inv_hot_find(const Inventory *inv, u16 item) {
-    for (int k = 0; k < INV_HOTBAR; k++) if (item && inv_hot_c(inv, k)->item == item) return k;
+int inv_sel_find(const Inventory *inv, u16 item) {
+    for (int k = 0; k < INV_SEL_COUNT; k++) if (item && inv_sel_c(inv, k)->item == item) return k;
     return -1;
 }
 
@@ -112,15 +100,18 @@ void inv_use_one(const ItemDB *db, InvSlot *s) {
     else s->count--;
 }
 
-InvSlot *inv_dev_hot(Inventory *inv, const ItemDB *db, int k) {
-    k = DG_CLAMP(k, 0, INV_HOTBAR - 1);
-    InvItem *it = inv_get(&inv->t, inv->quick[k]);
+InvSlot *inv_dev_sel(Inventory *inv, const ItemDB *db, int k) {
+    k = DG_CLAMP(k, 0, INV_SEL_COUNT - 1);
+    InvItem *it = sel_item(inv, k);
     if (it) return &it->s;
     InvSlot ph = { 1, 1, 0, { 0 }, 0 };   // a placeholder payload: the caller writes the real one
     it = inv_alloc(&inv->t, db, &ph);
     if (!it) { memset(&inv->none, 0, sizeof(inv->none)); return &inv->none; }
-    it->loc = INV_LOC_NONE;
-    inv->quick[k] = it->uid;
+    if (k < INV_SEL_WEAPONS) it->loc = (u8)(INV_LOC_EQUIP + k);
+    else {
+        it->loc = INV_LOC_NONE;
+        inv->hands = it->uid;
+    }
     return &it->s;
 }
 

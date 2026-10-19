@@ -13,21 +13,20 @@ typedef enum InvSide { INV_SIDE_SELF, INV_SIDE_LOOT, INV_SIDES } InvSide;
 
 typedef enum InvIntentType {
     II_NONE,
-    II_MOVE,         // src -> (dst side, dst parent, loc, x, y, rot), count (0 = all): place / merge / insert / swap
-    II_INSERT,       // src -> into container item dst (first free space)
+    II_MOVE,         // src -> (dst side, dst parent, loc, x, y, rot), count (0 = all): place / merge / swap
     II_ROTATE,       // src rotated in place
     II_EQUIP,        // src -> equipment slot aux (255 = its own); the occupant swaps out
-    II_QUICK_MOVE,   // src -> across (loot open) or the next player container (inv_quick_order)
+    II_QUICK_MOVE,   // src -> across (loot open), else between the equipment slots and the grid
     II_SPLIT,        // count (0 = half) of src -> dst place (dst INV_AUTO: the first space)
-    II_DISCARD,      // src, count (0 = all): removed, the host spawns the pickup (a container with its contents)
+    II_DISCARD,      // src, count (0 = all): removed, the host spawns the pickup
     II_USE,          // src (self): a consumable used once
     II_MOUNT,        // attachment src -> weapon dst (on dst side)
     II_UNMOUNT,      // weapon src, attachment slot aux -> dst place (dst INV_AUTO: the first space)
     II_FOLD,         // weapon src: fold / unfold the stock
     II_UNLOAD,       // weapon src: the loaded rounds back into an ammo stack
-    II_BIND,         // hotbar slot aux <- src (0 = clear)
-    II_TAKE_ALL,     // every loot root item that fits -> self
-    II_SORT,         // re-pack container dst (dst side; 0 = the root grids) by aux: 0 type, 1 weight, 2 size
+    II_HOLD,         // src (self) into the hands (0 = put away): a consumable / throwable / hand tool
+    II_TAKE_ALL,     // everything of the loot tree that fits -> self
+    II_COMPACT,      // re-pack the grid of side dst (largest first, reading order kept)
     II_COUNT
 } InvIntentType;
 
@@ -38,16 +37,15 @@ typedef struct InvIntent {
     u8 src_side, dst_side;
     u8 loc;           // destination compartment, or INV_LOC_EQUIP + slot
     u16 src;          // item uid in the src side's tree
-    u16 dst;          // destination parent uid (0 = the root, INV_AUTO), or the target item (insert / mount)
+    u16 dst;          // destination parent uid (0 = the root, a worn backpack's uid, INV_AUTO), or the target weapon (mount)
     u8 x, y, rot;
-    u8 aux;           // attachment slot / hotbar slot / equipment slot
+    u8 aux;           // attachment slot / equipment slot
     u16 count;
     u32 seq;          // client sequence (reconcile); 0 = unsequenced
 } InvIntent;
 
 typedef struct InvEffect {
-    InvTree dropped;                  // II_DISCARD: what the host spawns as pickups, as it was: each top at the root,
-                                      // a container's contents under it with their layout (one pickup keeps them)
+    InvTree dropped;                  // II_DISCARD: what the host spawns as a pickup (one entry at the root)
     u16 used_item;                    // II_USE: the consumed item (host: heal / armour / vehicle use)
     u16 moved_uid;                    // where the moved item ended up (the selection follows it)
     u8 moved_side;
@@ -55,14 +53,12 @@ typedef struct InvEffect {
 
 typedef struct InvCtx {
     InvTree *tree[INV_SIDES];   // NULL: that side isn't open
-    u16 *quick;                 // the hotbar binds (self uids)
-    int quick_n;
+    u16 *hands;                 // the item in the hands (self uid, 0 = none); NULL: no hands
     const ItemDB *db;
-    InvOrder order;
     bool loot_reachable;        // host: the open container is in range (clients predict true)
 } InvCtx;
 
-InvCtx inv_ctx_make(const ItemDB *db, InvTree *self, u16 *quick, int quick_n, InvTree *loot);
+InvCtx inv_ctx_make(const ItemDB *db, InvTree *self, u16 *hands, InvTree *loot);
 int inv_intent_apply(InvCtx *ctx, const InvIntent *in, InvEffect *fx);
 const char *inv_intent_name(int type);
 int inv_intent_from_name(const char *s);   // II_NONE if unknown
@@ -71,23 +67,21 @@ int inv_intent_from_name(const char *s);   // II_NONE if unknown
 // goes into, or why not (IIR_NOT_WEAPON / IIR_NO_SLOT / IIR_INCOMPATIBLE).
 int inv_attach_check(const ItemDB *db, const InvSlot *weapon, u16 att_item, int *aslot_out);
 
-// What a hotbar slot may hold (II_BIND, the pickup binds): weapons, consumables, throwables, the
-// "hotbar": true tools. Never a container / wearable or the built-in phone.
-bool inv_bindable(const ItemDef *d);
+// What the hands may hold from the grid (II_HOLD, the wheels): consumables, throwables, the
+// "hands": true tools. Weapons are drawn from their equipment slots; never the built-in phone.
+bool inv_holdable(const ItemDef *d);
 
-// Pickup rule (docs/INVENTORY.md): merge into stacks, equip a weapon / wearable into a free slot,
-// else the first space in the order; weapons, consumables and throwables bind to a free hotbar
-// slot (so do the ones moved over from a world container by any intent). Returns how many could
-// NOT be added.
+// Pickup rule (docs/INVENTORY.md): merge into the grid's stacks, a weapon into a free slot, a bigger
+// backpack onto the back over the default bag (the contents move over), else the first space in
+// the grid. Returns how many could NOT be added.
 int inv_give(InvCtx *ctx, const InvSlot *s);
-// A container picked up with what it held (a dropped backpack's pickup): contents' root level goes
-// into it, every entry in its own place. All or nothing: returns 0 or s->count.
-int inv_give_with(InvCtx *ctx, const InvSlot *s, const InvTree *contents);
-// The same into a world container's root grids (no equipment, no binds).
+// The same into a world container's root grid (no equipment).
 int inv_give_root(InvTree *t, const ItemDB *db, const InvSlot *s);
+// A body tree without a backpack gets the default bag (spawn, after death); true if it got one.
+bool inv_ensure_pack(InvTree *t, const ItemDB *db);
 
-// Death: everything but the secure container's subtree moves from the body into the corpse tree
-// (same places: the corpse shows the equipment). Binds into what left are cleared.
-void inv_strip_to_corpse(InvTree *body, u16 *quick, int quick_n, InvTree *corpse, const ItemDB *db);
+// Death: everything moves from the body into the corpse tree (same places: the corpse wears the
+// weapons and the backpack with its contents); the body gets a fresh default bag.
+void inv_strip_to_corpse(InvTree *body, u16 *hands, InvTree *corpse, const ItemDB *db);
 
 #endif

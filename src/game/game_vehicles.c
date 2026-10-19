@@ -2366,9 +2366,9 @@ void vehicles_test_tick(World *w) {
             inv_add(&p->inv, w->items, item_find(w->items, "rifle"), 1, 30);
         }
         if (f == 5)
-            for (int k = 0; k < INV_HOTBAR; k++) {
-                const WeaponDef *wd = item_weapon(w->items, inv_hot_c(&p->inv, k)->item);
-                if (wd && wd->one_hand_capable) { G->hotbar_slot = (u8)k; break; }
+            for (int k = 0; k < INV_SEL_WEAPONS; k++) {
+                const WeaponDef *wd = item_weapon(w->items, inv_sel_c(&p->inv, k)->item);
+                if (wd && wd->one_hand_capable) { game_select(k); break; }
             }
         v = test_vehicle(w);
         if (!v) { test_end(); return; }

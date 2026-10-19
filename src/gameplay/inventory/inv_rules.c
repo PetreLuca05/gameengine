@@ -2,35 +2,11 @@
 #include <string.h>
 
 const char *inv_result_text(int r) {
-    static const char *t[IIR_COUNT] = { "", "Nothing to do", "Invalid", "No room", "Doesn't go in there", "Can't go inside itself or a smaller container",
+    static const char *t[IIR_COUNT] = { "", "Nothing to do", "Invalid", "No room", "Doesn't go in there", "Only the worn backpack holds items",
                                         "Someone else took it", "Too far away", "Inventory full", "Doesn't go in that slot", "Can't be used",
-                                        "Doesn't fit this weapon", "This weapon has no slot for it", "Takes no attachments", "Can't be rotated" };
+                                        "Doesn't fit this weapon", "This weapon has no slot for it", "Takes no attachments", "Can't be rotated",
+                                        "Empty it first", "The default bag stays on" };
     return r >= 0 && r < IIR_COUNT ? t[r] : "?";
-}
-
-InvOrder inv_order_default(void) {
-    InvOrder o = { 3, { IQ_RIG, IQ_BACKPACK, IQ_POCKETS, IQ_SECURE } };
-    return o;
-}
-
-InvOrder inv_order_parse(const char *s) {
-    InvOrder o;
-    memset(&o, 0, sizeof(o));
-    if (!s) return inv_order_default();
-    char buf[96];
-    dg_strcpy(buf, sizeof(buf), s);
-    for (char *tok = buf; tok && *tok && o.n < IQ_COUNT;) {
-        char *comma = strchr(tok, ',');
-        if (comma) *comma = 0;
-        while (*tok == ' ') tok++;
-        int q = !strcmp(tok, "rig") ? IQ_RIG : !strcmp(tok, "backpack") ? IQ_BACKPACK : !strcmp(tok, "pockets") ? IQ_POCKETS
-              : !strcmp(tok, "secure") ? IQ_SECURE : -1;
-        bool dup = false;
-        for (int i = 0; i < o.n; i++) dup |= o.t[i] == q;
-        if (q >= 0 && !dup) o.t[o.n++] = (u8)q;
-        tok = comma ? comma + 1 : NULL;
-    }
-    return o.n ? o : inv_order_default();
 }
 
 bool inv_equip_accepts(int slot, const ItemDef *d) {
@@ -50,8 +26,6 @@ int inv_accepts(const ItemDB *db, const InvContainerDef *cd, const InvSlot *s, i
         int clo = DG_MIN(cd->max_w, cd->max_h), chi = DG_MAX(cd->max_w, cd->max_h);
         if (lo > clo || hi > chi) return IIR_FILTER;
     }
-    const InvContainerDef *own = item_container(db, s->item);
-    if (own && cd->no_containers) return IIR_NESTING;
     return IIR_OK;
 }
 
@@ -77,19 +51,20 @@ int inv_check_place(const InvTree *t, const ItemDB *db, const InvItem *it, InvPl
         }
         return IIR_OK;
     }
+    // Only a tree's grid holds items: a world container's root, a body's worn backpack.
+    if (p.parent != inv_grid(t, db)) return IIR_NESTING;
+    if (p.parent && p.parent == self) return IIR_NESTING;
     const InvContainerDef *cd = inv_parent_def(t, db, p.parent);
     if (!cd) return IIR_INVALID;
-    if (p.parent && self && inv_is_ancestor(t, self, p.parent)) return IIR_NESTING;
     if (p.loc >= cd->comp_count) return IIR_INVALID;
     if (p.rot && !d->rotatable) return IIR_NOT_ROTATABLE;
+    // A backpack in a grid is an empty item (its contents would nest).
+    if (self && item_container(db, it->s.item) && inv_child_count(t, self)) return IIR_NOT_EMPTY;
     int bw, bh;
     inv_base_size(db, &it->s, it->flags, &bw, &bh);
     int w = p.rot ? bh : bw, h = p.rot ? bw : bh;
     int r = inv_accepts(db, cd, &it->s, w, h);
     if (r != IIR_OK) return r;
-    // A container never goes into a container that isn't strictly larger (backpack in backpack).
-    const InvContainerDef *own = item_container(db, it->s.item);
-    if (own && p.parent && own->capacity >= cd->capacity) return IIR_NESTING;
     const InvCompDef *c = &cd->comp[p.loc];
     if (p.x + w > c->w || p.y + h > c->h) return IIR_NO_ROOM;
     for (int i = 0; i < INV_MAX_ITEMS; i++) {
@@ -108,7 +83,7 @@ int inv_check_place(const InvTree *t, const ItemDB *db, const InvItem *it, InvPl
 }
 
 bool inv_find_space(const InvTree *t, const ItemDB *db, const InvItem *it, u16 parent, InvPlace *out) {
-    const InvContainerDef *cd = inv_parent_def(t, db, parent);
+    const InvContainerDef *cd = parent == INV_NO_GRID ? NULL : inv_parent_def(t, db, parent);
     if (!cd) return false;
     const ItemDef *d = item_def(db, it->s.item);
     for (int c = 0; c < cd->comp_count; c++)
@@ -121,28 +96,8 @@ bool inv_find_space(const InvTree *t, const ItemDB *db, const InvItem *it, u16 p
     return false;
 }
 
-bool inv_quick_parent(const InvTree *t, InvQuickTarget q, u16 *parent) {
-    switch (q) {
-    case IQ_POCKETS: *parent = 0; return true;
-    case IQ_RIG: case IQ_BACKPACK: case IQ_SECURE: {
-        int slot = q == IQ_RIG ? EQ_RIG : q == IQ_BACKPACK ? EQ_BACKPACK : EQ_SECURE;
-        const InvItem *e = inv_equipped_c(t, slot);
-        if (!e) return false;
-        *parent = e->uid;
-        return true;
-    }
-    default: return false;
-    }
-}
-
-bool inv_find_space_order(const InvTree *t, const ItemDB *db, const InvItem *it, InvOrder order, InvPlace *out) {
-    for (int i = 0; i < order.n; i++) {
-        u16 parent;
-        if (!inv_quick_parent(t, (InvQuickTarget)order.t[i], &parent)) continue;
-        if (it->uid && parent && inv_is_ancestor(t, it->uid, parent)) continue;   // not into itself
-        if (inv_find_space(t, db, it, parent, out)) return true;
-    }
-    return false;
+bool inv_find_grid_space(const InvTree *t, const ItemDB *db, const InvItem *it, InvPlace *out) {
+    return inv_find_space(t, db, it, inv_grid(t, db), out);
 }
 
 int inv_equip_target(const InvTree *t, const ItemDB *db, const InvItem *it) {

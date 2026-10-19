@@ -5,20 +5,18 @@
 //   double click: open / inspect; right click: context menu; R: rotate the carried item;
 //   pad / keyboard: A picks up what the cursor is on, A again places it (the same rules).
 //
-// Release rules: a grid cell = move (place / merge onto a stack / into a container / swap, Shift:
-// a split dialog); an equipment slot = equip; a hotbar tile = bind (a loot item: rejected); an
-// attachment slot of the inspected weapon = mount; an attachment chip onto a cell = unmount there;
-// the discard zone / outside the screen = discard (weapons and containers ask first); a hotbar
-// tile dragged off the hotbar = unbind.
+// Release rules: a grid cell = move (place / merge onto a stack / swap, Shift: a split dialog); an
+// equipment slot = equip; the character = equip into the item's own slot; an attachment chip of a
+// weapon (the slot column, the inspect panel) = mount; an attachment chip onto a cell = unmount there;
+// the discard zone / outside the screen = discard (weapons and gear ask first).
 #include "inv_ui.h"
 #include <string.h>
 
 void idd_reset(InvDrag *d) { memset(d, 0, sizeof(*d)); }
 
-const char *idd_reason_text(int reason) {
-    if (reason == IDR_TAKE_FIRST) return "Take it first";
-    return inv_result_text(reason);
-}
+const char *idd_reason_text(int reason) { return inv_result_text(reason); }
+
+bool inv_cat_dims(int cat, const ItemDef *d) { return cat > 0 && d->category != cat - 1; }
 
 static const InvItem *item_at(const InvView *v, int side, u16 uid) {
     if (side < 0 || side >= INV_SIDES || !v->tree[side] || !uid) return NULL;
@@ -75,9 +73,8 @@ static void grab_rot(const InvDrag *d, const InvView *v, int *gx, int *gy) {
 bool idd_footprint(const InvDrag *d, InvTarget t, const InvView *v, int *x, int *y, int *w, int *h) {
     if (t.kind != IT_CELL || d->state == IDD_IDLE) return false;
     const InvItem *it = item_at(v, d->side, d->uid);
-    if (!it || d->src.kind == IT_ATTACH || d->src.kind == IT_HOT) {
+    if (!it || d->src.kind == IT_ATTACH) {
         *x = t.x; *y = t.y; *w = *h = 1;
-        if (d->src.kind == IT_HOT) return false;
         return d->src.kind == IT_ATTACH;
     }
     int bw, bh;
@@ -101,13 +98,6 @@ InvDDOut idd_drop_on(const InvDrag *d, InvTarget t, const InvView *v) {
     memset(&none, 0, sizeof(none));
     none.action = IDA_CANCEL;
     const InvTarget *s = &d->src;
-    // A hotbar tile: bind elsewhere, or unbind anywhere off the hotbar.
-    if (s->kind == IT_HOT) {
-        if (t.kind == IT_HOT && t.index == s->index) return none;
-        InvIntent in = mk(II_BIND, INV_SIDE_SELF, t.kind == IT_HOT ? s->uid : 0, INV_SIDE_SELF, 0);
-        in.aux = (u8)(t.kind == IT_HOT ? t.index : s->index);
-        return out_intent(in, t);
-    }
     // An attachment chip of the inspected weapon: onto a cell (unmount there) or away (first space).
     if (s->kind == IT_ATTACH) {
         InvIntent in = mk(II_UNMOUNT, s->side, s->uid, s->side, INV_AUTO);
@@ -150,10 +140,12 @@ InvDDOut idd_drop_on(const InvDrag *d, InvTarget t, const InvView *v) {
         if (!inv_equip_accepts(t.index, item_def(v->db, it->s.item))) return out_reject(t, IIR_EQUIP);
         return out_intent(in, t);
     }
-    case IT_HOT: {
-        if (d->side != INV_SIDE_SELF) return out_reject(t, IDR_TAKE_FIRST);
-        InvIntent in = mk(II_BIND, INV_SIDE_SELF, d->uid, INV_SIDE_SELF, 0);
-        in.aux = (u8)t.index;
+    case IT_CHAR: {
+        // Onto the character: worn in its own slot (a long gun: the primary, else the secondary).
+        if (item_def(v->db, it->s.item)->equip_slot == EQ_NONE) return out_reject(t, IIR_EQUIP);
+        if (s->kind == IT_EQUIP && s->side == INV_SIDE_SELF) return none;
+        InvIntent in = mk(II_EQUIP, d->side, d->uid, INV_SIDE_SELF, 0);
+        in.aux = 255;
         return out_intent(in, t);
     }
     case IT_ATTACH: {
@@ -188,13 +180,14 @@ InvDDOut idd_update(InvDrag *d, const InvDDIn *in, const InvView *v) {
     switch (d->state) {
     case IDD_IDLE: {
         const InvTarget *h = &in->hover;
-        if (in->right_pressed && h->uid && (h->kind == IT_CELL || h->kind == IT_EQUIP || h->kind == IT_HOT)) return out_act(IDA_CONTEXT, *h);
+        if (in->right_pressed && h->uid && (h->kind == IT_CELL || h->kind == IT_EQUIP)) return out_act(IDA_CONTEXT, *h);
         if (in->double_clicked && h->uid && (h->kind == IT_CELL || h->kind == IT_EQUIP)) return out_act(IDA_OPEN, *h);
         if (!in->pressed || !h->uid) return none;
-        if (h->kind != IT_CELL && h->kind != IT_EQUIP && h->kind != IT_HOT && h->kind != IT_ATTACH) return none;
+        if (h->kind != IT_CELL && h->kind != IT_EQUIP && h->kind != IT_ATTACH) return none;
+        if (h->kind == IT_ATTACH && !(v->tree[h->side] && inv_get_c(v->tree[h->side], h->uid) && inv_get_c(v->tree[h->side], h->uid)->s.att[h->index])) return none;
         d->state = IDD_PRESSED;
         d->src = *h;
-        d->side = h->kind == IT_HOT ? INV_SIDE_SELF : h->side;
+        d->side = h->side;
         d->uid = h->uid;
         d->press_pos = in->mouse;
         d->split = in->shift;
@@ -246,7 +239,7 @@ InvDDOut idd_carry_accept(InvDrag *d, InvTarget focus, const InvView *v, bool sp
     InvDDOut none;
     memset(&none, 0, sizeof(none));
     if (!d->carry) {
-        if (!focus.uid || (focus.kind != IT_CELL && focus.kind != IT_EQUIP && focus.kind != IT_HOT && focus.kind != IT_ATTACH)) return out_act(IDA_SELECT, focus);
+        if (!focus.uid || (focus.kind != IT_CELL && focus.kind != IT_EQUIP && focus.kind != IT_ATTACH)) return out_act(IDA_SELECT, focus);
         InvDDIn in;
         memset(&in, 0, sizeof(in));
         in.pressed = true;

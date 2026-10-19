@@ -102,7 +102,7 @@ static void attachment_items_create(ItemDB *db) {
         d->attachment = (u8)a;
         d->container = -1;
         d->equip_slot = EQ_NONE;
-        d->inv_weight = -1;
+        d->category = 255;
         d->shape = VIS_BOX;
         vec3 mn = v3s(1e9f), mx = v3s(-1e9f);
         for (int p = 0; p < ad->part_count; p++) {
@@ -124,16 +124,23 @@ static void attachment_items_create(ItemDB *db) {
 // ------------------------------------------------------------------ grid inventory (docs/INVENTORY.md)
 
 const char *equip_slot_name(int slot) {
-    static const char *n[EQ_COUNT] = { "primary", "secondary", "holster", "melee", "headwear", "earpiece", "face_cover", "eyewear",
-                                       "body_armor", "tactical_rig", "backpack", "armband", "secure_container" };
+    static const char *n[EQ_COUNT] = { "primary", "secondary", "holster", "backpack", "headwear", "body_armor" };
     return slot >= 0 && slot < EQ_COUNT ? n[slot] : "none";
 }
 
 int equip_slot_from_name(const char *s) {
     for (int i = 0; i < EQ_COUNT; i++) if (!strcmp(s, equip_slot_name(i))) return i;
-    if (!strcmp(s, "rig")) return EQ_RIG;
-    if (!strcmp(s, "secure")) return EQ_SECURE;
     return EQ_NONE;
+}
+
+const char *inv_category_name(int cat) {
+    static const char *n[ICAT_COUNT] = { "weapons", "attachments", "medical", "throwables", "tools", "misc" };
+    return cat >= 0 && cat < ICAT_COUNT ? n[cat] : "misc";
+}
+
+int inv_category_from_name(const char *s) {
+    for (int i = 0; i < ICAT_COUNT; i++) if (!strcmp(s, inv_category_name(i))) return i;
+    return -1;
 }
 
 int container_find(const ItemDB *db, const char *id) {
@@ -188,7 +195,6 @@ static int container_parse(ItemDB *db, const char *id, const cJSON *c) {
     const cJSON *di = cJSON_GetObjectItemCaseSensitive(c, "deny_items");
     if (g_deny_json[idx]) cJSON_Delete((cJSON *)g_deny_json[idx]);
     g_deny_json[idx] = di ? cJSON_Duplicate(di, true) : NULL;   // item ids: resolved once every item exists
-    cd->no_containers = jbool(c, "no_containers", false);
     cd->equip = jbool(c, "equip", false);
     const cJSON *mx = cJSON_GetObjectItemCaseSensitive(c, "max_item");
     if (cJSON_IsArray(mx) && cJSON_GetArraySize(mx) >= 2) {
@@ -216,52 +222,66 @@ static void containers_load(ItemDB *db, const char *path) {
 static void grid_defaults(ItemDB *db, ItemDef *d) {
     const WeaponDef *wd = d->kind == ITEM_WEAPON && d->weapon >= 0 ? &db->weapons[d->weapon] : NULL;
     int w = 1, h = 1;
-    float kg = 0.2f;
     u8 eq = EQ_NONE;
     if (wd) {
         if (wd->kind == WPN_MELEE) {
+            // A knife goes in the holster, a bat in a long-gun slot.
             bool small = fmaxf(d->size.x, fmaxf(d->size.y, d->size.z)) < 0.2f;
-            w = 1; h = small ? 2 : 3; kg = small ? 0.3f : 1.0f; eq = EQ_MELEE;
+            w = 1; h = small ? 2 : 3; eq = small ? EQ_HOLSTER : EQ_PRIMARY;
         } else if (!strcmp(wd->hold_style, "pistol")) {
-            w = 2; h = 1; kg = 0.9f; eq = EQ_HOLSTER;
+            w = 2; h = 1; eq = EQ_HOLSTER;
         } else {
             float len = 2.0f * fmaxf(d->size.x, fmaxf(d->size.y, d->size.z));
-            w = len < 0.7f ? 3 : len < 1.0f ? 4 : 5; h = 2; kg = 1.0f + len * 3.5f; eq = EQ_PRIMARY;
+            w = len < 0.7f ? 3 : len < 1.0f ? 4 : 5; h = 2; eq = EQ_PRIMARY;
         }
     } else {
         switch (d->kind) {
         case ITEM_CONSUMABLE:
-            if (d->vehicle_use == VUSE_FUEL) { w = 2; h = 3; kg = 12.0f; }
-            else if (d->vehicle_use == VUSE_SPARE_TIRE) { w = 3; h = 3; kg = 9.0f; }
-            else if (d->vehicle_use == VUSE_TIRE_REPAIR || d->heal >= 40.0f || d->armor > 0) { w = 2; h = 2; kg = 1.2f; }
-            else kg = 0.15f;
+            if (d->vehicle_use == VUSE_FUEL) { w = 2; h = 3; }
+            else if (d->vehicle_use == VUSE_SPARE_TIRE) { w = 3; h = 3; }
+            else if (d->vehicle_use == VUSE_TIRE_REPAIR || d->heal >= 40.0f || d->armor > 0) { w = 2; h = 2; }
             break;
         case ITEM_ATTACHMENT: {
             const AttachmentDef *a = attach_def(db, d->attachment);
             if (a && a->slot == ATT_OPTIC && a->zoom > 1.01f) w = 2;
-            kg = 0.3f;
             break;
         }
-        case ITEM_AMMO: kg = 0.012f; break;
-        case ITEM_THROWABLE: kg = 0.5f; break;
         default: {
             float m = fmaxf(d->size.x, fmaxf(d->size.y, d->size.z));
-            if (m > 0.25f) { w = 2; h = 2; kg = 1.5f; }
+            if (m > 0.25f) { w = 2; h = 2; }
             break;
         }
         }
     }
     if (!d->grid_w) { d->grid_w = (u8)w; d->grid_h = (u8)h; }
-    if (d->inv_weight < 0) d->inv_weight = kg;
     if (d->equip_slot == EQ_NONE && eq != EQ_NONE && d->container < 0) d->equip_slot = eq;
+}
+
+// The category bar's default for an item without "category" (docs/INVENTORY.md "Categories").
+static int category_default(const ItemDef *d) {
+    switch (d->kind) {
+    case ITEM_WEAPON: case ITEM_AMMO: return ICAT_WEAPONS;
+    case ITEM_ATTACHMENT: return ICAT_ATTACHMENTS;
+    case ITEM_THROWABLE: return ICAT_THROWABLES;
+    case ITEM_CONSUMABLE: return d->vehicle_use ? ICAT_TOOLS : ICAT_MEDICAL;
+    case ITEM_KEY: return ICAT_TOOLS;
+    default: return d->hands || d->camera ? ICAT_TOOLS : ICAT_MISC;
+    }
 }
 
 // After items, weapons and attachments: class defaults, container deny lists.
 static void inventory_defs_resolve(ItemDB *db) {
     for (int i = 1; i < db->item_count; i++) {
         ItemDef *d = &db->items[i];
-        if (d->kind == ITEM_ATTACHMENT && !d->grid_w) { d->container = -1; d->equip_slot = EQ_NONE; d->inv_weight = -1; }
+        if (d->kind == ITEM_ATTACHMENT && !d->grid_w) { d->container = -1; d->equip_slot = EQ_NONE; }
         grid_defaults(db, d);
+        if (d->category >= ICAT_COUNT) d->category = (u8)category_default(d);
+        // Only a worn backpack has a grid: anything else with a "container" block is a plain item.
+        if (d->container >= 0 && d->equip_slot != EQ_BACKPACK) {
+            log_warn("items: %s: only backpacks have a grid (\"container\" ignored)", d->id);
+            d->container = -1;
+        }
+        if (d->default_pack && d->equip_slot == EQ_BACKPACK && d->container >= 0 && !db->default_backpack) db->default_backpack = (u16)i;
         if (d->rotatable && d->grid_w == d->grid_h) d->rotatable = false;
         if (d->kind == ITEM_CONSUMABLE && d->use_type == INV_USE_NONE) d->use_type = INV_USE_CONSUME;
     }
@@ -899,6 +919,7 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
     db->items[0].weapon = -1;
     db->items[0].container = -1;
     db->items[0].equip_slot = EQ_NONE;
+    db->items[0].category = ICAT_MISC;
     db->item_count = 1;
     containers_load(db, "data/containers.json");   // the roots first: body, crate, ... (docs/INVENTORY.md)
 
@@ -951,8 +972,11 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
                 d->grid_h = (u8)DG_CLAMP(cJSON_GetArrayItem(g, 1)->valueint, 1, 16);
             }
             d->rotatable = jbool(it, "rotatable", true);
-            d->inv_weight = jnum(it, "weight", -1.0f);
             d->equip_slot = (u8)equip_slot_from_name(jstr(it, "equip", ""));
+            int cat = inv_category_from_name(jstr(it, "category", ""));
+            d->category = (u8)(cat >= 0 ? cat : 255);   // 255: from the kind (inventory_defs_resolve)
+            d->default_pack = jbool(it, "default", false);
+            d->plates = (u8)DG_CLAMP((int)jnum(it, "plates", 0), 0, 16);
             const char *use = jstr(it, "use", "");
             d->use_type = !strcmp(use, "charges") ? INV_USE_CHARGES : !strcmp(use, "consume") ? INV_USE_CONSUME : INV_USE_NONE;
             d->charges = (u8)DG_CLAMP((int)jnum(it, "charges", 0), 0, 255);
@@ -975,7 +999,7 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
         const cJSON *hold = cJSON_GetObjectItemCaseSensitive(it, "hold");
         dg_strcpy(d->hold_style_alt, sizeof(d->hold_style_alt), jstr(hold, "style_landscape", ""));
         d->builtin = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "builtin"));
-        d->hotbar = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "hotbar"));
+        d->hands = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "hands"));
         parse_camera(d, cJSON_GetObjectItemCaseSensitive(it, "camera"));
         const cJSON *sk = cJSON_GetObjectItemCaseSensitive(hold, "sockets");
         apply_sockets(&d->sockets, sk);
