@@ -1240,7 +1240,9 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
             float cone = recoil_spread(rp, &ws->rc, &sm) + chars_limb_spread(w, p->ent);
             if (sim->move.mode == MOVE_SEATED && g_vh.spread_mult) cone *= g_vh.spread_mult(w, slot);
             u32 seed = shot_seed(cmd, slot, ws->shots);
-            int shot_in_mag = d->mag_size - *mag;   // 0 = first round of the magazine (tracer loading)
+            // 0 = first round of the magazine (tracer loading). Infinite ammo never empties it: the rounds
+            // count on with the shot counter (a fresh magazine every mag_size), not one round forever.
+            int shot_in_mag = WC.infinite_ammo->i ? (int)(ws->shots % (u32)DG_MAX(d->mag_size, 1)) : d->mag_size - *mag;
             if (!WC.infinite_ammo->i) (*mag)--;
             if (w->authority) ws->mag = s->ammo;
             AimSolve as;

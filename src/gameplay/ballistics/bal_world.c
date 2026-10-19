@@ -31,6 +31,7 @@
 #define CHAR_SLACK 4.5f          // broadphase radius around a character (body + rewind motion)
 #define MAX_PENDING 64
 #define ZERO_CACHE 32
+#define MAX_ENDED 64
 
 static struct {
     BalData data;
@@ -38,6 +39,12 @@ static struct {
     BalLive pool[BAL_POOL];
     int high;                    // pool high-water mark (live bullets are below it)
     BalStats stats;
+    // Tracers that ended, until a frame has drawn their last streak (frame: bal_world_frame count
+    // when they ended).
+    BalLive ended[MAX_ENDED];
+    u32 ended_frame[MAX_ENDED];
+    int ended_count;
+    u32 frame;
     // EV_SHOT records waiting for the render clock to reach their tick (client).
     struct { BalShotRecord rec; vec3 pos, dir; int slot; } pending[MAX_PENDING];
     int pending_count;
@@ -126,11 +133,47 @@ void bal_world_clear(void) {
     for (int i = 0; i < BAL_POOL; i++) B.pool[i].b.flags = BF_DEAD;
     B.high = 0;
     B.pending_count = 0;
+    B.ended_count = 0;
 }
 
 const BalLive *bal_world_bullets(int *count) {
     *count = B.high;
     return B.pool;
+}
+
+const BalLive *bal_world_ended_tracers(int *count) {
+    *count = B.ended_count;
+    return B.ended;
+}
+
+// A tracer stopped at stop_pos, arriving with vel after dist m of path (called before the step's
+// trail update: the impact becomes the newest trail point).
+static void push_ended(const BalLive *l, vec3 stop_pos, vec3 vel, float dist) {
+    if (B.ended_count >= MAX_ENDED) {
+        memmove(B.ended, B.ended + 1, sizeof(B.ended[0]) * (MAX_ENDED - 1));
+        memmove(B.ended_frame, B.ended_frame + 1, sizeof(B.ended_frame[0]) * (MAX_ENDED - 1));
+        B.ended_count--;
+    }
+    BalLive *e = &B.ended[B.ended_count];
+    *e = *l;
+    e->b.pos = stop_pos;
+    e->b.vel = vel;
+    e->b.dist = dist;
+    memmove(e->trail + 1, e->trail, sizeof(vec3) * (BAL_TRAIL - 1));
+    e->trail[0] = stop_pos;
+    if (e->trail_count < BAL_TRAIL) e->trail_count++;
+    B.ended_frame[B.ended_count++] = B.frame;
+}
+
+// Drops the ended tracers a frame has drawn since they ended.
+static void prune_ended(void) {
+    int keep = 0;
+    for (int i = 0; i < B.ended_count; i++) {
+        if (B.ended_frame[i] != B.frame) continue;
+        B.ended[keep] = B.ended[i];
+        B.ended_frame[keep++] = B.ended_frame[i];
+    }
+    B.ended_count = keep;
 }
 
 const BalStats *bal_world_stats(void) { return &B.stats; }
@@ -707,7 +750,14 @@ static void step_bullet(World *w, BalLive *l, float dt) {
         vec3 dir = v3_scale(seg, 1.0f / len);
         SegHit s;
         if (!trace_segment(w, l, from, dir, len, &s)) break;
-        if (!resolve_hit(w, l, &s, dir, path_before)) { alive = false; break; }
+        vec3 vel_in = l->b.vel;
+        if (!resolve_hit(w, l, &s, dir, path_before)) {
+            alive = false;
+            // A tracer's last streak ends at the impact (bal_apply_hit leaves the position at the
+            // end of the step and zeroes the velocity). Spent tracers have burnt out long before.
+            if (l->b.flags & BF_TRACER) push_ended(l, s.h.point, vel_in, path_before + s.t);
+            break;
+        }
         float rest = fmaxf(len - s.t, 0.0f);
         path_before += s.t;
         from = l->b.pos;   // exit point
@@ -755,6 +805,7 @@ void bal_world_tick(World *w, float dt) {
     if (!B.loaded) bal_world_load();
     double t0 = platform_time();
     B.stats.steps = B.stats.rays = 0;
+    prune_ended();
     if (!w->authority) spawn_pending(w);
     int live = 0;
     for (int i = 0; i < B.high; i++)
@@ -777,6 +828,7 @@ void bal_world_tick(World *w, float dt) {
 
 void bal_world_frame(World *w, vec3 listener, float dt) {
     (void)dt;
+    B.frame++;   // the tracers that ended before this point are drawn by this frame
     B.listener = listener;
     B.have_listener = true;
     B.listener_slot = game_view_slot();
