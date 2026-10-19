@@ -325,7 +325,7 @@ static void graphics_quality(GuiCursor *c) {
         if (gw_dropdown_ex(rid("gfx_overall"), r, k_tiers, 5, &sel, en, notes) && sel < 4) game_quality_set_overall(sel);
     }
     quality_row(c, "Anti-aliasing", FG_AA, "Low FXAA, Medium SMAA, High and Ultra TAA (with sharpening from Medium).");
-    quality_row(c, "Post-processing", FG_POST, "Ambient occlusion, reflections, volumetrics, depth of field, bloom, motion blur, film grain, chromatic aberration, vignette.");
+    quality_row(c, "Post-processing", FG_POST, "Ambient occlusion, reflections, volumetrics, depth of field, bloom, film grain, chromatic aberration, vignette.");
     quality_row(c, "Shadows", FG_SHADOWS, "Sun, moon and lamp shadows: resolution, cascades, softness.");
     quality_row(c, "Textures", FG_TEXTURES, "Texture resolution, filtering, terrain detail.");
     quality_row(c, "Effects", FG_EFFECTS, "Particles, rain and snow, water, the scope picture.");
@@ -445,6 +445,9 @@ static void graphics_comfort(GuiCursor *c) {
     static const char *const weapon_fov[] = { "Narrow", "Default", "Wide" };
     row_combo_cvar(c, "Weapon Field of View", "cl_weapon_fov", weapon_fov, 3,
                    "Adjust the field of view of your weapon and arms, independent of Field of View. Narrow brings the weapon closer, Wide shows more of it.");
+    static const char *const motion_blur[] = { "Off", "World", "Hands and world" };
+    row_combo_cvar(c, "Motion Blur", "r_motion_blur", motion_blur, 3,
+                   "World: the view and moving things blur with motion, your hands and weapon stay sharp. Hands and world: your hands and weapon blur too. Off: no motion blur.");
     row_slider_cvar(c, "Screen effects", "r_post_feedback", 0.5f, 1, 0.05f, "%.2f", "Damage, flash and low-health effects (photosensitivity).");
     static const char *const gore[] = { "Off", "Low", "High" };
     row_combo_cvar(c, "Gore", "gore_level", gore, 3, "Off: neutral impact puffs (hits stay readable), no blood.");

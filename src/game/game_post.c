@@ -350,7 +350,8 @@ void game_post_init(void) {
     GP.ssr = cvar_reg_int("r_ssr", 2, 0, 2, CVAR_TIER, "screen-space reflections: 0 off, 1 half res, 2 full res");
     GP.ssgi = cvar_reg_int("r_ssgi", 0, 0, 1, CVAR_TIER, "screen-space diffuse GI");
     GP.vol = cvar_reg_int("r_volumetrics", 2, 0, 3, CVAR_TIER, "volumetric fog / light shafts: 0 off .. 3 ultra");
-    GP.mb = cvar_reg_int("r_motion_blur", 1, 0, 2, CVAR_TIER, "motion blur: 0 off, 1 camera, 2 camera + objects");
+    GP.mb = cvar_reg_int("r_motion_blur", 1, 0, 2, CVAR_ARCHIVE | CVAR_EDITABLE,
+                         "Motion Blur: 0 off, 1 world (the camera + moving objects; the hands and gun stay sharp), 2 hands and world (the hands and gun blur along their own motion too)");
     GP.mb_strength = cvar_reg_float("r_motion_blur_strength", 0.5f, 0.0f, 1.0f, CVAR_LOCKED, "shutter fraction (0.5 = 180 degrees)");
     GP.dof = cvar_reg_int("r_dof", 1, 0, 2, CVAR_TIER, "depth of field: 0 off, 1 aiming down sights, 2 always");
     GP.bloom = cvar_find("r_bloom");
@@ -439,7 +440,7 @@ static void build_settings(PostSettings *s, const PostFrameInfo *fi) {
     s->dof_quality = GP.dof_quality->i;
     // Engine Fidelity Off: no post-processing at all (the renderer's direct output path).
     s->direct_output = fid_loaded() && !fid_level_post(fid_level());
-    s->motion_blur = GP.mb->i;
+    s->motion_blur = GP.mb->i <= 0 ? 0 : (GP.mb->i >= 2 ? 3 : 2);   // the player's Motion Blur: world = camera + objects, + the hands
     s->mb_intensity = GP.mb_strength->f;
     s->dof = GP.dof->i;
     s->bloom = GP.bloom->i ? DG_MAX(GP.bloom_q->i, 1) : 0;

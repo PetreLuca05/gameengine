@@ -2,9 +2,9 @@
 // Motion blur 3/3: reconstruction filter (McGuire et al. 2012): samples along the neighbourhood
 // max velocity, each weighted by depth ordering and whether its own velocity covers the centre
 // (foreground blurs over background, background never over a sharp foreground). Blue-noise
-// jittered taps; viewmodel pixels stay sharp and are not gathered, except for the fire animation's
-// 1-2 tick blur spike (U.s_mb.w > 0, docs/FIRE_ANIM.md): the gun + hands then smear along their
-// own velocity, gathering viewmodel pixels only.
+// jittered taps. Viewmodel pixels are never gathered by the world; they blur along their own velocity
+// (gathering viewmodel pixels only) with "Hands and world" (U.s_mb.y >= 3: at the shutter) and on the
+// fire animation's 1-2 tick spike (U.s_mb.w > 0, docs/FIRE_ANIM.md), else they stay sharp.
 #extension GL_GOOGLE_include_directive : require
 #include "post_common.glsl"
 layout(local_size_x = 8, local_size_y = 8) in;
@@ -45,11 +45,13 @@ void main() {
     float vmax_len = length(vmax);
     bool vm = (gb_flags(texelFetch(material_tex, p, 0)) & GB_VIEWMODEL) != 0u;
     if (vm) {
-        // Fire blur spike: the viewmodel's own velocity (written per draw from its previous transform).
-        vec2 v = textureLod(velocity_tex, uv, 0.0).rg * U.outsz.xy * U.s_mb.w;
+        // The viewmodel's own velocity (written per draw from its previous transform): the hands + gun
+        // blur at the shutter with "Hands and world", plus the fire animation's spike.
+        float k = U.s_mb.w + (U.s_mb.y >= 3.0 ? U.s_mb.x / 0.5 : 0.0);
+        vec2 v = textureLod(velocity_tex, uv, 0.0).rg * U.outsz.xy * k;
         float l = length(v);
         if (l > 24.0) v *= 24.0 / l;
-        if (U.s_mb.w <= 0.0 || l < 0.5) { imageStore(dst, p, center); return; }
+        if (k <= 0.0 || l < 0.5) { imageStore(dst, p, center); return; }
         float jv = blue_noise(noise_tex, p).r - 0.5;
         vec3 acc = center.rgb;
         float ws = 1.0;

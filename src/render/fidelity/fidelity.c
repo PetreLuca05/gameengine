@@ -697,9 +697,10 @@ int fid_custom_count(void) { return fid_check_table(S.level, NULL, 0); }
 // ------------------------------------------------------------------ quality groups
 
 // Every quality feature belongs to one group. Render scale, the upscaler and HDR output are the
-// player's own Display settings; the tonemapper / exposure and the renderer switch are the engine's.
+// player's own Display settings, motion blur its own Comfort setting; the tonemapper / exposure and
+// the renderer switch are the engine's.
 static const int k_g_post[] = { FF_AO, FF_CONTACT_SHADOWS, FF_SSR, FF_SSGI, FF_PUDDLE_REFLECTIONS, FF_VOLUMETRICS, FF_VOL_LOCAL_LIGHTS,
-                                FF_DOF, FF_DOF_QUALITY, FF_ADS_DOF, FF_BLOOM, FF_BLOOM_QUALITY, FF_MOTION_BLUR, FF_CHROMATIC, FF_VIGNETTE, FF_FILM_GRAIN };
+                                FF_DOF, FF_DOF_QUALITY, FF_ADS_DOF, FF_BLOOM, FF_BLOOM_QUALITY, FF_CHROMATIC, FF_VIGNETTE, FF_FILM_GRAIN };
 static const int k_g_shadows[] = { FF_SHADOWS, FF_SHADOW_RESOLUTION, FF_SHADOW_PROJECTION, FF_SHADOW_CASCADES, FF_SOFT_SHADOW_QUALITY, FF_SHADOW_MIN_RADIUS,
                                    FF_SHADOW_CASTER_LIMIT, FF_SHADOW_FAR_INTERVAL, FF_LIGHT_SHADOW_QUALITY };
 static const int k_g_textures[] = { FF_TEXTURE_QUALITY, FF_ANISO, FF_TERRAIN_QUALITY };

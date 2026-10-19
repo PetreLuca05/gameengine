@@ -11,7 +11,7 @@ overrides, no per-feature sliders.
 |---|---|---|
 | Overall | — (sets the seven below; reads Custom when they differ) | |
 | Anti-aliasing | `r_quality_aa` | `aa` (FXAA, SMAA, TAA, TAA), `sharpen` |
-| Post-processing | `r_quality_post` | ao, contact shadows, ssr, ssgi, puddle reflections, volumetrics (+ local lights), dof (+ quality, ADS dof), bloom (+ quality), motion blur, chromatic aberration, vignette, film grain |
+| Post-processing | `r_quality_post` | ao, contact shadows, ssr, ssgi, puddle reflections, volumetrics (+ local lights), dof (+ quality, ADS dof), bloom (+ quality), chromatic aberration, vignette, film grain (motion blur is its own Comfort setting, `r_motion_blur`) |
 | Shadows | `r_quality_shadows` | shadows, resolution, projection, cascades, soft quality, min radius, caster limit, far interval, light shadow quality |
 | Textures | `r_quality_textures` | texture quality, aniso, terrain quality |
 | Effects | `r_quality_effects` | vfx quality, vfx lighting, precipitation, water, scope picture scale |

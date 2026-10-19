@@ -1868,9 +1868,9 @@
    "category": "rendering"
   },
   "r_motion_blur": {
-   "class": "TIER",
-   "ui": "—",
-   "reason": "Set by the player's quality settings only (Anti-aliasing: sharpening; Post-processing: the rest), docs/ENGINE_FIDELITY.md \"Player settings\".",
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Motion Blur Off / World / Hands and world: the player's own comfort choice (motion sickness), the only thing setting it (no quality group, 2026-10-20); it shows nothing others can't see.",
    "category": "rendering"
   },
   "r_motion_blur_strength": {

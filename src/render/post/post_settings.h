@@ -41,7 +41,7 @@ typedef struct PostSettings {
     float fog_ambient;             // 0 = thin haze (sun-lit) .. 1 = thick weather fog lit by the whole sky
     vec3 fog_albedo;
     // camera
-    int motion_blur;               // 0 off, 1 camera, 2 camera + objects
+    int motion_blur;               // 0 off, 1 camera, 2 camera + objects, 3 + the hands and gun (the viewmodel)
     float mb_intensity;            // shutter fraction (0.5 = 180 deg)
     float mb_viewmodel;            // fire animation blur spike on the viewmodel (0 = sharp; set per frame by game_post.c)
     int dof;                       // 0 off, 1 ADS only, 2 full

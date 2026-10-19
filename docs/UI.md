@@ -73,8 +73,9 @@ they moved to (`ui_screen settings:<n>`, `menu skin` opens HUD).
   scale, **stretched resolution** (`r_stretch`, with the equivalent stretched resolution of this
   display), **upscaling** (every upscaler: Off / TAA-U / FSR 1 / FSR 2 and DLSS, both slots running
   FSR 1 for now, + its resolution), HDR10 (+ paper white), brightness, colour-blind filter, show FPS.
-* Comfort: Field of View (or the server's), ADS Field of View, Weapon Field of View (docs/CAMERA_HOLDPOINT.md "Field of view"), screen effects, **gore**. Motion blur,
-  depth of field, film grain, chromatic aberration, vignette and sharpening follow the qualities.
+* Comfort: Field of View (or the server's), ADS Field of View, Weapon Field of View (docs/CAMERA_HOLDPOINT.md "Field of view"), **Motion Blur** (Off / World /
+  Hands and world, `r_motion_blur`), screen effects, **gore**. Depth of field, film grain, chromatic aberration, vignette and sharpening follow the
+  qualities.
 * Head bob, camera shake, weapon sway and weapon kick are not settings: locked at the designed values.
 
 **HUD**: INTERFACE (UI scale, safe area) · CROSSHAIR · LAYOUT · COMPASS · KILLS · PINGS · WHEELS.
