@@ -105,7 +105,7 @@ void render_register_cvars(void) {
     r->r_shadow_debug = cvar_reg_int("r_shadow_debug", 0, 0, 8, CVAR_LOCKED,
                                      "shadow views: 1 readout (sky, cascades, bias, filter, jitter), 2 penumbra width, 3 blocker distance, 4 cascade / mode, 5 cloud shadow, 6 texel size, 7 viewmodel tile coverage, 8 fitting spheres + light frustums");
     r->r_vm_shadow = cvar_reg_bool("r_vm_shadow", true, CVAR_TIER, "first-person rig (arms, held item) in its own high-resolution shadow tile (docs/SHADOWS.md)");
-    r->r_stretch = cvar_reg_float("r_stretch", 0.0f, 0.0f, 1.0f, CVAR_LOCKED,
+    r->r_stretch = cvar_reg_float("r_stretch", 0.0f, 0.0f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE,
                                   "stretched resolution simulator: 0 normal .. 1 extreme (the 3D view squeezed into a narrower aspect, stretched to the screen)");
     r->r_shadow_min_radius = cvar_reg_float("r_shadow_min_radius", 0.0f, 0.0f, 4.0f, CVAR_TIER, "props smaller than this radius (m) cast no sun shadow");
     r->r_shadow_far_interval = cvar_reg_int("r_shadow_far_interval", 2, 1, 4, CVAR_TIER,

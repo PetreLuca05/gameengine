@@ -566,10 +566,8 @@ static void cmd_ui_screen(int argc, const char **argv) {
     if (!strncmp(n, "settings", 8)) {
         if (!M->depth || M->stack[0] != SCR_PAUSE) { menus_close_all(); screens_push(SCR_PAUSE); }
         do_action("settings");
-        // settings:<tab>, settings:debug / settings:normal (the Graphics sub-tabs)
-        if (n[8] == ':' && !strcmp(n + 9, "debug")) { settings_open(0); settings_graphics_page(1); }
-        else if (n[8] == ':' && !strcmp(n + 9, "normal")) { settings_open(0); settings_graphics_page(0); }
-        else if (n[8] == ':') settings_open(atoi(n + 9));
+        // settings:<tab>
+        if (n[8] == ':') settings_open(atoi(n + 9));
         return;
     }
     if (!strcmp(n, "commands") || !strcmp(n, "copypos")) {

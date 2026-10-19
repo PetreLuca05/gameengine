@@ -82,12 +82,12 @@ static void cmd_aim_report(int argc, const char **argv) {
 void weapons_register_cvars(void) {
     WC.recoil_scale = cvar_reg_float("wpn_recoil_scale", 1.0f, 0.0f, 5.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "aim recoil multiplier (gameplay, host)");
     WC.spread_scale = cvar_reg_float("wpn_spread_scale", 1.0f, 0.0f, 5.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "bullet spread cone multiplier (gameplay, host)");
-    WC.visual_scale = cvar_reg_float("wpn_visual_scale", 1.0f, 0.5f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "camera + viewmodel kick multiplier (cosmetic)");
+    WC.visual_scale = cvar_reg_float("wpn_visual_scale", 1.0f, 0.5f, 1.0f, CVAR_LOCKED, "camera + viewmodel kick multiplier (cosmetic)");
     WC.sway_scale = cvar_reg_float("wpn_sway_scale", 1.0f, 0.0f, 3.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "weapon sway: the drawn item's look lag / idle sway / breathing / sprint bob (never moves a bullet) and the ADS aim sway amplitude (x wpn_ads_sway)");
     WC.kick_scale = cvar_reg_float("wpn_kick_scale", 1.0f, 0.0f, 3.0f, CVAR_LOCKED, "visual recoil kick of the drawn item on its hold point (never moves a bullet; aim recoil is separate)");
     WC.ads_sway = cvar_reg_float("wpn_ads_sway", 0.0f, 0.0f, 10.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "aim sway that moves the reticle off the screen centre while aimed (x the weapon's idle sway; 0 = the reticle stays centred, the gun sways about it)");
     WC.sway_ads_scale = cvar_reg_float("wpn_sway_ads_scale", 1.0f, 0.0f, 3.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "ADS weapon sway: x the weapons' ADS sway multipliers (quick tuning)");
-    WC.sway_cosmetic = cvar_reg_float("cl_weapon_sway", 1.0f, 0.0f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "weapon sway (cosmetic: breathing, look lag, bob, landing of the held weapon)");
+    WC.sway_cosmetic = cvar_reg_float("cl_weapon_sway", 1.0f, 0.0f, 1.0f, CVAR_LOCKED, "weapon sway (cosmetic: breathing, look lag, bob, landing of the held weapon)");
     WC.ads_bob = cvar_reg_float("wpn_ads_bob", 0.0f, 0.0f, 3.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "aim bob that moves the reticle while walking aimed (bullets follow it; 0 = the gun bobs about the reticle instead)");
     WC.bob_scale = cvar_reg_float("wpn_bob_scale", 1.0f, 0.0f, 3.0f, CVAR_LOCKED, "item bob while walking / running (x the weapon sway bob; sprinting always bobs)");
     WC.recoil_debug = cvar_reg_int("wpn_recoil_debug", 0, 0, 2, CVAR_LOCKED, "recoil overlay: 1 = panel + cone, 2 = also log every shot");

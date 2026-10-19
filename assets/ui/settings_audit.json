@@ -326,9 +326,9 @@
    "category": "camera"
   },
   "cam_kick_scale": {
-   "class": "EDITABLE",
-   "ui": "Graphics > Comfort",
-   "reason": "Camera shake: the visual camera kick on shots and the fire punches, 0.25 .. 1 (accessibility). Aim recoil is separate (wpn_recoil_scale, host).",
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Camera shake (the visual camera kick on shots and the fire punches): Removed from Settings (the user's call, 2026-10-19): fixed at the designed value. Aim recoil is separate (wpn_recoil_scale, host).",
    "category": "camera"
   },
   "cam_recon_smooth_time": {
@@ -406,7 +406,7 @@
   "cl_fire_punch": {
    "class": "LOCKED",
    "ui": "—",
-   "reason": "Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. The player-facing controls are Weapon kick / sway / Camera shake.",
+   "reason": "Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. No player-facing control (Weapon kick / sway / Camera shake were removed from Settings).",
    "category": "weapons"
   },
   "cl_fov": {
@@ -428,15 +428,15 @@
    "category": "player"
   },
   "cl_headbob": {
-   "class": "EDITABLE",
-   "ui": "Graphics > Comfort",
-   "reason": "Head bob 0 .. 1 (was 0 .. 3; above 1 only made it worse). cl_headbob stays as its on / off switch.",
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Head bob: Removed from Settings (the user's call, 2026-10-19): fixed at the designed value. cl_headbob stays its on / off switch.",
    "category": "camera"
   },
   "cl_headbob_amount": {
-   "class": "EDITABLE",
-   "ui": "Graphics > Comfort",
-   "reason": "Head bob 0 .. 1 (was 0 .. 3; above 1 only made it worse). cl_headbob stays as its on / off switch.",
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Head bob strength: Removed from Settings (the user's call, 2026-10-19): fixed at the designed value.",
    "category": "camera"
   },
   "cl_healthbars": {
@@ -507,7 +507,7 @@
   },
   "cl_skin": {
    "class": "EDITABLE",
-   "ui": "Character",
+   "ui": "Main menu (profile / cosmetics)",
    "reason": "Skin: cosmetic, seen by everyone (same set for all).",
    "category": "player"
   },
@@ -536,9 +536,9 @@
    "category": "camera"
   },
   "cl_weapon_sway": {
-   "class": "EDITABLE",
-   "ui": "Graphics > Comfort",
-   "reason": "Weapon sway (cosmetic: aiming stays exact): 0 .. 1.",
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Weapon sway (cosmetic: aiming stays exact): Removed from Settings (the user's call, 2026-10-19): fixed at the designed value.",
    "category": "weapons"
   },
   "con_enable": {
@@ -687,7 +687,7 @@
   },
   "gore_level": {
    "class": "EDITABLE",
-   "ui": "Character > Content",
+   "ui": "Graphics > Comfort",
    "reason": "Gore (moved from Graphics): a content / age-rating choice. Gore Off keeps neutral impact puffs, so hits stay readable.",
    "category": "vfx"
   },
@@ -2132,9 +2132,9 @@
    "category": "rendering"
   },
   "r_stretch": {
-   "class": "LOCKED",
-   "ui": "—",
-   "reason": "Visibility: changes what you can see relative to other players. Stretched resolution makes targets wider on screen (the 4:3 stretch trick): fixed 0.",
+   "class": "EDITABLE",
+   "ui": "Graphics > Display",
+   "reason": "Stretched resolution simulator 0 .. 1 (the 4:3 stretched look), back in Settings at the user's request (2026-10-19). It widens targets on screen for whoever uses it.",
    "category": "rendering"
   },
   "r_surfaces": {
@@ -2427,13 +2427,13 @@
   },
   "spec_blend_time": {
    "class": "EDITABLE",
-   "ui": "Character > Spectating",
+   "ui": "—",
    "reason": "Death cam time / blend: personal pacing of your own spectator camera.",
    "category": "player"
   },
   "spec_death_cam_time": {
    "class": "EDITABLE",
-   "ui": "Character > Spectating",
+   "ui": "—",
    "reason": "Death cam time / blend: personal pacing of your own spectator camera.",
    "category": "player"
   },
@@ -2469,7 +2469,7 @@
   },
   "spec_show_delay": {
    "class": "EDITABLE",
-   "ui": "Character (dev)",
+   "ui": "—",
    "reason": "Spectator delay readout.",
    "category": "player"
   },
@@ -2625,13 +2625,13 @@
   },
   "ui_safe_area": {
    "class": "EDITABLE",
-   "ui": "Character > Interface",
+   "ui": "HUD > Interface",
    "reason": "UI scale / safe area: display.",
    "category": "hud"
   },
   "ui_scale": {
    "class": "EDITABLE",
-   "ui": "Character > Interface",
+   "ui": "HUD > Interface",
    "reason": "UI scale / safe area: display.",
    "category": "hud"
   },
@@ -2896,7 +2896,7 @@
   "wpn_bob_scale": {
    "class": "LOCKED",
    "ui": "—",
-   "reason": "Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. The player-facing controls are Weapon kick / sway / Camera shake.",
+   "reason": "Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. No player-facing control (Weapon kick / sway / Camera shake were removed from Settings).",
    "category": "weapons"
   },
   "wpn_debug_melee": {
@@ -2908,7 +2908,7 @@
   "wpn_fire_anim_scale": {
    "class": "LOCKED",
    "ui": "—",
-   "reason": "Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. The player-facing controls are Weapon kick / sway / Camera shake.",
+   "reason": "Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. No player-facing control (Weapon kick / sway / Camera shake were removed from Settings).",
    "category": "weapons"
   },
   "wpn_fire_debug": {
@@ -2926,13 +2926,13 @@
   "wpn_kick_scale": {
    "class": "LOCKED",
    "ui": "—",
-   "reason": "Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. The player-facing controls are Weapon kick / sway / Camera shake.",
+   "reason": "Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. No player-facing control (Weapon kick / sway / Camera shake were removed from Settings).",
    "category": "weapons"
   },
   "wpn_look_lag": {
    "class": "LOCKED",
    "ui": "—",
-   "reason": "Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. The player-facing controls are Weapon kick / sway / Camera shake.",
+   "reason": "Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. No player-facing control (Weapon kick / sway / Camera shake were removed from Settings).",
    "category": "weapons"
   },
   "wpn_muzzle_tolerance": {
@@ -2972,9 +2972,9 @@
    "category": "weapons"
   },
   "wpn_visual_scale": {
-   "class": "EDITABLE",
-   "ui": "Graphics > Comfort",
-   "reason": "Weapon kick (visual camera + viewmodel kick): 0.5 .. 1 (was 0 .. 3). Zero kick gave a still sight picture while the aim recoils, an advantage in sprays.",
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Weapon kick (visual camera + viewmodel kick): Removed from Settings (the user's call, 2026-10-19): fixed at the designed value.",
    "category": "weapons"
   },
   "zombie_speed": {

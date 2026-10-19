@@ -14,7 +14,7 @@ void camera_fp_register_cvars(void) {
     c->follow_lateral = cvar_reg_float("cam_head_follow_lateral", 0.35f, 0.0f, 1.0f, CVAR_LOCKED, "extra factor on horizontal head motion (sway is the motion-sickness axis)");
     c->clamp = cvar_reg_float("cam_head_clamp", 0.07f, 0.0f, 0.5f, CVAR_LOCKED, "max camera displacement from the ideal eye (m)");
     c->bob_scale = cvar_reg_float("cam_bob_scale", 0.0f, 0.0f, 2.0f, CVAR_LOCKED, "first-person camera stabilizer / landing dip / bob offset from the head eye (0 = camera exactly on the head)");
-    c->kick_scale = cvar_reg_float("cam_kick_scale", 1.0f, 0.25f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "visual camera kick on shots (aim recoil is separate)");
+    c->kick_scale = cvar_reg_float("cam_kick_scale", 1.0f, 0.25f, 1.0f, CVAR_LOCKED, "visual camera kick on shots (aim recoil is separate)");
     // docs/AIM.md "Sway, recoil and the camera": a camera turned off the aim line would move the
     // centred crosshair off the bullets' line, so the fire camera layer's pitch / yaw are off.
     c->kick_rot = cvar_reg_float("cam_kick_rot", 0.0f, 0.0f, 1.0f, CVAR_LOCKED, "fire camera layer pitch / yaw (x the camera kick; 0 = the camera never leaves the aim line, roll twitch / FOV punch / push-back stay)");

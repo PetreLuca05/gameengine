@@ -30,7 +30,6 @@
     "r_lens_distortion": { "value": 0, "why": "Lens distortion changes target positions on screen." },
     "r_lens_drops": { "value": 1, "why": "Rain droplets on the camera: on for everyone (switching them off cleared the view in rain)." },
     "r_lens_drops_intensity": { "value": 0.8, "why": "Droplet strength." },
-    "r_stretch": { "value": 0, "why": "Stretched resolution made targets wider on screen." },
     "vfx_decal_max": { "value": 256, "why": "Impact decals (levels kept 16 .. 4096): blood and impacts stay as long for everyone." },
     "vfx_max_particles": { "value": 1048576, "why": "Particle pool: a small pool silently dropped smoke / impact particles." },
     "vfx_enable": { "value": 1, "why": "Particle effects (muzzle flashes, impacts) on." },

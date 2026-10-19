@@ -211,16 +211,16 @@ def main():
         fails.append("scr_settings.c: Graphics groups must be Engine Fidelity / Display / Comfort (has %s)" % ", ".join(sorted(set(groups))))
     shown = ""
     for fn in re.findall(r"\nstatic void (\w+)\(GuiCursor \*c\)", ui):
-        if fn in ("tab_graphics_debug",) or fn.startswith("row_") or fn == "section":
+        if fn.startswith("row_") or fn == "section":
             continue
         shown += strip_dev_blocks(func_body(ui, fn))
     for name in sorted(set(re.findall(r'"([a-z][a-z0-9_]+)"', shown))):
         if name in seen and name not in NOT_ROWS and name not in DEV_ROWS and seen[name] != "EDITABLE":
-            fails.append("scr_settings.c: shows %s (%s) outside the dev-only Debug page" % (name, seen[name]))
+            fails.append("scr_settings.c: shows %s (%s), not a player setting" % (name, seen[name]))
     for ff in sorted(set(re.findall(r"\b(FF_\w+)\b", shown))):
         cvar = feat_cvar.get(ff)
         if cvar and seen.get(cvar) != "EDITABLE":
-            fails.append("scr_settings.c: shows %s (%s, %s) outside the dev-only Debug page" % (ff, cvar, seen.get(cvar)))
+            fails.append("scr_settings.c: shows %s (%s, %s), not a player setting" % (ff, cvar, seen.get(cvar)))
 
     # the doc table
     table = doc_table(audit)

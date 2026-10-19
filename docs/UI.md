@@ -57,70 +57,30 @@ screens and the HUD draw during `game_render`, and `ui_render` flushes the old H
 (crosshair, dev overlays), then the game UI (`gui_frame_end`: navigation, tooltip, flush), then
 Nuklear.
 
-### Settings → Graphics (since the settings audit)
+### Settings
 
-docs/SETTINGS_AUDIT.md section 6 is current: Graphics = "Why can't I change X?" + Default, the
-Engine Fidelity card, **Display** and **Comfort**; the crosshair moved into the HUD tab; Debug exists
-only in dev builds (developer mode, no release locks) and holds tier features only. The text below
-describes the layout before the audit.
+Tabs: **Graphics | Controls | HUD | Audio | Phone** (`k_order` in `scr_settings.c`). Crosshair and
+Character were merged into HUD, Post-processing into Graphics; their old indices still open the tab
+they moved to (`ui_screen settings:<n>`, `menu skin` opens HUD).
 
-### Settings → Graphics: Normal and Debug
+**Graphics** is one page (docs/SETTINGS_AUDIT.md section 6): "Why can't I change X?" + Default, the
+Engine Fidelity card, **Display** and **Comfort**. There is no Debug page: the per-feature tiers are
+the engine's, set by the Engine Fidelity level (console only).
+* Display: resolution, window mode, VSync (Apply / Revert, 15 s confirm), frame rate limit, render
+  scale, **stretched resolution** (`r_stretch`, with the equivalent stretched resolution of this
+  display), **upscaling** (every upscaler: Off / TAA-U / FSR 1 / FSR 2 and DLSS, both slots running
+  FSR 1 for now, + its resolution), HDR10 (+ paper white), brightness, colour-blind filter, show FPS.
+* Comfort: field of view (or the server's), sprint FOV effect, motion blur (+ strength), depth of
+  field, film grain, chromatic aberration, vignette, sharpening, screen effects, **gore**.
+* Head bob, camera shake, weapon sway and weapon kick are not settings: locked at the designed values.
 
-The Graphics tab has two sub-tabs (`gw_tabs` under the main tab bar, `k_gfx_pages` in
-`scr_settings.c`). **Debug is shown only in developer mode** (the `developer` cvar, the same switch
-as the dev HUD and the pause Commands tab); with `developer 0` there is no sub-tab bar and the
-page is Normal. `developer` defaults to 0 for players (saved; `developer 1` in the console turns it on)
-and `--test` runs force it on. The rule: options a PC player expects in a commercial game are Normal; engine
-internals, diagnostics and per-feature tuning are Debug.
+**HUD**: INTERFACE (UI scale, safe area) · CROSSHAIR · LAYOUT · COMPASS · KILLS · PINGS · WHEELS.
+The character skin is chosen in the main menu (profile / cosmetics); the spectating times
+(`spec_death_cam_time`, `spec_blend_time`) are console only.
 
-**Normal** (a player's page, one control per concept):
-* Default button (as above).
-* Display: resolution, window mode, VSync (Apply / Revert, 15 s confirm), frame rate limit,
-  stretched resolution.
-* View: field of view (or the server's), hands FOV follows camera, hands / weapon FOV, red dot
-  brightness.
-* Quality card: **Overall graphics quality** = the Engine Fidelity level used as a preset (Off,
-  Low, Medium, High, Modern, plus "Custom", greyed, shown when any feature differs from the level's
-  defaults: `fid_custom_count`). Picking a level clears the tweaks and applies the level's table;
-  Run benchmark, Apply recommended. Below it: render scale, upscaling (Off / TAA-U / FSR 1 and its
-  resolution), anti-aliasing, sharpening, then the simple qualities **Post-processing, Shadows,
-  Textures, Effects, Foliage, View distance** and motion blur.
-* Picture: brightness, gamma, HDR10 + paper white / peak when
-  the display supports it.
-* Accessibility & content: colour-blind filter, screen effects, gore.
-
-The simple qualities are **fidelity groups** (`fid_group_*`, `src/render/fidelity`): each a set of
-features; tier t = every feature at level t's own table default for this era (Lowest / Low /
-Medium / High / Ultra = the Off .. Modern columns). Applied as user changes through the bound hook,
-so the level bounds hold and the overall level reads Custom afterwards. A tier the level doesn't
-allow is greyed "requires &lt;level&gt;"; a row reads Custom when the cvars match no tier.
-
-| quality | features |
-|---|---|
-| Post-processing | ao, contact_shadows, ssr, ssgi, puddle_reflections, volumetrics, vol_local_lights, dof, dof_quality, ads_dof, bloom, bloom_quality |
-| Shadows | shadows, shadow_resolution, shadow_cascades, shadow_distance, soft_shadow_quality, shadow_min_radius, shadow_caster_limit, light_shadows, light_shadow_quality, cloud_shadows, moon_shadows |
-| Textures | texture_quality, aniso, terrain_quality |
-| Effects | vfx_quality, vfx_lighting, decal_max, precip_quality, water, lens_drops |
-| Foliage | foliage_density, foliage_wind |
-| View distance | lod_bias, impostor_px, vgeo_shadow_error_px, vgeo_lod_px |
-
-Foliage density and the discrete LOD thresholds are era-owned: the era preset (`r_era`, `vk_vgeo.c
-era_detect`) also accepts a lower level's own value of the era, so these tiers keep the era.
-
-**Debug** (developer mode): Diagnostics (performance overlay), the full
-upscaler list (FSR 2 / DLSS slots), Post-processing & Effects (the legacy post preset, every
-screen-space / fog / DoF / bloom / lens / grain / exposure control, motion blur strength),
-Shadows & lighting (cascades, splits and the split bar, near plane, shadowmask, min caster, lamp /
-cloud / moon shadows), Geometry / textures / foliage (no Engine Fidelity card or era look any more: the Normal tab's Overall graphics quality picks the level; textures,
-aniso, density, impostors, terrain, character LOD / quality), Effects (particles, lit particles,
-decals), Sights (scope picture resolution, aiming DoF), Weather (rain / snow, puddles, water).
-
-**Other tabs, developer mode only:** Character → Developer: third person view, spectator delay
-readout. Phone → Developer: HTTPS, pairing code lifetime, stream width / height.
-
-`ui_screen settings:normal` / `settings:debug` open the sub-tabs (scripts);
-`tools/tests/ui_settings_graphics.cfg` screenshots both, developer 0 / 1, at 1920x1080, 1280x720,
-2560x1080 and 1024x768, plus Overall Medium and a one-option Custom.
+`tools/tests/ui_settings_graphics.cfg` screenshots the Graphics page at 1920x1080, 1280x720,
+2560x1080 and 1024x768, with the stretch and an upscaler on, plus Overall Medium and a one-option
+Custom.
 
 ## Style
 

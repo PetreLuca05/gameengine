@@ -20,8 +20,8 @@ void camera_register_cvars(void) {
                                    "widest aspect that sees more to the sides; wider screens keep its horizontal FOV (0 = unlimited Hor+)");
     c->ads_world_zoom = cvar_reg_float("cl_ads_world_zoom", 1.5f, 1.0f, 1.5f, CVAR_LOCKED,
                                        "ADS: the world camera narrows by this (tangent ratio) when fully aimed, on top of the hands / weapon zoom (1 = off; a sight's \"world_zoom\" overrides it)");
-    c->headbob = cvar_reg_bool("cl_headbob", true, CVAR_ARCHIVE | CVAR_EDITABLE, "camera head bob");
-    c->bob_amount = cvar_reg_float("cl_headbob_amount", 1.0f, 0.0f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "head bob strength");
+    c->headbob = cvar_reg_bool("cl_headbob", true, CVAR_LOCKED, "camera head bob");
+    c->bob_amount = cvar_reg_float("cl_headbob_amount", 1.0f, 0.0f, 1.0f, CVAR_LOCKED, "head bob strength");
     c->sprint_fov = cvar_reg_float("cl_sprint_fov", 7.0f, 0.0f, 7.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "extra FOV while sprinting (deg)");
 }
 

@@ -12,7 +12,7 @@ stale. In the game, `settings_audit [filter] [locked|tier|editable|rule|ui]` pri
 | Class | Flag | Who may write | In the UI | In config.cfg |
 |---|---|---|---|---|
 | Player-editable | `CVAR_EDITABLE` | anyone (UI, console, config), bounded by the fidelity level | yes, or console only | yes |
-| Tier-driven | `CVAR_TIER` | Engine Fidelity / the era preset only (`CVAR_SRC_FIDELITY`) | Graphics > Debug in dev builds only | no |
+| Tier-driven | `CVAR_TIER` | Engine Fidelity / the era preset only (`CVAR_SRC_FIDELITY`) | not in Settings (console only) | no |
 | Hard-coded | `CVAR_LOCKED` | the consistency set at startup (`CVAR_SRC_HOST`); dev builds also the console | no | no |
 | Hard-coded, host rule | `CVAR_LOCKED \| CVAR_RULE` | as LOCKED, plus the host's server rules (lobby rules, `sv_rule`), replicated with `MSG_CVARS`; never a client | Lobby only | the host's own value |
 
@@ -47,7 +47,7 @@ stale. In the game, `settings_audit [filter] [locked|tier|editable|rule|ui]` pri
 | Default (reset) | the player's graphics cvars | header, next to "Why can't I change X?"; resets EDITABLE cvars only |
 | Resolution / Window mode / VSync / Apply | r_width, r_height, r_mode, r_vsync | Display |
 | Frame rate limit | r_maxfps | Display |
-| Stretched resolution | r_stretch | removed, locked 0 |
+| Stretched resolution | r_stretch | Display (back at the user's request, 2026-10-19) |
 | Field of view | cl_fov | Comfort, 60 .. 120 deg vertical (was 50 .. 120) |
 | Hands FOV follows camera / Hands FOV | cam_weapon_fov | removed, locked 0 (follows the camera) |
 | Red dot brightness | sight_brightness | HUD > Crosshair, 0.25 .. 2 |
@@ -62,18 +62,18 @@ stale. In the game, `settings_audit [filter] [locked|tier|editable|rule|ui]` pri
 | HDR10 / paper white / peak | r_hdr_output, r_hdr_paper_white, r_hdr_max_nits | Display (paper white 100 .. 300); peak console only |
 | Colour-blind filter | r_colorblind | Display |
 | Screen effects | r_post_feedback | Comfort, 0.5 .. 1 |
-| Gore | gore_level | Character > Content |
+| Gore | gore_level | Comfort (was Character > Content) |
 | Show FPS (Character tab) | cl_showfps | Display |
-| Head bob (Controls tab) | cl_headbob, cl_headbob_amount | Comfort, 0 .. 1 |
-| Weapon kick / sway (Crosshair tab) | wpn_visual_scale, cl_weapon_sway | Comfort (kick 0.5 .. 1) |
+| Head bob (Controls tab) | cl_headbob, cl_headbob_amount | removed, locked (designed value) |
+| Weapon kick / sway (Crosshair tab), Camera shake | wpn_visual_scale, cl_weapon_sway, cam_kick_scale | removed, locked (designed values) |
+| UI scale / Safe area (Character tab) | ui_scale, ui_safe_area | HUD > Interface |
 | Follow camera kick (Crosshair tab) | crosshair_follow_kick | removed (the cvar is gone: the crosshair is exactly the screen centre, the camera layer stays on the aim line with `cam_kick_rot` locked 0, docs/AIM.md) |
 | Health bars (Character tab) | cl_healthbars | removed, lobby rule (off) |
 | Free camera collision (Character tab) | spec_free_collide | removed, host rule |
 
 The Era and Look pickers were already removed from Settings on main (commit 2cd1d95: every session
-starts on Realism); `r_era` and `r_look` are locked (modern / realism) here. The Graphics > Debug
-sub-tab exists only in dev builds, in developer mode, without the release locks; it holds the tier
-features (the parts a level sets) and nothing locked.
+starts on Realism); `r_era` and `r_look` are locked (modern / realism) here. There is no Graphics >
+Debug page any more: the tier features (the parts a level sets) are the engine's, console only.
 
 ## 3. The ambiguous calls
 
@@ -89,11 +89,9 @@ features (the parts a level sets) and nothing locked.
   tier only buys splash detail.
 - **Gore**: editable (content / age rating), moved to Character. Gore Off keeps neutral impact
   puffs. Corpse bleeding (`gore_bleed`) is locked.
-- **Weapon kick** 0.5 .. 1 (no kick gave a still sight picture while the aim recoils), **weapon
-  sway** 0 .. 1 (cosmetic, aiming stays exact), **camera shake** (`cam_kick_scale`) 0.25 .. 1:
-  accessibility for motion sickness; it also scales the fire punches, which are now the same at
-  every level (they were off at Low). The fire-animation tuning cvars are locked (FIRE_ANIM.md:
-  one global sway).
+- **Head bob, weapon kick, weapon sway, camera shake** are locked at the designed values (removed
+  from Settings at the user's request, 2026-10-19). The fire punches are the same at every level
+  (they were off at Low). The fire-animation tuning cvars are locked (FIRE_ANIM.md: one global sway).
 - **Motion blur**: camera / object blur stays editable; the viewmodel's blur spike follows
   Camera shake, so blur never masks recoil differently between players.
 - **Screen effects**: editable for photosensitivity, floored at 0.5 (at 0 a flashbang did nothing).
@@ -104,7 +102,8 @@ features (the parts a level sets) and nothing locked.
   camera layer's turn (`cam_kick_rot`) are behaviour and locked; the hold aim's limit
   (`wpn_hold_aim_max`) is a host rule.
 - **Health bars, damage numbers**: game state, locked off; the host may turn them on (rules).
-- **Stretched resolution**: locked 0 (wider targets).
+- **Stretched resolution**: the player's again (Graphics > Display), at the user's request; it
+  widens targets on screen for whoever uses it.
 - **Occlusion culling**: locked two-pass (mode 1 drew a player leaving cover one frame late).
 - **Spectator free camera collision / speed**: host rules.
 - **Character animation features** (lean, foot IK, ragdolls ...): locked; every client sees remote
@@ -152,19 +151,20 @@ renders the same world cheaper, never smaller.
 ## 6. The tabs
 
 ```
-Settings:  Graphics | Controls | HUD | Audio | Character | Phone      (Crosshair merged into HUD)
+Settings:  Graphics | Controls | HUD | Audio | Phone      (Crosshair and Character merged into HUD)
 
 Graphics                                         [ (i) Why can't I change X? ]   [ Default ]
   ENGINE FIDELITY  [ High v ]  description · last benchmark · [Run benchmark] [Apply recommended]
   DISPLAY   Resolution · Window mode · VSync · [Revert] [Apply] · Frame rate limit · Render scale ·
-            Upscaling (+ resolution) · HDR10 output (+ paper white) · Brightness · Colour-blind filter · Show FPS
-  COMFORT   Field of view (or "set by the server") · Sprint FOV effect · Head bob · Camera shake ·
-            Weapon sway · Weapon kick · Motion blur (+ strength) · Depth of field · Film grain ·
-            Chromatic aberration · Vignette · Sharpening · Screen effects
+            Stretched resolution · Upscaling: Off / TAA-U / FSR 1 / FSR 2 / DLSS (+ resolution) ·
+            HDR10 output (+ paper white) · Brightness · Colour-blind filter · Show FPS
+  COMFORT   Field of view (or "set by the server") · Sprint FOV effect · Motion blur (+ strength) ·
+            Depth of field · Film grain · Chromatic aberration · Vignette · Sharpening · Screen effects · Gore
 
-HUD        CROSSHAIR (style, colour, length, thickness, extra gap, opacity, outline, target tint, hit
-           markers, red dot brightness) · LAYOUT · COMPASS (+ compass arc 90 .. 180 deg) · KILLS · PINGS · WHEELS
-Character  skin · UI scale · safe area · CONTENT: gore · SPECTATING: death cam time, blend
+HUD        INTERFACE (UI scale, safe area) · CROSSHAIR (style, colour, length, thickness, extra gap, opacity,
+           outline, target tint, hit markers, red dot brightness) · LAYOUT · COMPASS (+ compass arc
+           90 .. 180 deg) · KILLS · PINGS · WHEELS
+(no Graphics > Debug page; the skin is picked in the main menu; spectating times are console only)
 ```
 
 Tooltip of "Why can't I change X?": settings that change what you can see compared with other
@@ -184,7 +184,7 @@ see; the host's lobby rules may set some of them for a whole game.
 
 ## 8. Full classification
 
-497 cvars: 134 EDITABLE, 49 TIER, 225 LOCKED, 89 LOCKED + host rule. Generated by `tools/tests/lint_settings.py --write` from `assets/ui/settings_audit.json` (the class must match each registration's flag; `settings_audit` prints the same table in the game). **UI after the rebuild** "—" means the cvar is in no settings tab.
+497 cvars: 130 EDITABLE, 49 TIER, 229 LOCKED, 89 LOCKED + host rule. Generated by `tools/tests/lint_settings.py --write` from `assets/ui/settings_audit.json` (the class must match each registration's flag; `settings_audit` prints the same table in the game). **UI after the rebuild** "—" means the cvar is in no settings tab.
 
 | Cvar | Category | Class | UI after the rebuild | Locked in release | Reason |
 |---|---|---|---|---|---|
@@ -194,10 +194,7 @@ see; the host's lobby rules may set some of them for a whole game.
 | `snd_ui` | audio | EDITABLE | Audio | no | Volumes. |
 | `snd_voice` | audio | EDITABLE | Audio | no | Volumes. |
 | `snd_weather` | audio | EDITABLE | Audio | no | Volumes. |
-| `cam_kick_scale` | camera | EDITABLE | Graphics > Comfort | no | Camera shake: the visual camera kick on shots and the fire punches, 0.25 .. 1 (accessibility). Aim recoil is separate (wpn_recoil_scale, host). |
 | `cl_fov` | camera | EDITABLE | Graphics > Comfort | no | World FOV: personal comfort within the band 60 .. 120 deg vertical (was 50 .. 120). sv_fov / sv_fov_max still override. |
-| `cl_headbob` | camera | EDITABLE | Graphics > Comfort | no | Head bob 0 .. 1 (was 0 .. 3; above 1 only made it worse). cl_headbob stays as its on / off switch. |
-| `cl_headbob_amount` | camera | EDITABLE | Graphics > Comfort | no | Head bob 0 .. 1 (was 0 .. 3; above 1 only made it worse). cl_headbob stays as its on / off switch. |
 | `cl_sprint_fov` | camera | EDITABLE | Graphics > Comfort | no | Sprint FOV kick: comfort (motion sickness), bounded 0 .. 7 deg: it can only narrow the change. |
 | `hud_compass` | hud | EDITABLE | HUD | no | HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock. |
 | `hud_compass_arc` | hud | EDITABLE | HUD | no | HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock. |
@@ -220,8 +217,8 @@ see; the host's lobby rules may set some of them for a whole game.
 | `ping_chat` | hud | EDITABLE | HUD | no | Pings: personal filters of teammates' pings. |
 | `ping_enable` | hud | EDITABLE | HUD | no | Pings: personal filters of teammates' pings. |
 | `ping_sound` | hud | EDITABLE | HUD | no | Pings: personal filters of teammates' pings. |
-| `ui_safe_area` | hud | EDITABLE | Character > Interface | no | UI scale / safe area: display. |
-| `ui_scale` | hud | EDITABLE | Character > Interface | no | UI scale / safe area: display. |
+| `ui_safe_area` | hud | EDITABLE | HUD > Interface | no | UI scale / safe area: display. |
+| `ui_scale` | hud | EDITABLE | HUD > Interface | no | UI scale / safe area: display. |
 | `wheel_enable` | hud | EDITABLE | HUD | no | Radial wheels: input comfort (slow motion only applies alone). |
 | `wheel_heal_auto_use` | hud | EDITABLE | HUD | no | Radial wheels: input comfort (slow motion only applies alone). |
 | `wheel_hold_time` | hud | EDITABLE | HUD | no | Radial wheels: input comfort (slow motion only applies alone). |
@@ -265,12 +262,12 @@ see; the host's lobby rules may set some of them for a whole game.
 | `phone_video_kbps` | phone | EDITABLE | Phone | no | Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone. |
 | `cl_fp_body` | player | EDITABLE | — | no | Own body in first person: only your view of yourself. |
 | `cl_showfps` | player | EDITABLE | Graphics > Display | no | FPS overlay toggle. |
-| `cl_skin` | player | EDITABLE | Character | no | Skin: cosmetic, seen by everyone (same set for all). |
+| `cl_skin` | player | EDITABLE | Main menu (profile / cosmetics) | no | Skin: cosmetic, seen by everyone (same set for all). |
 | `developer` | player | EDITABLE | — | no | Identity / network preferences / console. |
 | `g_map` | player | EDITABLE | — | no | Identity / network preferences / console. |
-| `spec_blend_time` | player | EDITABLE | Character > Spectating | no | Death cam time / blend: personal pacing of your own spectator camera. |
-| `spec_death_cam_time` | player | EDITABLE | Character > Spectating | no | Death cam time / blend: personal pacing of your own spectator camera. |
-| `spec_show_delay` | player | EDITABLE | Character (dev) | no | Spectator delay readout. |
+| `spec_blend_time` | player | EDITABLE | — | no | Death cam time / blend: personal pacing of your own spectator camera. |
+| `spec_death_cam_time` | player | EDITABLE | — | no | Death cam time / blend: personal pacing of your own spectator camera. |
+| `spec_show_delay` | player | EDITABLE | — | no | Spectator delay readout. |
 | `r_brightness` | rendering | EDITABLE | Graphics > Display | no | Brightness: display calibration, narrowed to 0.85 .. 1.15 (was 0.3 .. 3.0, which lifted the night darkness floor). |
 | `r_chromatic` | rendering | EDITABLE | Graphics > Comfort | no | Film grain, chromatic aberration, vignette, sharpening: cosmetic, each bounded by the level and the Look. |
 | `r_colorblind` | rendering | EDITABLE | Graphics > Display | no | Colour-blind correction: accessibility; remaps hues, not luminance, at every level (Off included). |
@@ -294,6 +291,7 @@ see; the host's lobby rules may set some of them for a whole game.
 | `r_post_feedback` | rendering | EDITABLE | Graphics > Comfort | no | Screen effects (damage / flash / low health): photosensitivity accessibility, 0.5 .. 1 (at 0 a flashbang did nothing). |
 | `r_render_scale` | rendering | EDITABLE | Graphics > Display | no | Resolution of the 3D view, bounded by the level. Fewer pixels look softer but never remove objects (LOD / culling / impostor switches are locked). |
 | `r_sharpen` | rendering | EDITABLE | Graphics > Comfort | no | Film grain, chromatic aberration, vignette, sharpening: cosmetic, each bounded by the level and the Look. |
+| `r_stretch` | rendering | EDITABLE | Graphics > Display | no | Stretched resolution simulator 0 .. 1 (the 4:3 stretched look), back in Settings at the user's request (2026-10-19). It widens targets on screen for whoever uses it. |
 | `r_upscale_ratio` | rendering | EDITABLE | Graphics > Display | no | Resolution of the 3D view, bounded by the level. Fewer pixels look softer but never remove objects (LOD / culling / impostor switches are locked). |
 | `r_upscaler` | rendering | EDITABLE | Graphics > Display | no | Resolution of the 3D view, bounded by the level. Fewer pixels look softer but never remove objects (LOD / culling / impostor switches are locked). |
 | `r_vignette` | rendering | EDITABLE | Graphics > Comfort | no | Film grain, chromatic aberration, vignette, sharpening: cosmetic, each bounded by the level and the Look. |
@@ -306,10 +304,9 @@ see; the host's lobby rules may set some of them for a whole game.
 | `con_enable` | system | EDITABLE | — | no | Identity / network preferences / console. |
 | `con_favorites` | system | EDITABLE | — | no | Identity / network preferences / console. |
 | `con_recent` | system | EDITABLE | — | no | Identity / network preferences / console. |
-| `gore_level` | vfx | EDITABLE | Character > Content | no | Gore (moved from Graphics): a content / age-rating choice. Gore Off keeps neutral impact puffs, so hits stay readable. |
+| `gore_level` | vfx | EDITABLE | Graphics > Comfort | no | Gore (moved from Graphics): a content / age-rating choice. Gore Off keeps neutral impact puffs, so hits stay readable. |
 | `ads_sens_coef` | weapons | EDITABLE | Controls | no | Input: sensitivities, inversion, ADS scaling, deadzone, toggles. |
 | `ads_sens_mode` | weapons | EDITABLE | Controls | no | Input: sensitivities, inversion, ADS scaling, deadzone, toggles. |
-| `cl_weapon_sway` | weapons | EDITABLE | Graphics > Comfort | no | Weapon sway (cosmetic: aiming stays exact): 0 .. 1. |
 | `crosshair_color` | weapons | EDITABLE | HUD > Crosshair | no | Crosshair style / colour / size / opacity / outline: style only (the gap stays the exact spread plus this). |
 | `crosshair_gap` | weapons | EDITABLE | HUD > Crosshair | no | Crosshair style / colour / size / opacity / outline: style only (the gap stays the exact spread plus this). |
 | `crosshair_hitmarker` | weapons | EDITABLE | HUD > Crosshair | no | Hit markers / target tint: turning them off only removes information from yourself; their timing / accuracy is fixed in code. |
@@ -320,7 +317,6 @@ see; the host's lobby rules may set some of them for a whole game.
 | `crosshair_target_color` | weapons | EDITABLE | HUD > Crosshair | no | Hit markers / target tint: turning them off only removes information from yourself; their timing / accuracy is fixed in code. |
 | `crosshair_thickness` | weapons | EDITABLE | HUD > Crosshair | no | Crosshair style / colour / size / opacity / outline: style only (the gap stays the exact spread plus this). |
 | `sight_brightness` | weapons | EDITABLE | HUD > Crosshair | no | Red dot brightness (moved from Graphics): 0.25 .. 2 (was 0 .. 4). |
-| `wpn_visual_scale` | weapons | EDITABLE | Graphics > Comfort | no | Weapon kick (visual camera + viewmodel kick): 0.5 .. 1 (was 0 .. 3). Zero kick gave a still sight picture while the aim recoils, an advantage in sprays. |
 | `cl_clock` | world | EDITABLE | HUD | no | HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock. |
 | `anim_eval_budget` | animation | TIER | — | yes (fidelity writes) | Streaming / animation budgets: cost spread over frames; final state identical. |
 | `r_aa` | rendering | TIER | Graphics (dev) | yes (fidelity writes) | Anti-aliasing mode: a quality / cost trade at the same visibility; picked by the level. |
@@ -414,6 +410,7 @@ see; the host's lobby rules may set some of them for a whole game.
 | `cam_head_follow_lateral` | camera | LOCKED | — | yes | First-person camera rig tuning (head follow / spring / clamp / socket bob): aim stability and what peeks over cover. One rig for all. |
 | `cam_head_stiffness` | camera | LOCKED | — | yes | First-person camera rig tuning (head follow / spring / clamp / socket bob): aim stability and what peeks over cover. One rig for all. |
 | `cam_kick_rot` | camera | LOCKED | — | yes | A camera turned off the aim line moves the crosshair off the screen centre (AIM.md): the fire camera layer's pitch / yaw stay off for everyone. |
+| `cam_kick_scale` | camera | LOCKED | — | yes | Camera shake (the visual camera kick on shots and the fire punches): Removed from Settings (the user's call, 2026-10-19): fixed at the designed value. Aim recoil is separate (wpn_recoil_scale, host). |
 | `cam_recon_smooth_time` | camera | LOCKED | — | yes | First-person camera rig tuning (head follow / spring / clamp / socket bob): aim stability and what peeks over cover. One rig for all. |
 | `cam_third` | camera | LOCKED | — | yes | Visibility: changes what you can see relative to other players. Wireframe / hitboxes / collision / CPU skinning / third person: wallhack-class views, dev only. |
 | `cam_weapon_fov` | camera | LOCKED | — | yes | Viewmodel FOV: the hands follow the camera FOV; the sight's ADS zoom still applies. |
@@ -421,6 +418,8 @@ see; the host's lobby rules may set some of them for a whole game.
 | `cl_camera_socket` | camera | LOCKED | — | yes | First-person camera rig tuning (head follow / spring / clamp / socket bob): aim stability and what peeks over cover. One rig for all. |
 | `cl_camera_socket_follow` | camera | LOCKED | — | yes | First-person camera rig tuning (head follow / spring / clamp / socket bob): aim stability and what peeks over cover. One rig for all. |
 | `cl_camera_socket_roll` | camera | LOCKED | — | yes | First-person camera rig tuning (head follow / spring / clamp / socket bob): aim stability and what peeks over cover. One rig for all. |
+| `cl_headbob` | camera | LOCKED | — | yes | Head bob: Removed from Settings (the user's call, 2026-10-19): fixed at the designed value. cl_headbob stays its on / off switch. |
+| `cl_headbob_amount` | camera | LOCKED | — | yes | Head bob strength: Removed from Settings (the user's call, 2026-10-19): fixed at the designed value. |
 | `cl_thirdperson` | camera | LOCKED | — | yes | Visibility: changes what you can see relative to other players. Wireframe / hitboxes / collision / CPU skinning / third person: wallhack-class views, dev only. |
 | `cl_thirdperson_dist` | camera | LOCKED | — | yes | Visibility: changes what you can see relative to other players. Wireframe / hitboxes / collision / CPU skinning / third person: wallhack-class views, dev only. |
 | `handpose_autoreg` | camera | LOCKED | — | yes | Hand pose editor / hands rig tuning: dev tools. |
@@ -516,7 +515,6 @@ see; the host's lobby rules may set some of them for a whole game.
 | `r_shader_hotreload` | rendering | LOCKED | — | yes | Shader hot reload, fixed frame time, anim bake rate: dev tools. |
 | `r_shadow_debug` | rendering | LOCKED | — | yes | Debug view / log: dev builds only (debug views can show geometry and entities through walls). |
 | `r_shadow_max_distance` | rendering | LOCKED | — | yes | Visibility: changes what you can see relative to other players. Sun shadow distance: tiers 50 .. 300 m (max 1000) (V5). One distance for everyone; tiers keep resolution / cascades. |
-| `r_stretch` | rendering | LOCKED | — | yes | Visibility: changes what you can see relative to other players. Stretched resolution makes targets wider on screen (the 4:3 stretch trick): fixed 0. |
 | `r_surfaces` | rendering | LOCKED | — | yes | Visibility: changes what you can see relative to other players. Terrain / building texturing on / off: dev switches (vertex colours change ground contrast). |
 | `r_terrain` | rendering | LOCKED | — | yes | Visibility: changes what you can see relative to other players. Terrain / building texturing on / off: dev switches (vertex colours change ground contrast). |
 | `r_terrain_debug` | rendering | LOCKED | — | yes | Debug view / log: dev builds only (debug views can show geometry and entities through walls). |
@@ -553,18 +551,20 @@ see; the host's lobby rules may set some of them for a whole game.
 | `bal_vapor_trails` | weapons | LOCKED | — | yes | Visibility: changes what you can see relative to other players. Tracers / bullet trace / vapour trails / tracer ignition: muzzle and tracer visibility. |
 | `bal_watch` | weapons | LOCKED | — | yes | Debug view / log: dev builds only (debug views can show geometry and entities through walls). |
 | `ballistics_debug` | weapons | LOCKED | — | yes | Debug view / log: dev builds only (debug views can show geometry and entities through walls). |
-| `cl_fire_punch` | weapons | LOCKED | — | yes | Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. The player-facing controls are Weapon kick / sway / Camera shake. |
+| `cl_fire_punch` | weapons | LOCKED | — | yes | Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. No player-facing control (Weapon kick / sway / Camera shake were removed from Settings). |
+| `cl_weapon_sway` | weapons | LOCKED | — | yes | Weapon sway (cosmetic: aiming stays exact): Removed from Settings (the user's call, 2026-10-19): fixed at the designed value. |
 | `crosshair_obstruct` | weapons | LOCKED | — | yes | Crosshair obstruction: where the bullet will land (AIM.md). |
 | `crosshair_obstruct_lerp` | weapons | LOCKED | — | yes | Crosshair obstruction: where the bullet will land (AIM.md). |
 | `shutter_preview` | weapons | LOCKED | — | yes | Shutter preview / VFX time scale / sky disc zoom / dev night: dev views. |
 | `sight_debug` | weapons | LOCKED | — | yes | Debug view / log: dev builds only (debug views can show geometry and entities through walls). |
-| `wpn_bob_scale` | weapons | LOCKED | — | yes | Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. The player-facing controls are Weapon kick / sway / Camera shake. |
+| `wpn_bob_scale` | weapons | LOCKED | — | yes | Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. No player-facing control (Weapon kick / sway / Camera shake were removed from Settings). |
 | `wpn_debug_melee` | weapons | LOCKED | — | yes | Debug view / log: dev builds only (debug views can show geometry and entities through walls). |
-| `wpn_fire_anim_scale` | weapons | LOCKED | — | yes | Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. The player-facing controls are Weapon kick / sway / Camera shake. |
+| `wpn_fire_anim_scale` | weapons | LOCKED | — | yes | Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. No player-facing control (Weapon kick / sway / Camera shake were removed from Settings). |
 | `wpn_fire_debug` | weapons | LOCKED | — | yes | Debug view / log: dev builds only (debug views can show geometry and entities through walls). |
-| `wpn_kick_scale` | weapons | LOCKED | — | yes | Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. The player-facing controls are Weapon kick / sway / Camera shake. |
-| `wpn_look_lag` | weapons | LOCKED | — | yes | Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. The player-facing controls are Weapon kick / sway / Camera shake. |
+| `wpn_kick_scale` | weapons | LOCKED | — | yes | Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. No player-facing control (Weapon kick / sway / Camera shake were removed from Settings). |
+| `wpn_look_lag` | weapons | LOCKED | — | yes | Fire animation tuning (FIRE_ANIM.md, ONE global sway): item kick, master scale, punch, item bob, look lag. No player-facing control (Weapon kick / sway / Camera shake were removed from Settings). |
 | `wpn_recoil_debug` | weapons | LOCKED | — | yes | Debug view / log: dev builds only (debug views can show geometry and entities through walls). |
+| `wpn_visual_scale` | weapons | LOCKED | — | yes | Weapon kick (visual camera + viewmodel kick): Removed from Settings (the user's call, 2026-10-19): fixed at the designed value. |
 | `env_night` | world | LOCKED | — | yes | Shutter preview / VFX time scale / sky disc zoom / dev night: dev views. |
 | `sky_aerial_max` | world | LOCKED | — | yes | Visibility: changes what you can see relative to other players. Atmosphere / aerial perspective: distant haze. sky_aerial_scale was archived and player-settable 0 .. 20. |
 | `sky_aerial_scale` | world | LOCKED | — | yes | Visibility: changes what you can see relative to other players. Atmosphere / aerial perspective: distant haze. sky_aerial_scale was archived and player-settable 0 .. 20. |

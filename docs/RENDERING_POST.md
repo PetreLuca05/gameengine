@@ -173,7 +173,7 @@ vignette / grain / chromatic / sharpen / bloom intensity scale the Look's finish
 samples from `tools/gen_luts.py`), `r_colorblind`, `r_brightness`, `r_gamma`,
 `r_post_feedback`, `r_hdr_output`, `r_hdr_paper_white`, `r_hdr_max_nits`, `r_render_scale`.
 
-**Stretched resolution simulator** (`r_stretch` 0 .. 1, Settings → Graphics → View): the
+**Stretched resolution simulator** (`r_stretch` 0 .. 1, Settings → Graphics → Display): the
 competitive "4:3 stretched" look. The 3D view (world and viewmodel) is projected as if the screen
 were k = 1 + 1.5 × r_stretch times narrower at the same vertical FOV and fills the full width, so
 everything looks k times wider (0.25 ≈ 4:3 on a 16:9 display, 1 = 2.5x). Every projection-based
@@ -283,7 +283,7 @@ the self-occlusion GTAO sees) and multiplied otherwise. The vgeo glTF importer n
 Limitation: for WPO (wind) foliage the vertex colour is the wind weights, so vertex AO is 1 there
 (their textures' AO is used instead).
 
-**Uniforms / cvars** (Settings > Graphics > Debug, under Ambient occlusion; `PostUBO s_ao / s_ao2 / s_ao3`):
+**Uniforms / cvars** (console; `PostUBO s_ao / s_ao2 / s_ao3`):
 
 | cvar | default | |
 |---|---|---|
