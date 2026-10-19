@@ -48,7 +48,7 @@ stale. In the game, `settings_audit [filter] [locked|tier|editable|rule|ui]` pri
 | Resolution / Window mode / VSync / Apply | r_width, r_height, r_mode, r_vsync | Display |
 | Frame rate limit | r_maxfps | Display |
 | Stretched resolution | r_stretch | Display (back at the user's request, 2026-10-19) |
-| Field of view | cl_fov | Comfort "Field of View", 80 .. 120 horizontal deg at 16:9, Hor+ (the MWII model, 2026-10-19), with "ADS Field of View" (`cl_ads_fov`) and "Weapon Field of View" (`cl_weapon_fov`): docs/CAMERA_HOLDPOINT.md "Field of view" |
+| Field of view | cl_fov | Comfort "Field of View", 80 .. 150 horizontal deg at 16:9, Hor+ (the MWII model, 2026-10-19), with "ADS Field of View" (`cl_ads_fov`) and "Weapon Field of View" (`cl_weapon_fov`): docs/CAMERA_HOLDPOINT.md "Field of view" |
 | Hands FOV follows camera / Hands FOV | cam_weapon_fov, cl_hands_fov | removed: Weapon Field of View presets (Narrow / Default / Wide) instead; `cl_hands_fov` is a locked dev override |
 | Sprint FOV effect | cl_sprint_fov | removed (2026-10-19, the FOV model has three settings): a locked multiplier |
 | Red dot brightness | sight_brightness | HUD > Crosshair, 0.25 .. 2 |
@@ -194,7 +194,7 @@ see; the host's lobby rules may set some of them for a whole game.
 | `snd_ui` | audio | EDITABLE | Audio | no | Volumes. |
 | `snd_voice` | audio | EDITABLE | Audio | no | Volumes. |
 | `snd_weather` | audio | EDITABLE | Audio | no | Volumes. |
-| `cl_fov` | camera | EDITABLE | Graphics > Comfort | no | Field of View (the MWII model, docs/CAMERA_HOLDPOINT.md "Field of view"): 80 .. 120, horizontal deg at 16:9, Hor+ (the vertical FOV is the same on every aspect). Personal comfort; sv_fov / sv_fov_max still override. |
+| `cl_fov` | camera | EDITABLE | Graphics > Comfort | no | Field of View (the MWII model, docs/CAMERA_HOLDPOINT.md "Field of view"): 80 .. 150, horizontal deg at 16:9, Hor+ (the vertical FOV is the same on every aspect). Personal comfort; sv_fov / sv_fov_max still override. |
 | `hud_compass` | hud | EDITABLE | HUD | no | HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock. |
 | `hud_compass_arc` | hud | EDITABLE | HUD | no | HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock. |
 | `hud_coords` | hud | EDITABLE | HUD | no | HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock. |

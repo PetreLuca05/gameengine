@@ -1,6 +1,6 @@
 // Field of view model (docs/CAMERA_HOLDPOINT.md "Field of view"), after Call of Duty: Modern Warfare
 // II: three player settings, pure math.
-//   Field of View         the world camera at the hip, 80 .. 120, horizontal degrees at 16:9; Hor+:
+//   Field of View         the world camera at the hip, 80 .. 150, horizontal degrees at 16:9; Hor+:
 //                         the vertical FOV is the same on every aspect (21:9 sees more to the sides)
 //   ADS Field of View     Independent: aiming goes back to the default 80, then the sight's own zoom;
 //                         Affected: the sight's FOV at 80 scaled by Field of View / 80
@@ -13,7 +13,7 @@
 #include "core/base.h"
 
 #define FOV_MIN 80.0f
-#define FOV_MAX 120.0f
+#define FOV_MAX 150.0f
 #define FOV_DEFAULT 80.0f              // the Field of View default and the Independent ADS base
 #define FOV_REF_ASPECT (16.0f / 9.0f)  // the settings' horizontal FOVs are at this aspect
 #define FOV_PUNCH_REF 75.0f            // fire FOV punch degrees are authored against this vertical FOV

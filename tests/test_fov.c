@@ -20,7 +20,11 @@ int main(void) {
     // 1) Hor+.
     {
         float v80 = fov_h16_to_v(80.0f), v100 = fov_h16_to_v(100.0f), v120 = fov_h16_to_v(120.0f);
+        float v150 = fov_h16_to_v(FOV_MAX);
         CHECK(NEAR(v80, 50.534f, 0.01f) && NEAR(v100, 67.668f, 0.01f) && NEAR(v120, 88.511f, 0.01f), "vertical of 80 / 100 / 120: %.3f %.3f %.3f", v80, v100, v120);
+        CHECK(FOV_MAX == 150.0f && NEAR(v150, 129.06f, 0.01f), "the slider's top: %.0f = %.3f vertical", FOV_MAX, v150);
+        // Sprint widening on top of the widest setting stays a valid projection.
+        CHECK(fov_sprint(v150, 0.12f) < 179.0f, "sprint at 150: %.2f", fov_sprint(v150, 0.12f));
         static const struct { const char *name; float aspect, h80; } k[] = { { "16:9", 16.0f / 9.0f, 80.0f }, { "21:9", 64.0f / 27.0f, 96.42f }, { "4:3", 4.0f / 3.0f, 64.37f } };
         for (int i = 0; i < 3; i++) {
             float h = fov_v_to_h(v80, k[i].aspect);

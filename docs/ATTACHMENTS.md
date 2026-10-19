@@ -207,7 +207,7 @@ per-frame re-solve. The barrel pull is used only if the slide isn't enough.
 
 ## FOV and sensitivity
 
-- **The FOV model** (docs/CAMERA_HOLDPOINT.md "Field of view"): Field of View (`cl_fov`, 80..120,
+- **The FOV model** (docs/CAMERA_HOLDPOINT.md "Field of view"): Field of View (`cl_fov`, 80..150,
   horizontal degrees at 16:9, Hor+), ADS Field of View (`cl_ads_fov`, Independent / Affected) and
   Weapon Field of View (`cl_weapon_fov`, the arms layer only), Settings → Graphics → Comfort. A host
   can force one FOV for everyone with `sv_fov` (0 = off, the default) or cap the players' choice with

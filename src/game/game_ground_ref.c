@@ -62,7 +62,7 @@ static void cmd_ref_cam(int argc, const char **argv) {
     const cJSON *map = cJSON_GetObjectItemCaseSensitive(v, "map"), *pos = cJSON_GetObjectItemCaseSensitive(v, "pos");
     char cmd[512];
     // The reference's horizontal FOV at 16:9 is the FOV model's unit; sv_fov takes it outside the
-    // players' 80 .. 120 band (docs/CAMERA_HOLDPOINT.md "Field of view").
+    // players' 80 .. 150 band (docs/CAMERA_HOLDPOINT.md "Field of view").
     float fov_h = (float)cJSON_GetObjectItemCaseSensitive(v, "fov")->valuedouble;
     snprintf(cmd, sizeof(cmd), "%s%s%sset sv_fov %.1f\ntime_set %s instant\ntime_pause\nweather_set %s 0\nweather_lock 1\nsetpos %g %g %g %g %g\n",
              (cJSON_IsString(map)) ? "map " : "", (cJSON_IsString(map)) ? map->valuestring : "", (cJSON_IsString(map)) ? "\n" : "", fov_h,

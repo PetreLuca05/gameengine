@@ -186,7 +186,7 @@ layer.
 
 | Setting | Cvar | Values | What it changes |
 |---|---|---|---|
-| Field of View | `cl_fov` | 80 … 120 (default 80), horizontal degrees at 16:9 | the world camera at the hip, never the arms layer |
+| Field of View | `cl_fov` | 80 … 150 (default 80), horizontal degrees at 16:9 | the world camera at the hip, never the arms layer |
 | ADS Field of View | `cl_ads_fov` | 0 Independent (default), 1 Affected | the world camera while aiming |
 | Weapon Field of View | `cl_weapon_fov` | 0 Narrow, 1 Default (default), 2 Wide | the arms layer's projection at the hip, never the world |
 
@@ -200,6 +200,7 @@ layer.
 | 80 | 50.5° | 80° | 96.4° | 64.4° |
 | 100 | 67.7° | 100° | 113.7° | 83.5° |
 | 120 | 88.5° | 120° | 131.4° | 104.3° |
+| 150 | 129.1° | 150° | 157.3° | 140.7° |
 
 A host may force one Field of View for everyone (`sv_fov`) or cap it (`sv_fov_max`), in the same units
 (0 = off). `sv_fov_max_aspect` (0 = Hor+ on every aspect) can stop wider screens from seeing more.

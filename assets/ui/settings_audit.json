@@ -388,7 +388,7 @@
   "cl_fov": {
    "class": "EDITABLE",
    "ui": "Graphics > Comfort",
-   "reason": "Field of View (the MWII model, docs/CAMERA_HOLDPOINT.md \"Field of view\"): 80 .. 120, horizontal deg at 16:9, Hor+ (the vertical FOV is the same on every aspect). Personal comfort; sv_fov / sv_fov_max still override.",
+   "reason": "Field of View (the MWII model, docs/CAMERA_HOLDPOINT.md \"Field of view\"): 80 .. 150, horizontal deg at 16:9, Hor+ (the vertical FOV is the same on every aspect). Personal comfort; sv_fov / sv_fov_max still override.",
    "category": "camera"
   },
   "cl_fp_body": {
