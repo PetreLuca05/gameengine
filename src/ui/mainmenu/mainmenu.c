@@ -398,6 +398,7 @@ bool mainmenu_draw(bool top) {
 }
 
 void mainmenu_tick(float dt) {
+    globe_tick();   // a release asked for by a session start (the menu closed)
     if (!M->active) return;
     mm_play_tick(dt);
 }
@@ -450,6 +451,7 @@ void mainmenu_enter(const char *message) {
 
 void mainmenu_session_started(void) {
     M->active = false;
+    globe_release();   // the Maps tab's globe (~90 MB of tiles, vectors, heights) isn't kept through the game
     mainmenu_leave_scene();
     menus_close_all();
     audio_play_music("ambient");

@@ -155,7 +155,8 @@ void inventory_slot_view(const InvSlot *s, const ItemDB *db, int mag_override, G
 // ------------------------------------------------------------------ intents
 
 // A dry run on copies: what the intent would do (drop highlights, rejections before sending).
-static int dry_run(const InvIntent *in) {
+// loot_left (optional): the entries the open container still holds afterwards (what take all leaves).
+static int dry_run_left(const InvIntent *in, int *loot_left) {
     static Inventory inv;
     static InvTree loot;
     Player *p = game_local_player();
@@ -165,7 +166,17 @@ static int dry_run(const InvIntent *in) {
     InvTree *lt = game_loot_tree();
     if (lt) loot = *lt;
     InvCtx c = inv_ctx(&inv, db, lt ? &loot : NULL);
-    return inv_intent_apply(&c, in, NULL);
+    int r = inv_intent_apply(&c, in, NULL);
+    if (loot_left) *loot_left = lt ? inv_live_count(&loot) : 0;
+    return r;
+}
+
+static int dry_run(const InvIntent *in) { return dry_run_left(in, NULL); }
+
+// c with its alpha raised to at least a (an opaque-enough backdrop).
+static u32 min_alpha(u32 c, float a) {
+    u32 al = (u32)(a * 255.0f + 0.5f);
+    return (c >> 24) >= al ? c : (c & 0x00FFFFFFu) | (al << 24);   // lint:ok the alpha byte only
 }
 
 static void shake(InvTarget at) {
@@ -448,9 +459,10 @@ static void draw_grid(GuiRect origin, GuiRect clip, int side, u16 parent, const 
         for (int y = 0; y < k->h; y++)
             for (int x = 0; x < k->w; x++) {
                 GuiRect cr = { gr.x + (float)x * cell, gr.y + (float)y * cell, cell, cell };
-                gd_round_outline(gui_rect_inset(cr, 1), gui_s(2), 1, gui_rgba_mul(TH->slot_border, 0.55f));
                 InvTarget pt = { IT_CELL, (u8)side, (u8)c, 0, parent, 0, (i16)x, (i16)y };
                 const InvItem *under = inv_at(t, db, parent, c, x, y);
+                // The cell lines only on free cells (and under the carried item): a multi-cell tile reads as one.
+                if (!under || carrying(side, under->uid)) gd_round_outline(gui_rect_inset(cr, 1), gui_s(2), 1, gui_rgba_mul(TH->slot_border, 0.55f));
                 pt.uid = under ? under->uid : 0;
                 if (gui_rect_contains(clip, cr.x + cell * 0.5f, cr.y + cell * 0.5f)) pad_add(pt, cr, region);
             }
@@ -591,8 +603,9 @@ static void draw_equip(void) {
         hit_add(HK_EQUIP, r, r, me, 0);
         pad_add(me, r, 1);
         bool hover = V.hover.kind == IT_EQUIP && V.hover.index == s;
-        // The centre has no panel behind the player: each slot carries its own backdrop (the panel
-        // colour) so an empty one reads over a bright sky or floor.
+        // The centre has no panel behind the player: each slot carries its own backdrop (the side
+        // panels' blur under the panel colour) so an empty one reads over a bright sky or floor and
+        // nothing sharp of the world (a label, a floor marker) shows through as if it were in it.
         u32 border = gui_rgba_lerp(TH->panel_border, TH->text_faint, 0.35f), bg = TH->panel;
         if (V.dd.state == IDD_DRAGGING && hover) {
             InvDDOut o = idd_drop_on(&V.dd, me, &v);
@@ -605,6 +618,7 @@ static void draw_equip(void) {
         }
         float sh = shake_amount(me);
         if (sh > 0) r.x += sinf(sh * 40.0f) * sh * gui_s(5);
+        gd_backdrop(gui_rect_inset(r, 1), WHITE);
         gd_round_border(r, gui_s(TH->radius), 1, bg, border);
         GuiText lab = { tpx(TH->t_tiny), GW_MEDIUM, it ? TH->text_faint : TH->text_dim, GUI_LEFT, TH->tracking_caps, true, false, r.w - gui_s(8) };
         gd_text(&lab, r.x + gui_s(5), r.y + gui_s(3), short_slot_name(s));
@@ -622,8 +636,9 @@ static void draw_equip(void) {
     hit_add(HK_DISCARD, d, d, dt, 0);
     bool over = V.dd.state == IDD_DRAGGING && V.hover.kind == IT_DISCARD;
     bool dragging = V.dd.state == IDD_DRAGGING;
-    // A solid pill (the panel colour, a danger-tinted edge): visible over the scene before a drag starts.
-    u32 fill = over ? gui_rgba_lerp(TH->panel, TH->danger, 0.45f) : TH->panel;
+    // A solid pill (the panel colour near opaque, a danger-tinted edge): visible over the scene before a
+    // drag starts, nothing of the world showing through it (a pill: no square blur backdrop).
+    u32 fill = min_alpha(over ? gui_rgba_lerp(TH->panel, TH->danger, 0.45f) : TH->panel, 0.95f);
     u32 edge = over ? TH->danger : gui_rgba_lerp(TH->panel_border, TH->danger, dragging ? 0.8f : 0.45f);
     gd_round_border(d, d.h * 0.5f, dragging ? fmaxf(1.0f, gui_s(1.5f)) : 1.0f, fill, edge);
     gw_label_caps(d, "Discard", tpx(TH->t_label), over ? TH->text : dragging ? TH->text_dim : TH->text_faint, GUI_CENTER);
@@ -660,7 +675,7 @@ static void draw_hotbar(void) {
         gd_round_border(gui_rect_inset(r, 1), gui_s(TH->radius), sel ? fmaxf(1.0f, gui_s(1.5f)) : 1.0f, bg, border);
         char key[4];
         snprintf(key, sizeof(key), "%d", k + 1);
-        GuiText kt = { tpx(TH->t_tiny), GW_SEMIBOLD, sel ? TH->select : TH->text_faint, GUI_LEFT, 0, false, false, 0 };
+        GuiText kt = { tpx(TH->t_tiny), GW_SEMIBOLD, sel ? TH->select : TH->text_dim, GUI_LEFT, 0, false, false, 0 };
         gd_text(&kt, r.x + gui_s(4), r.y + gui_s(2), key);
         if (s->item) {
             const InvItem *it = inv_get_c(&p->inv.t, p->inv.quick[k]);
@@ -682,6 +697,7 @@ static void draw_hotbar(void) {
     GuiRect ir = L->hot_info;
     if (ir.h <= 0) return;
     float rh = DG_MIN(ir.h / (float)INV_HOTBAR, gui_s(26));
+    bool hinted = false;   // the empty-slot hint once, a dash on the other empty rows
     for (int k = 0; k < INV_HOTBAR; k++) {
         GuiRect row = { ir.x, ir.y + (float)k * rh, ir.w, rh };
         const InvSlot *s = inv_hot_c(&p->inv, k);
@@ -690,11 +706,12 @@ static void draw_hotbar(void) {
         float ty = row.y + (rh - gd_line_height(tpx(TH->t_small))) * 0.5f;
         char key[4];
         snprintf(key, sizeof(key), "%d", k + 1);
-        GuiText kt = { tpx(TH->t_small), GW_SEMIBOLD, sel ? TH->select : TH->text_faint, GUI_LEFT, 0, false, false, 0 };
+        GuiText kt = { tpx(TH->t_small), GW_SEMIBOLD, sel ? TH->select : TH->text_dim, GUI_LEFT, 0, false, false, 0 };
         gd_text(&kt, row.x + gui_s(6), ty, key);
         if (!s->item) {
             GuiText et = { tpx(TH->t_small), GW_REGULAR, TH->text_faint, GUI_LEFT, 0, false, false, 0 };
-            gd_text(&et, row.x + gui_s(26), ty, "Drag an item onto a tile");
+            gd_text(&et, row.x + gui_s(26), ty, hinted ? "\xE2\x80\x94" : "Drag an item onto a tile");
+            hinted = true;
             continue;
         }
         const ItemDef *d = item_def(db, s->item);
@@ -731,6 +748,7 @@ static const char *loot_name(void) {
     InvTree *t = game_loot_tree();
     const InvContainerDef *cd = t ? inv_root_def(t, items()) : NULL;
     if (cd && !strcmp(cd->id, "cabinet")) return "Cabinet";
+    if (cd && !strcmp(cd->id, "wardrobe")) return "Wardrobe";
     return "Crate";
 }
 
@@ -752,7 +770,15 @@ static void draw_loot(void) {
         memset(&in, 0, sizeof(in));
         in.type = II_TAKE_ALL;
         in.src_side = in.dst_side = INV_SIDE_LOOT;
-        inv_screen_send(in);
+        int left = 0;
+        int r = dry_run_left(&in, &left);
+        // Take all takes what fits: say so when some of it stays (no room in the pockets / packs).
+        if (inv_screen_send(in) == IIR_OK && r == IIR_OK && left > 0) {
+            char msg[64];
+            if (left == 1) snprintf(msg, sizeof(msg), "No room for 1 item");
+            else snprintf(msg, sizeof(msg), "No room for %d items", left);
+            inv_screen_toast(msg);
+        }
     }
     sort_button(tr, INV_SIDE_LOOT, 0, gui_id("inv_sort_loot"));
     GuiRect clip = { r.x, r.y + L->title_h, r.w, r.h - L->title_h - ta.h - L->gap };
@@ -1054,7 +1080,7 @@ static void draw_context(void) {
     }
     if (d->rotatable && !equipped) e[n++] = (Entry){ "Rotate", II_ROTATE, 0, 0 };
     if (it->s.count > 1) e[n++] = (Entry){ "Split", II_SPLIT, 0, 0 };
-    if (side == INV_SIDE_SELF && p && !bound_key(p, it->uid)) e[n++] = (Entry){ "Bind to hotbar", II_BIND, 0, 0 };
+    if (side == INV_SIDE_SELF && p && !bound_key(p, it->uid) && inv_bindable(d)) e[n++] = (Entry){ "Bind to hotbar", II_BIND, 0, 0 };
     if (side == INV_SIDE_LOOT || game_loot_tree()) e[n++] = (Entry){ side == INV_SIDE_LOOT ? "Take" : "Put in container", II_QUICK_MOVE, 0, 0 };
     e[n++] = (Entry){ it->s.count > 1 ? "Discard one" : "Discard", II_DISCARD, 0, it->s.count > 1 ? 1 : 0 };
     if (it->s.count > 1) e[n++] = (Entry){ "Discard all", II_DISCARD, 0, 0 };

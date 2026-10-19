@@ -430,13 +430,16 @@ float attach_sight_zoom(const AttachmentDef *optic) {
 
 float attach_sight_fov(const AttachmentDef *optic, float base_fov) { return zoom_fov(base_fov, attach_sight_zoom(optic)); }
 
-// The weapon's own ADS zoom (irons), a red dot's on top (never wider than the irons), a scope
-// the mild main_zoom around its ocular: the gun and sight look as they did when this zoomed the
-// whole view, the world around them stays at the base FOV.
+// The weapon's own ADS zoom (irons), a red dot's on top, a scope the mild main_zoom around its
+// ocular: the gun and sight look as they did when this zoomed the whole view, the world around them
+// stays at the base FOV. A red dot is a 1x optic: its aimed magnification stops at the AR-pattern
+// guns' (REDDOT_MAX_VM_ZOOM, the rifle's 2.30x), so on a gun with narrow irons (the sniper's 22 deg,
+// the DMR's 35) the tube doesn't fill the screen (there it is wider than the irons).
+#define REDDOT_MAX_VM_ZOOM 2.35f
 float attach_ads_vm_zoom(const WeaponDef *eff, const AttachmentDef *optic) {
     float fov = iron_fov(eff);
     if (optic && optic->sight == SIGHT_SCOPE) fov = zoom_fov(fov, optic->main_zoom);
-    else if (optic) fov = optic->ads_fov > 1.0f ? optic->ads_fov : zoom_fov(fov, optic->zoom);
+    else if (optic) return clampf(fov_zoom(optic->ads_fov > 1.0f ? optic->ads_fov : zoom_fov(fov, optic->zoom)), 1.0f, REDDOT_MAX_VM_ZOOM);
     return fmaxf(1.0f, fov_zoom(fov));
 }
 

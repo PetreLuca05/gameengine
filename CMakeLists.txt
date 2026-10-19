@@ -731,7 +731,9 @@ target_link_libraries(test_inventory PRIVATE dg_animcore)
 if(MSVC)
   target_compile_options(test_inventory PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
-add_test(NAME inventory COMMAND test_inventory WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# Stocked world containers: every level's and building-kit prefab's loot fits its root (test_world_loot).
+file(GLOB DG_LOOT_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/data/levels/*.json ${CMAKE_SOURCE_DIR}/assets/kits/building/prefabs/*.json)
+add_test(NAME inventory COMMAND test_inventory ${DG_LOOT_FILES} WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # Inventory screen, pure parts: layout at 16:9 / 21:9 / 4:3, drag and drop for every source -> target, pad navigation.
 add_executable(test_inventory_ui tests/test_inventory_ui.c src/ui/inventory/inv_layout.c src/ui/inventory/inv_dd.c ${DG_INVENTORY_SOURCES})

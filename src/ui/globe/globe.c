@@ -8,6 +8,7 @@
 #include "ui/gui/gui_draw.h"
 #include "ui/gui/gui_theme.h"
 #include "core/cvar.h"
+#include "core/jobs.h"
 #include "core/log.h"
 #include "core/platform.h"
 #include "core/profiler.h"
@@ -20,7 +21,8 @@
 
 #define MAX_REGIONS 8
 #define MAX_TILE_SLOTS 160          // grey 512^2 textures with mips (~350 KB each)
-#define TILE_LOADS_PER_FRAME 3
+#define TILE_LOADS_PER_FRAME 4      // new tile decodes started per frame (on the jobs)
+#define TILE_INFLIGHT_MAX 8         // tile decodes in flight
 #define STAR_COUNT 260
 #define PTS_MAX 512
 
@@ -54,16 +56,20 @@ typedef struct HeightGrid {
     double w, s, e, n;
     u16 *px;
     int pw, ph;
-    bool tried;
+    bool tried, loading;       // loading: its PNG is decoding on the jobs
 } HeightGrid;
 
 static struct {
     bool registered, loaded, ok;
+    bool release_req;          // globe_release: free everything on the next globe_tick
+    u32 gen;                   // bumped by globe_release: a job finishing after it drops its result
     // tiles
     char pack_path[512];
     TileEntry *tiles;
     int tile_count, max_level;
     int *tile_slot;            // per entry: slot index or -1
+    u8 *tile_loading;          // per entry: its decode is in flight
+    int inflight;
     u32 *hash;                 // open addressing: entry index + 1 (0 empty)
     int hash_cap;
     TileSlot slots[MAX_TILE_SLOTS];
@@ -104,7 +110,8 @@ static struct {
     int phase;                 // 0 standby, 1 travelling, 2 locked
     double intro_at;           // first open: the flight starts after a beat
     float elev;                // the locked place's height (m)
-    bool elev_ok;
+    bool elev_ok, elev_pending;   // pending: a height grid holding the place is still decoding
+    GuiRect clip;              // where the labels may go: the gap between the panels
     float stars[STAR_COUNT][4];
     u32 last_verts;            // the offscreen layer's vertices last frame (mm_globe_dump)
     float last_ms;             // CPU time of the last globe_draw (tile loads included)
@@ -150,6 +157,7 @@ static bool load_tiles(void) {
     if (!platform_read_file_range(G.pack_path, 32, G.tiles, sizeof(TileEntry) * (size_t)G.tile_count)) return false;
     G.tile_slot = (int *)malloc(sizeof(int) * (size_t)G.tile_count);
     for (int i = 0; i < G.tile_count; i++) G.tile_slot[i] = -1;
+    G.tile_loading = (u8 *)calloc((size_t)G.tile_count, 1);
     G.hash_cap = 64;
     while (G.hash_cap < G.tile_count * 2) G.hash_cap <<= 1;
     G.hash = (u32 *)calloc((size_t)G.hash_cap, sizeof(u32));
@@ -276,21 +284,59 @@ static const Region *region_find(const char *id) {
     return NULL;
 }
 
-// The finest height grid holding (lon, lat), bilinear; false without one.
-static bool height_at(double lon, double lat, float *out) {
+// A height grid's 16-bit PNG, read and decoded on a worker (the world grid is 4096 x 2048); the
+// main thread takes it in height_done.
+typedef struct HeightJob {
+    u32 gen;
+    int grid;
+    char path[512];
+    u16 *px;
+    int w, h;
+} HeightJob;
+
+static void height_job(void *user) {
+    HeightJob *j = (HeightJob *)user;
+    size_t size = 0;
+    void *data = platform_read_file(j->path, &size);
+    int c = 0;
+    if (data) j->px = stbi_load_16_from_memory((const stbi_uc *)data, (int)size, &j->w, &j->h, &c, 1);
+    free(data);
+}
+
+static void height_done(void *user) {
+    HeightJob *j = (HeightJob *)user;
+    if (j->gen == G.gen && G.loaded && j->grid < G.height_count) {
+        HeightGrid *hg = &G.heights[j->grid];
+        hg->px = j->px;
+        hg->pw = j->w;
+        hg->ph = j->h;
+        hg->loading = false;
+        j->px = NULL;
+    }
+    stbi_image_free(j->px);
+    free(j);
+}
+
+// The finest loaded height grid holding (lon, lat), bilinear; false without one. A grid holding it
+// that isn't loaded yet starts decoding on the jobs and sets *pending (ask again later).
+static bool height_at(double lon, double lat, float *out, bool *pending) {
     const HeightGrid *best = NULL;
+    *pending = false;
     for (int i = 0; i < G.height_count; i++) {
         HeightGrid *hg = &G.heights[i];
         if (lon < hg->w || lon > hg->e || lat < hg->s || lat > hg->n) continue;
         if (!hg->tried) {
             hg->tried = true;
-            char path[512];
-            size_t size = 0;
-            void *data = platform_read_file(platform_data_path(hg->file, path, sizeof(path)), &size);
-            int c = 0;
-            if (data) hg->px = stbi_load_16_from_memory((const stbi_uc *)data, (int)size, &hg->pw, &hg->ph, &c, 1);
-            free(data);
+            HeightJob *j = (HeightJob *)calloc(1, sizeof(HeightJob));
+            if (j) {
+                j->gen = G.gen;
+                j->grid = i;
+                platform_data_path(hg->file, j->path, sizeof(j->path));
+                hg->loading = true;
+                jobs_submit(height_job, height_done, j, NULL);
+            }
         }
+        if (hg->loading) *pending = true;
         if (!hg->px) continue;
         if (!best || (hg->e - hg->w) / hg->pw < (best->e - best->w) / best->pw) best = hg;
     }
@@ -328,20 +374,33 @@ static void load_all(void) {
 
 // ------------------------------------------------------------------ tile cache
 
-// JPEG -> grey levels (box filtered) -> an R8 texture sampled as grey.
-static TextureId tile_upload(int e) {
-    const TileEntry *t = &G.tiles[e];
-    u8 *jpg = (u8 *)malloc(t->size);
-    if (!jpg || !platform_read_file_range(G.pack_path, t->offset, jpg, t->size)) { free(jpg); return 0; }
+// A tile decode on a worker: its JPEG read from the pack, decoded to grey levels, box filtered into
+// the mips (PF-0024's texture decodes do the same). The main thread only uploads it (tile_done).
+typedef struct TileJob {
+    u32 gen;
+    int e;
+    u64 offset;
+    u32 size;
+    char path[512];
+    u8 *all;                   // every mip level, largest first (NULL: failed)
+    size_t sizes[16];
+    int levels;
+} TileJob;
+
+static void tile_job(void *user) {
+    TileJob *j = (TileJob *)user;
+    u8 *jpg = (u8 *)malloc(j->size);
+    if (!jpg || !platform_read_file_range(j->path, j->offset, jpg, j->size)) { free(jpg); return; }
     int w = 0, h = 0, c = 0;
-    u8 *px = stbi_load_from_memory(jpg, (int)t->size, &w, &h, &c, 1);
+    u8 *px = stbi_load_from_memory(jpg, (int)j->size, &w, &h, &c, 1);
     free(jpg);
-    if (!px || w != GLOBE_TILE_SIZE || h != GLOBE_TILE_SIZE) { stbi_image_free(px); return 0; }
-    size_t sizes[16], total = 0;
+    if (!px || w != GLOBE_TILE_SIZE || h != GLOBE_TILE_SIZE) { stbi_image_free(px); return; }
+    size_t total = 0;
     int levels = 0;
-    for (int s = GLOBE_TILE_SIZE; s >= 1; s >>= 1) { sizes[levels++] = (size_t)s * (size_t)s; total += (size_t)s * (size_t)s; }
+    for (int s = GLOBE_TILE_SIZE; s >= 1; s >>= 1) { j->sizes[levels++] = (size_t)s * (size_t)s; total += (size_t)s * (size_t)s; }
     u8 *all = (u8 *)malloc(total);
-    memcpy(all, px, sizes[0]);
+    if (!all) { stbi_image_free(px); return; }
+    memcpy(all, px, j->sizes[0]);
     stbi_image_free(px);
     u8 *src = all;
     for (int l = 1, s = GLOBE_TILE_SIZE / 2; l < levels; l++, s >>= 1) {
@@ -353,12 +412,12 @@ static TextureId tile_upload(int e) {
             }
         src = dst;
     }
-    TextureId tex = render_texture_create_gray(GLOBE_TILE_SIZE, GLOBE_TILE_SIZE, levels, all, sizes);
-    free(all);
-    return tex;
+    j->all = all;
+    j->levels = levels;
 }
 
-static bool tile_load(int e) {
+// A decoded tile into the cache: an R8 texture sampled as grey.
+static bool tile_install(int e, const TileJob *j) {
     if (G.tile_slot[e] >= 0) return true;
     // A free slot, else the least recently used one not drawn in the last two frames.
     int best = -1;
@@ -369,7 +428,7 @@ static bool tile_load(int e) {
         if (best < 0 || s->used_frame < G.slots[best].used_frame) best = i;
     }
     if (best < 0) return false;
-    TextureId tex = tile_upload(e);
+    TextureId tex = render_texture_create_gray(GLOBE_TILE_SIZE, GLOBE_TILE_SIZE, j->levels, j->all, j->sizes);
     if (!tex) return false;
     TileSlot *s = &G.slots[best];
     if (s->entry >= 0) {
@@ -383,8 +442,19 @@ static bool tile_load(int e) {
     return true;
 }
 
+static void tile_done(void *user) {
+    TileJob *j = (TileJob *)user;
+    if (j->gen == G.gen && G.loaded) {   // else the globe was released meanwhile
+        G.tile_loading[j->e] = 0;
+        G.inflight--;
+        if (j->all) tile_install(j->e, j);
+    }
+    free(j->all);
+    free(j);
+}
+
 static void want_tile(int e, int level) {
-    if (G.tile_slot[e] >= 0) return;
+    if (G.tile_slot[e] >= 0 || G.tile_loading[e]) return;
     for (int i = 0; i < G.want_count; i++) if (G.want[i] == e) return;
     if (G.want_count < (int)(sizeof(G.want) / sizeof(G.want[0]))) G.want[G.want_count++] = e;
     else {
@@ -395,14 +465,26 @@ static void want_tile(int e, int level) {
     }
 }
 
+// The wanted tiles start decoding on the jobs, coarse first, a few per frame with a cap on those in
+// flight; each is uploaded when it is done (tile_done, from jobs_pump_completions). Nothing of a tile
+// is read or decoded on the main thread (a frame never waits on the disk).
 static void service_loads(void) {
-    // Coarse first.
-    for (int k = 0; k < TILE_LOADS_PER_FRAME && G.want_count; k++) {
+    for (int k = 0; k < TILE_LOADS_PER_FRAME && G.want_count && G.inflight < TILE_INFLIGHT_MAX; k++) {
         int bi = 0;
         for (int i = 1; i < G.want_count; i++) if (G.tiles[G.want[i]].level < G.tiles[G.want[bi]].level) bi = i;
         int e = G.want[bi];
         G.want[bi] = G.want[--G.want_count];
-        tile_load(e);
+        if (G.tile_slot[e] >= 0 || G.tile_loading[e]) continue;
+        TileJob *j = (TileJob *)calloc(1, sizeof(TileJob));
+        if (!j) break;
+        j->gen = G.gen;
+        j->e = e;
+        j->offset = G.tiles[e].offset;
+        j->size = G.tiles[e].size;
+        dg_strcpy(j->path, sizeof(j->path), G.pack_path);
+        G.tile_loading[e] = 1;
+        G.inflight++;
+        jobs_submit(tile_job, tile_done, j, NULL);
     }
     G.want_count = 0;
 }
@@ -442,10 +524,13 @@ static u32 white(float a) { return grey(1.0f, a); }
 
 // ------------------------------------------------------------------ texture
 
+static bool g_want_only;   // visit_tile only asks for the tiles (the flight's destination, prefetched)
+
 static void draw_tile(const Proj *P, int level, int x, int y, float opacity) {
     // The tile's own texture, else the nearest loaded ancestor (a sub-rect of it).
     int e = tile_find(level, x, y);
     if (e >= 0) want_tile(e, level);
+    if (g_want_only) return;
     int al = level, ax = x, ay = y, ae = e;
     while (al >= 0 && (ae < 0 || G.tile_slot[ae] < 0)) {
         al--;
@@ -510,6 +595,23 @@ static void draw_texture(const Proj *P, float opacity) {
     int target = globe_level_for(P->ppd * 0.9, G.max_level);
     visit_tile(P, 0, 0, 0, target, opacity);
     visit_tile(P, 0, 1, 0, target, opacity);
+}
+
+// While flying: the destination's tiles are asked for too (after the visible ones, so the coarse
+// tiles on screen still load first), so the place is sharp when the camera gets there.
+static void prefetch_destination(const Proj *P, float cx, float cy, float opacity) {
+    if (!G.ok || opacity <= 0 || !G.fl.active || !G.fl.count) return;
+    const GlobeLeg *l = &G.fl.legs[G.fl.count - 1];
+    GlobeView v = { l->lon, l->lat, l->radius * P->s, cx, cy };
+    Proj D = *P;
+    globe_basis(&v, &D.b);
+    D.ppd = globe_px_per_deg(&v);
+    D.box = globe_visible_box(&D.b, P->sw, P->sh);
+    int target = globe_level_for(D.ppd * 0.9, G.max_level);
+    g_want_only = true;
+    visit_tile(&D, 0, 0, 0, target, opacity);
+    visit_tile(&D, 0, 1, 0, target, opacity);
+    g_want_only = false;
 }
 
 // ------------------------------------------------------------------ vectors
@@ -783,7 +885,7 @@ void globe_select(const MapInfo *m) {
     G.hl_t0_set = false;
     G.arrived_set = false;
     G.phase = 1;
-    G.elev_ok = height_at(m->geo_lon, m->geo_lat, &G.elev);
+    G.elev_ok = height_at(m->geo_lon, m->geo_lat, &G.elev, &G.elev_pending);
 }
 
 static void cmd_finish(int argc, const char **argv) {
@@ -913,12 +1015,23 @@ static void draw_lock(const Proj *P, float now) {
     gd_circle(x, y, 2.5f * s, cs);
     const GuiTheme *th = gui_theme();
     GuiText nt = { 14.0f * s * 1.2f, GW_SEMIBOLD, cs, GUI_LEFT, th->tracking_caps, true, true, 0 };
-    gd_text(&nt, x + half + 10.0f * s, y - half - 4.0f * s - gd_line_height(nt.size), G.sel_place);
     char co[96];
     int n = snprintf(co, sizeof(co), "%.2f%s %.2f%s", fabs(G.sel_lat), G.sel_lat >= 0 ? "N" : "S", fabs(G.sel_lon), G.sel_lon >= 0 ? "E" : "W");
     if (G.elev_ok && n > 0) snprintf(co + n, sizeof(co) - (size_t)n, "  ·  %.0f m", (double)G.elev);
     GuiText ct = { 11.0f * s * 1.2f, GW_MEDIUM, white(a * e * 0.7f), GUI_LEFT, th->tracking_caps * 0.6f, true, true, 0 };
-    gd_text(&ct, x + half + 10.0f * s, y + half + 14.0f * s - gd_line_height(ct.size), co);
+    // Right of the square, or left of it when that would run under the details panel; with room on
+    // neither side (a big square on a small screen) it ends at the gap's edge. The labels stay in the
+    // gap between the panels.
+    float tw = fmaxf(gd_text_width(&nt, G.sel_place), gd_text_width(&ct, co));
+    float tx = x + half + 10.0f * s, right = G.clip.x + G.clip.w;
+    if (G.clip.w > 0 && tx + tw > right) {
+        if (x - half - 10.0f * s - tw >= G.clip.x) {
+            tx = x - half - 10.0f * s;
+            nt.align = ct.align = GUI_RIGHT;
+        } else tx = fmaxf(G.clip.x, right - tw);
+    }
+    gd_text(&nt, tx, y - half - 4.0f * s - gd_line_height(nt.size), G.sel_place);
+    gd_text(&ct, tx, y + half + 14.0f * s - gd_line_height(ct.size), co);
     (void)now;
 }
 
@@ -947,6 +1060,10 @@ static void draw_unit_label(const Proj *P, const Region *reg, float lk) {
         if (z <= 0) return;
         const char *text = G.cur.radius > reg->ov_r * 2.2 ? (reg->unit_name[0] ? reg->unit_name : L->name) : L->code;
         GuiText t = { 13.0f * P->s * 1.2f, GW_SEMIBOLD, white(lk), GUI_CENTER, 0.35f, true, true, 0 };
+        if (G.clip.w > 0) {   // inside the gap between the panels (a unit near the map list keeps its whole name)
+            float hw = gd_text_width(&t, text) * 0.5f + 8.0f * P->s;
+            if (hw * 2.0f < G.clip.w) x = DG_CLAMP(x, G.clip.x + hw, G.clip.x + G.clip.w - hw);
+        }
         gd_text(&t, x, y - gd_line_height(t.size) * 0.5f, text);
         return;
     }
@@ -955,6 +1072,7 @@ static void draw_unit_label(const Proj *P, const Region *reg, float lk) {
 void globe_draw(float cx, float cy, GuiRect input, float alpha) {
     PROF_BEGIN("ui:globe");
     double t_start = platform_time();
+    G.release_req = false;   // shown again: keep it
     load_all();
     G.frame++;
     float sw = gui_w(), sh = gui_h();
@@ -968,8 +1086,10 @@ void globe_draw(float cx, float cy, GuiRect input, float alpha) {
     }
     if (!G.target) { PROF_END(); return; }
     double now = gui_time();
+    G.clip = input;
     update_drag(input, now);
     update_camera(now);
+    if (G.has_sel && G.elev_pending) G.elev_ok = height_at(G.sel_lon, G.sel_lat, &G.elev, &G.elev_pending);   // a height grid finished decoding
     float s = sh / 900.0f;
     const Region *reg = G.has_sel && G.sel_region >= 0 ? &G.regions[G.sel_region] : NULL;
     double breathe = G.phase == 2 ? 1.0 + 0.004 * sin(now / 0.9) : 1.0;
@@ -1033,6 +1153,7 @@ void globe_draw(float cx, float cy, GuiRect input, float alpha) {
     draw_lock(&P, (float)now);
     G.last_verts = gd_layer_verts(GL_OFFSCREEN);
     gd_offscreen_end();
+    prefetch_destination(&P, cx, cy, G.cv_texture ? G.cv_texture->f : 0.55f);
     service_loads();
     // On screen: the offscreen image (the panels drawn after it blur it).
     gd_alpha_push(alpha);
@@ -1057,9 +1178,9 @@ static void cmd_dump(int argc, const char **argv) {
     (void)argc;
     (void)argv;
     int loaded = 0;
-    for (int i = 0; i < MAX_TILE_SLOTS; i++) loaded += G.slots[i].entry >= 0;
-    log_info("mm_globe_dump: ok %d phase %s map %s lon %.4f lat %.4f radius %.1f hl %.2f pin %.2f tiles %d/%d levels 0..%d layers %d elev %.0f",
-             G.ok ? 1 : 0, globe_phase_text(), G.sel_map, G.cur.lon, G.cur.lat, G.cur.radius, (double)G.hl, (double)G.pin, loaded, G.tile_count, G.max_level,
+    for (int i = 0; i < MAX_TILE_SLOTS && G.loaded; i++) loaded += G.slots[i].entry >= 0;
+    log_info("mm_globe_dump: ok %d phase %s map %s lon %.4f lat %.4f radius %.1f hl %.2f pin %.2f tiles %d/%d (%d decoding) levels 0..%d layers %d elev %.0f",
+             G.ok ? 1 : 0, globe_phase_text(), G.sel_map, G.cur.lon, G.cur.lat, G.cur.radius, (double)G.hl, (double)G.pin, loaded, G.tile_count, G.inflight, G.max_level,
              G.layer_count, G.elev_ok ? (double)G.elev : -99999.0);
     const Region *r = G.sel_region >= 0 ? &G.regions[G.sel_region] : NULL;
     if (r)
@@ -1080,23 +1201,43 @@ void globe_register(void) {
     cmd_register("mm_globe_finish", cmd_finish, "Maps tab globe: jump to the end of the current flight (scripted screenshots)");
 }
 
-void globe_shutdown(void) {
+// Everything the globe holds goes: up to 160 tile textures (~56 MB), the screen-sized target, the
+// vectors (15 MB) and the decoded height grids (the world's alone 16 MB). The cvars stay; the next
+// globe_draw / globe_select loads it again. Decodes still in flight drop their results (gen).
+static void free_all(void) {
+    if (!G.loaded && !G.target) return;
     for (int i = 0; i < MAX_TILE_SLOTS; i++)
         if (G.slots[i].entry >= 0) render_texture_destroy(G.slots[i].tex);
     if (G.target) render_ui3d_target_destroy(G.target);
     for (int i = 0; i < G.height_count; i++) stbi_image_free(G.heights[i].px);
     free(G.tiles);
     free(G.tile_slot);
+    free(G.tile_loading);
     free(G.hash);
     free(G.vec);
     bool reg = G.registered;
+    u32 gen = G.gen + 1;
     Cvar *c[5] = { G.cv_rotate, G.cv_texture, G.cv_lines, G.cv_travel, G.cv_detail };
     memset(&G, 0, sizeof(G));
     G.registered = reg;
+    G.gen = gen;
     G.cv_rotate = c[0];
     G.cv_texture = c[1];
     G.cv_lines = c[2];
     G.cv_travel = c[3];
     G.cv_detail = c[4];
     G.sel_region = -1;
+    log_info("globe: released");
 }
+
+// The release waits for the next frame's globe_tick: a session can start from the Maps tab itself
+// (a story map's Play), after the globe was drawn this frame, and its textures are in this frame's
+// UI lists. Drawn again before that (the menu is back), it stays.
+void globe_release(void) { G.release_req = G.loaded || G.target; }
+
+void globe_tick(void) {
+    if (G.release_req) free_all();
+    G.release_req = false;
+}
+
+void globe_shutdown(void) { free_all(); }

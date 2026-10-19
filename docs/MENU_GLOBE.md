@@ -70,11 +70,24 @@ values.
   - Each tile is a lon / lat grid mesh (4..32 cells a side) with the limb darkening
     (0.45 + 0.55 z^0.6) and the texture opacity (`mm_globe_texture`, 0.55) in its vertex colours.
     Vertices behind the limb are pushed onto it.
-  - Tiles load 3 per frame, coarsest first. Each is decoded (stb_image), box-filtered into 10
-    mips and uploaded as an R8 texture whose view swizzles to (r, r, r, 1)
-    (`render_texture_create_gray`, ~350 KB).
+  - Tiles stream on the jobs, coarsest first: up to 4 new decodes a frame, at most 8 in flight.
+    A worker reads the JPEG from the pack, decodes it (stb_image) and box-filters it into 10 mips;
+    the main thread only uploads it as an R8 texture whose view swizzles to (r, r, r, 1)
+    (`render_texture_create_gray`, ~350 KB, from `jobs_pump_completions`). Nothing of a tile is
+    read or decoded on the main thread, so a frame never waits on the disk.
+  - While flying, the destination's tiles are asked for too (after the visible ones), so the
+    place is sharp when the camera gets there.
+  - The height grids (`height_*.png`, the world's 4096 x 2048) decode on the jobs the first time
+    a place inside them is selected; the lock's height shows once its grid is in.
   - The cache holds up to 160 tiles. It evicts the least recently drawn, never one drawn in the
     last 3 frames, and never levels 0..1 (the fallback).
+  - When the main menu closes (a map starts: `mainmenu_session_started`), `globe_release` frees
+    everything on the next frame (`globe_tick`): the tile textures (up to ~56 MB), the offscreen
+    target, the vectors (15 MB) and the height grids (~16 MB for the world's). The cvars stay; the
+    Maps tab loads it again when it is next shown. `globe_shutdown` frees it at exit.
+- **Labels:** the lock's name / coordinates and the unit's name stay inside the gap between the
+  panels (the `spacer` node): the lock label flips to the left of the square when it would run
+  under the details panel, the unit label is clamped.
 - **Lines:** `gd_polyline` with mitred joins and a 1 px feather.
   - Each layer has levels of detail by pixels per degree. A level is simplified to ~0.6 px at the
     densest zoom it serves, and the globe picks the first level whose limit is at least the
@@ -206,6 +219,8 @@ Commands:
   (`deadground --test --menu --nosound --log mm_globe.log --script tools/tests/mm_globe.cfg`)
   takes these screenshots, each with an `mm_globe_dump` line: the idle globe, the US overview
   mid-flight, the New York, Constanța and Hârșova locks. They were checked on Linux (lavapipe).
-- **Cost** (`mm_globe_dump` ms, CPU, tile loads included): about 8..9 ms at a country overview
+- **Cost** (`mm_globe_dump` ms, CPU of `globe_draw`): about 8..9 ms at a country overview
   (the Romanian communes or the US states, ~140..200 k offscreen vertices), 1.5..3 ms locked on a
-  place. The offscreen layer holds 393 k vertices and 1 M indices.
+  place. The tile and height decodes run on the jobs (`mm_globe_dump` shows the decodes in
+  flight), so the frame no longer pays the disk read and the JPEG decode (a contended HDD put
+  100+ ms of `wait:io` in one frame when they ran on the main thread). The offscreen layer holds 393 k vertices and 1 M indices.

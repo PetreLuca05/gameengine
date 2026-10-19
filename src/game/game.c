@@ -1043,6 +1043,7 @@ static void cmd_give(int argc, const char **argv) {
     if (argc < 2 || G->mode != GM_HOST) { log_info("usage: give <item> [count] [player slot] (host only); give_list [filter] lists the item ids, give_all / give_ammo"); return; }
     u16 item = item_find(&G->items, argv[1]);
     if (!item) { log_warn("give: unknown item '%s'", argv[1]); return; }
+    if (G->items.items[item].builtin) { log_info("give: %s is built in (every player has one; no grid item)", argv[1]); return; }
     int count = argc > 2 ? atoi(argv[2]) : (G->items.items[item].max_stack > 1 ? G->items.items[item].max_stack : 1);
     const WeaponDef *wd = item_weapon(&G->items, item);
     int target = argc > 3 ? atoi(argv[3]) : G->local_slot;
@@ -1067,10 +1068,28 @@ static void cmd_give_list(int argc, const char **argv) {
     log_info("give_list: %d items (give <id> [count])", n);
 }
 
-// give_all [player slot]: one of every item (a full stack of stackables) while there is room: the
-// containers and wearables first (they bring the room), then the rest, ammo last (else the stacks fill
-// the pockets before a backpack arrives); never the built-in phone. give_ammo [player slot]: a full
-// stack of every ammo type.
+// give_all [player slot]: one of every item (a full stack of stackables) while there is room, in an
+// order that ends with a usable loadout: the worn gear first, the roomiest container of each slot
+// (a smaller one whose slot is taken is skipped: a sling bag would only fill the hiking pack), then
+// the weapons, each with a stack of its ammo (the guns take the first hotbar slots), then the
+// consumables and throwables, then the rest (materials, attachments, cases, the other ammo). Never a
+// key or the built-in phone. give_ammo [player slot]: a full stack of every ammo type.
+static int give_one(Player *p, u16 item, int *given, int *full) {
+    const ItemDef *d = &G->items.items[item];
+    int count = d->max_stack > 1 ? d->max_stack : 1;
+    const WeaponDef *wd = item_weapon(&G->items, item);
+    int left = inv_add(&p->inv, &G->items, item, count, wd ? (i16)wd->mag_size : 0);
+    if (left < count) (*given)++;
+    else (*full)++;
+    return count - left;
+}
+
+static int capacity_cmp(const void *a, const void *b) {
+    const InvContainerDef *ca = item_container(&G->items, *(const u16 *)a), *cb = item_container(&G->items, *(const u16 *)b);
+    int ka = ca ? ca->capacity : 0, kb = cb ? cb->capacity : 0;
+    return ka != kb ? kb - ka : (int)*(const u16 *)a - (int)*(const u16 *)b;
+}
+
 static void give_kinds(int argc, const char **argv, bool ammo_only) {
     World *w = G->world;
     if (!w || G->mode != GM_HOST) { log_info("%s: host only", ammo_only ? "give_ammo" : "give_all"); return; }
@@ -1078,18 +1097,50 @@ static void give_kinds(int argc, const char **argv, bool ammo_only) {
     if (target < 0 || target >= MAX_PLAYERS || !w->players[target].active) { log_warn("give: no player in slot %d", target); return; }
     Player *p = &w->players[target];
     int given = 0, full = 0;
-    for (int pass = 0; pass < 3; pass++)
+    static bool done[MAX_ITEM_DEFS];
+    memset(done, 0, sizeof(done));
+    for (int i = 1; i < G->items.item_count; i++) {
+        const ItemDef *d = &G->items.items[i];
+        if (ammo_only ? d->kind != ITEM_AMMO : (d->kind == ITEM_KEY || d->builtin)) done[i] = true;
+    }
+    if (!ammo_only) {
+        // 1. Worn gear, the roomiest first; skipped when its slot is taken already.
+        static u16 gear[MAX_ITEM_DEFS];
+        int gn = 0;
         for (int i = 1; i < G->items.item_count; i++) {
             const ItemDef *d = &G->items.items[i];
-            if (ammo_only ? d->kind != ITEM_AMMO : (d->kind == ITEM_KEY || d->builtin)) continue;
-            bool gear = d->container >= 0 || (d->equip_slot != EQ_NONE && d->kind != ITEM_WEAPON);
-            if ((pass == 0) != gear || (pass == 2) != (d->kind == ITEM_AMMO && !gear)) continue;
-            int count = d->max_stack > 1 ? d->max_stack : 1;
-            const WeaponDef *wd = item_weapon(&G->items, (u16)i);
-            int left = inv_add(&p->inv, &G->items, (u16)i, count, wd ? (i16)wd->mag_size : 0);
-            if (left < count) given++;
-            else full++;
+            if (!done[i] && d->kind != ITEM_WEAPON && d->equip_slot != EQ_NONE) gear[gn++] = (u16)i;
         }
+        qsort(gear, (size_t)gn, sizeof(gear[0]), capacity_cmp);
+        for (int k = 0; k < gn; k++) {
+            done[gear[k]] = true;
+            if (inv_equipped(&p->inv.t, G->items.items[gear[k]].equip_slot)) continue;
+            give_one(p, gear[k], &given, &full);
+        }
+        // 2. Weapons, each with its ammo.
+        for (int i = 1; i < G->items.item_count; i++) {
+            if (done[i] || G->items.items[i].kind != ITEM_WEAPON) continue;
+            done[i] = true;
+            if (!give_one(p, (u16)i, &given, &full)) continue;
+            const WeaponDef *wd = item_weapon(&G->items, (u16)i);
+            if (wd && wd->ammo_item && wd->ammo_item < G->items.item_count && !done[wd->ammo_item]) {
+                done[wd->ammo_item] = true;
+                give_one(p, wd->ammo_item, &given, &full);
+            }
+        }
+        // 3. Consumables and throwables.
+        for (int i = 1; i < G->items.item_count; i++) {
+            ItemKind k = G->items.items[i].kind;
+            if (done[i] || (k != ITEM_CONSUMABLE && k != ITEM_THROWABLE)) continue;
+            done[i] = true;
+            give_one(p, (u16)i, &given, &full);
+        }
+    }
+    // 4. The rest (give_ammo: every ammo type).
+    for (int i = 1; i < G->items.item_count; i++) {
+        if (done[i]) continue;
+        give_one(p, (u16)i, &given, &full);
+    }
     p->inv.revision++;
     log_info("%s: %d items given%s", ammo_only ? "give_ammo" : "give_all", given, full ? " (inventory full for the rest)" : "");
 }

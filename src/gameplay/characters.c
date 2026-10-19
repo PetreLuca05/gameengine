@@ -2658,11 +2658,17 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
                 pulled += d;
             }
             CG->fp_reach_pull = pulled;
+            // Only a sustained shortfall is worth a warning: the frame a weapon is drawn or ADS is left
+            // after a shot pulls 30..65 mm for a frame or two and nothing of it shows.
             static u32 warned_item;
+            static int pull_frames;
+            static float pull_max;
             u32 key = (u32)(uintptr_t)k;
-            if (pulled > 0.03f && warned_item != key) {
+            pull_frames = pulled > 0.03f ? pull_frames + 1 : 0;
+            pull_max = pull_frames ? fmaxf(pull_max, pulled) : 0.0f;
+            if (pull_frames >= 12 && warned_item != key) {
                 warned_item = key;
-                log_warn("first person: grip_l out of reach this frame, hold point pulled %.0f mm towards the shoulder", pulled * 1000.0f);
+                log_warn("first person: grip_l out of reach for %d frames, hold point pulled up to %.0f mm towards the shoulder", pull_frames, pull_max * 1000.0f);
             }
         }
         // Fire animation layer 3: the hands trail the gun's one-tick kick and catch up in 1-2 ticks.

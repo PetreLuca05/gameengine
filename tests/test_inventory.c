@@ -3,11 +3,15 @@
 // footprints, folding, the secure container on death, the corpse tree, the wire format, a fuzz of
 // random intents (the tree invariants always hold, nothing is created or lost), and two clients
 // looting one crate through a 150 ms host round trip with conflicting moves (no duplication or
-// loss, every copy converges). Run from the build output directory (data/, assets/).
+// loss, every copy converges); binds of what comes over inside a container (a corpse's rig, a dropped
+// rig picked up again); every stocked world container's loot fits its root (the arguments: level and
+// building-kit prefab files). Run from the build output directory (data/, assets/).
 #include "gameplay/inventory.h"
 #include "gameplay/inventory/inv_wire.h"
 #include "gameplay/attachments.h"
 #include "core/engine.h"
+#include "core/platform.h"
+#include "cJSON.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -836,6 +840,36 @@ static void test_loot_binds(void) {
     CHECK(tree_ok(&inv.t, "loot binds"), "invariants");
 }
 
+// The pickup's tree of a dropped container (entities.c spawn_pickup_tree): the container item's grid
+// is its root, its contents under it as they lay.
+static void pickup_tree(const InvTree *dropped, u16 top, InvTree *pk) {
+    inv_tree_init(pk, item_def(&g_db, inv_get_c(dropped, top)->s.item)->container);
+    int idx[INV_MAX_ITEMS];
+    int n = inv_subtree(dropped, top, idx, INV_MAX_ITEMS);
+    u16 ou[INV_MAX_ITEMS], nu[INV_MAX_ITEMS];
+    for (int k = 1; k < n; k++) {
+        const InvItem *src = &dropped->items[idx[k]];
+        InvItem *dst = inv_alloc(pk, &g_db, &src->s);
+        dst->flags = src->flags, dst->loc = src->loc, dst->x = src->x, dst->y = src->y, dst->parent = 0;
+        for (int j = 1; j < k; j++) if (ou[j] == src->parent) dst->parent = nu[j];
+        ou[k] = src->uid, nu[k] = dst->uid;
+    }
+}
+
+// A new instance of id x count inside container uid parent of t, at its first free space.
+static u16 put_in(InvTree *t, u16 parent, const char *id, int count) {
+    InvSlot s = { I(id), (u16)count, 0, { 0 }, 0 };
+    InvItem probe;
+    memset(&probe, 0, sizeof(probe));
+    probe.s = s;
+    InvPlace p;
+    if (!inv_find_space(t, &g_db, &probe, parent, &p)) { CHECK(false, "no room for %s", id); return 0; }
+    InvItem *it = inv_alloc(t, &g_db, &s);
+    it->parent = p.parent, it->loc = p.loc, it->x = p.x, it->y = p.y;
+    if (p.rot) it->flags |= INVF_ROT;
+    return it->uid;
+}
+
 // A discarded container keeps everything in it (more entries than the old 32-drop limit) as one
 // subtree, and picked up again (the pickup's tree) it comes back with the same layout.
 static void test_container_drop(void) {
@@ -879,19 +913,8 @@ static void test_container_drop(void) {
     for (int i = 0; i < INV_MAX_ITEMS; i++)
         if (inv_alive(&fx.dropped.items[i]) && !fx.dropped.items[i].parent) tops++, top = fx.dropped.items[i].uid;
     CHECK(tops == 1 && inv_get(&fx.dropped, top)->s.item == I("backpack_hiking"), "one pickup: the backpack, its contents under it");
-    // The pickup's tree (entities.c spawn_pickup_tree): the backpack's grid is its root.
     InvTree pk;
-    inv_tree_init(&pk, item_def(&g_db, I("backpack_hiking"))->container);
-    int idx[INV_MAX_ITEMS];
-    int n = inv_subtree(&fx.dropped, top, idx, INV_MAX_ITEMS);
-    u16 ou[INV_MAX_ITEMS], nu[INV_MAX_ITEMS];
-    for (int k = 1; k < n; k++) {
-        const InvItem *src = &fx.dropped.items[idx[k]];
-        InvItem *dst = inv_alloc(&pk, &g_db, &src->s);
-        dst->flags = src->flags, dst->loc = src->loc, dst->x = src->x, dst->y = src->y, dst->parent = 0;
-        for (int j = 1; j < k; j++) if (ou[j] == src->parent) dst->parent = nu[j];
-        ou[k] = src->uid, nu[k] = dst->uid;
-    }
+    pickup_tree(&fx.dropped, top, &pk);
     CHECK(tree_ok(&pk, "pickup tree"), "the pickup's tree is a valid backpack grid");
     Inventory other;
     fresh(&other);
@@ -934,6 +957,105 @@ static void test_take_all_contents(void) {
     CHECK(inv_get(&corpse, cbu) && inv_live_count(&corpse) == 1, "the pack itself stays, empty");
 }
 
+// Binds of a container's contents: a fresh player taking all from a corpse wearing a rig gets the
+// rifle and the medkits / grenades / bandages in the rig bound (not only the rig); the rig dropped
+// (discarded) and picked up again comes back with its consumables bound.
+static void test_container_binds(void) {
+    static const char *meds[] = { "medkit", "frag_grenade", "bandage" };
+    Inventory inv;
+    fresh(&inv);
+    InvTree corpse;
+    inv_tree_init(&corpse, container_find(&g_db, "body"));
+    InvSlot rs = { I("rifle"), 1, 0, { 0 }, 0 };
+    attach_defaults(item_weapon(&g_db, rs.item), rs.att);
+    InvItem *rf = inv_alloc(&corpse, &g_db, &rs);
+    rf->loc = INV_LOC_EQUIP + EQ_PRIMARY;
+    InvSlot gs = { I("rig_chest"), 1, 0, { 0 }, 0 };
+    InvItem *rig = inv_alloc(&corpse, &g_db, &gs);
+    rig->loc = INV_LOC_EQUIP + EQ_RIG;
+    u16 ru = rig->uid;
+    put_in(&corpse, ru, "medkit", 2);
+    put_in(&corpse, ru, "frag_grenade", 2);
+    put_in(&corpse, ru, "bandage", 3);
+    CHECK(tree_ok(&corpse, "corpse rig"), "a corpse wearing a rifle and a stocked rig");
+    CHECK(apply(&inv, &corpse, intent(II_TAKE_ALL, INV_SIDE_LOOT, 0, INV_SIDE_SELF, 0, 0, 0, 0, 0)) == IIR_OK, "take all from the corpse");
+    CHECK(inv_live_count(&corpse) == 0 && inv_equipped(&inv.t, EQ_RIG), "the rig came over whole, worn");
+    CHECK(inv_hot_find(&inv, I("rifle")) >= 0, "the rifle is bound");
+    for (int i = 0; i < 3; i++) CHECK(inv_hot_find(&inv, I(meds[i])) >= 0, "the %s in the rig is bound", meds[i]);
+    CHECK(inv_hot_find(&inv, I("rig_chest")) < 0, "the worn rig itself never binds");
+    // Drop the rig (G / Discard) and pick it up again: the consumables in it are bound again.
+    InvCtx c = inv_ctx(&inv, &g_db, NULL);
+    InvEffect fx;
+    InvIntent d = intent(II_DISCARD, INV_SIDE_SELF, inv_equipped(&inv.t, EQ_RIG)->uid, 0, 0, 0, 0, 0, 0);
+    CHECK(inv_intent_apply(&c, &d, &fx) == IIR_OK, "discard the rig");
+    for (int i = 0; i < 3; i++) CHECK(inv_hot_find(&inv, I(meds[i])) < 0, "%s left with the rig: unbound", meds[i]);
+    u16 top = 0;
+    for (int i = 0; i < INV_MAX_ITEMS; i++) if (inv_alive(&fx.dropped.items[i]) && !fx.dropped.items[i].parent) top = fx.dropped.items[i].uid;
+    InvTree pk;
+    pickup_tree(&fx.dropped, top, &pk);
+    InvSlot top_s = inv_get(&fx.dropped, top)->s;
+    CHECK(inv_add_with(&inv, &g_db, &top_s, &pk) == 0, "the rig picked up whole");
+    for (int i = 0; i < 3; i++) CHECK(inv_hot_find(&inv, I(meds[i])) >= 0, "the %s in the picked-up rig is bound again", meds[i]);
+    CHECK(inv_hot_find(&inv, I("rifle")) >= 0, "the rifle keeps its bind");
+    for (int k = 0; k < INV_HOTBAR; k++) CHECK(!inv.quick[k] || inv_get(&inv.t, inv.quick[k]), "binds stay valid");
+    CHECK(tree_ok(&inv.t, "rig binds"), "invariants");
+}
+
+// Every stocked world container (level "container" entities, building-kit furniture with "loot")
+// holds its loot: the root it names ("grid"; furniture "cabinet", a level container "crate") takes
+// every entry the way the loader adds it (container_add: loaded weapons, default attachments). A
+// 3x3 backpack in three 4x2 drawers was silently dropped by the loader. Files: the arguments
+// (CMake passes data/levels/*.json and the building kit's prefabs).
+static int g_loot_n;
+static void loot_walk(const cJSON *j, const char *file, bool kit) {
+    if (cJSON_IsArray(j) || cJSON_IsObject(j)) {
+        const cJSON *loot = cJSON_IsObject(j) ? cJSON_GetObjectItemCaseSensitive(j, "loot") : NULL;
+        if (cJSON_IsArray(loot)) {
+            const char *grid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "grid"));
+            bool piece = cJSON_GetObjectItemCaseSensitive(j, "piece") != NULL;
+            const char *root_id = grid ? grid : (kit || piece) ? "cabinet" : "crate";
+            const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "name"));
+            int root = container_find(&g_db, root_id);
+            CHECK(root >= 0, "%s: %s: unknown root '%s'", file, name ? name : "?", root_id);
+            InvTree t;
+            inv_tree_init(&t, root >= 0 ? root : 0);
+            const cJSON *e;
+            cJSON_ArrayForEach(e, loot) {
+                if (!cJSON_IsArray(e)) continue;
+                const char *id = cJSON_GetStringValue(cJSON_GetArrayItem(e, 0));
+                u16 item = id ? item_find(&g_db, id) : 0;
+                CHECK(item, "%s: %s: unknown loot item '%s'", file, name ? name : "?", id ? id : "?");
+                if (!item) continue;
+                int count = cJSON_GetArraySize(e) > 1 ? cJSON_GetArrayItem(e, 1)->valueint : 1;
+                const WeaponDef *wd = item_weapon(&g_db, item);
+                InvSlot s = { item, (u16)count, wd ? (i16)wd->mag_size : 0, { 0 }, 0 };
+                attach_defaults(wd, s.att);
+                int left = inv_give_root(&t, &g_db, &s);
+                CHECK(left == 0, "%s: %s (%s): %d of %s x%d don't fit", file, name ? name : "?", root_id, left, id, count);
+            }
+            g_loot_n++;
+        }
+        const cJSON *c;
+        cJSON_ArrayForEach(c, j) loot_walk(c, file, kit);
+    }
+}
+
+static void test_world_loot(int argc, char **argv) {
+    for (int i = 1; i < argc; i++) {
+        char *buf = platform_read_file(argv[i], NULL);
+        CHECK(buf, "read %s", argv[i]);
+        if (!buf) continue;
+        cJSON *j = cJSON_Parse(buf);
+        free(buf);
+        CHECK(j, "parse %s", argv[i]);
+        if (!j) continue;
+        const char *base = strrchr(argv[i], '/');
+        loot_walk(j, base ? base + 1 : argv[i], strstr(argv[i], "prefabs") != NULL);
+        cJSON_Delete(j);
+    }
+    if (argc > 1) printf("world loot: %d stocked containers checked\n", g_loot_n);
+}
+
 // Mounted attachments weigh: a red dot moved onto the rifle still counts in the totals.
 static void test_attachment_weight(void) {
     Inventory inv;
@@ -957,7 +1079,7 @@ static void test_attachment_weight(void) {
     }
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     CHECK(items_load(&g_db, "data/items.json", "data/weapons"), "items load");
     test_defs();
     test_fit_matrix();
@@ -974,6 +1096,8 @@ int main(void) {
     test_loot_binds();
     test_container_drop();
     test_take_all_contents();
+    test_container_binds();
+    test_world_loot(argc, argv);
     test_attachment_weight();
     test_fuzz();
     test_two_clients();

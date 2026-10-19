@@ -2507,6 +2507,7 @@
    ],
    "yaw": 90,
    "name": "coat_closet",
+   "grid": "wardrobe",
    "loot": [
     [
      "backpack",
@@ -2677,6 +2678,7 @@
    ],
    "yaw": -90,
    "name": "teen_wardrobe",
+   "grid": "wardrobe",
    "loot": [
     [
      "energy_bar",

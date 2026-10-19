@@ -272,19 +272,28 @@ static bool cam_sphere_cast(void *ctx, vec3 from, vec3 delta, float radius, floa
 // The inventory showcase camera (docs/INVENTORY.md "Screen"): 2.7 m in front of the chest, facing the
 // player. Collides: when a crate, a wall or a car is in the way it swings 30 / 60 / 90 deg to either
 // side for a clear view (facing a wall: along it), else takes the freest direction, pulled in to its
-// free distance (never closer than 0.4 m). Pulls in at once, eases back out (no pop when the blocker
-// is gone). open: the screen just opened (snap).
+// free distance (never closer than 0.4 m). A direction is clear only when the hips and knees are in
+// view too (a waist-high crate in front hides the legs: casts at hip and knee height); a low blocker
+// alone never pulls the camera in (it looks over it). Pulls in at once, eases back out (no pop when
+// the blocker is gone). open: the screen just opened (snap).
 static void showcase_camera(PhysicsWorld *phys, vec3 chest, float body_yaw, bool open, float dt, RenderCamera *cam) {
     static float cur_off, cur_dist = 2.7f;
     const float want = 2.7f, radius = 0.18f, near = 0.4f;
     static const float offs[7] = { 0.0f, 0.5236f, -0.5236f, 1.0472f, -1.0472f, 1.5708f, -1.5708f };
-    float best_off = 0, best_d = -1;
+    static const float low[2] = { 0.35f, 0.68f };   // below the chest: the hips, the knees (radius 0.18: clear of the floor)
+    float best_off = 0, best_d = -1, best_score = -1;
     for (int k = 0; k < 7; k++) {
         vec3 dir = forward_from_yaw(body_yaw + offs[k]);
         float f = 1.0f;
         float d = cam_sphere_cast(phys, chest, v3_scale(dir, want), radius, &f) ? want * f : want;
-        if (d >= want * 0.98f) { best_off = offs[k], best_d = want; break; }   // clear: the first (straightest) wins
-        if (d > best_d + 0.05f) best_off = offs[k], best_d = d;
+        float dl = want;
+        for (int j = 0; j < 2; j++) {
+            f = 1.0f;
+            if (cam_sphere_cast(phys, v3_sub(chest, v3(0, low[j], 0)), v3_scale(dir, want), radius, &f)) dl = fminf(dl, want * f);
+        }
+        if (d >= want * 0.98f && dl >= want * 0.98f) { best_off = offs[k], best_d = want, best_score = want; break; }   // clear: the first (straightest) wins
+        float score = fminf(d, dl);
+        if (score > best_score + 0.05f) best_off = offs[k], best_d = d, best_score = score;
     }
     float target = best_d >= want ? want : fmaxf(near, best_d - 0.05f);
     if (open) cur_off = best_off, cur_dist = target;

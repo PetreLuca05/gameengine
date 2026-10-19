@@ -64,10 +64,14 @@ muzzle devices longer than 10 cm add a column, so a suppressor makes a 4×2 rifl
 `at` places the compartment in the panel (cells); compartments may be separate grids (rigs) or one
 big grid (backpacks). Root containers (what a tree *is*) live in `data/containers.json`: `body`
 (the player: 4 pocket grids of 1×1 plus the equipment slots; it must stay first: a zeroed tree's
-root is container 0), `crate` 6×4, `crate_small` 4×3, `cabinet` three 4×2 drawers, `trunk` 8×5,
-`fabricator` 4×2, `stash` 10×12. A level container picks its root with `"grid": "<id>"` (default
-`crate`; building-kit furniture `cabinet`); a corpse's tree is a `body` holding what the player
-carried; a car's trunk is a `trunk`.
+root is container 0), `crate` 6×4, `crate_small` 4×3, `cabinet` three 4×2 drawers, `wardrobe` a
+4×4 hanging compartment over a 4×2 drawer (it takes a 3×3 backpack), `trunk` 8×5, `fabricator` 4×2,
+`stash` 10×12. A level container picks its root with `"grid": "<id>"` (default `crate`;
+building-kit furniture `cabinet`); a corpse's tree is a `body` holding what the player carried; a
+car's trunk is a `trunk`. Loot that doesn't fit its root is logged (`level:` / `kit:` warnings),
+and `test_inventory` loads every stocked container of `data/levels/*.json` and the building kit's
+prefabs and fails when an entry doesn't fit (Chapter 1's coat closet held its only backpack in
+three 4×2 drawers, so it never spawned).
 
 **Nesting:** an item can't go into itself or its own contents; a container item can't go into a
 container whose capacity (cells) is not larger than its own (a backpack never holds a backpack of
@@ -129,8 +133,8 @@ typedef struct Inventory {
 | Attachments | mounting re-checks the weapon's new footprint where it lies (rejected with "No room") |
 | Quick move (Ctrl+click) | loot open: across (player → loot root, loot → player). Else to the next player container in the order `inv_quick_order` (`rig,backpack,pockets`) |
 | Pickup (`inv_add`) | merge into stacks, equip a weapon into a free matching slot, else first space in the quick order; weapons / consumables / throwables bind to a free hotbar slot |
-| Loot binds | the same bind for whatever comes over from a world container by any intent (take all, Ctrl+click, a drag onto an equipment slot or into a grid, a split): a looted rifle can be drawn at once |
-| Container pickup (`inv_add_with`) | a dropped backpack / rig / case is one pickup with its own tree (the item's grid as the root): picked up, it goes in by the pickup rule with every entry in its old place; all or nothing |
+| Loot binds | the same bind for whatever comes over from a world container by any intent (take all, Ctrl+click, a drag onto an equipment slot or into a grid, a split): a looted rifle can be drawn at once. A container that comes over whole brings its contents' binds too (a corpse's rig: its medkits, grenades and bandages), in tree order until the hotbar is full |
+| Container pickup (`inv_add_with`) | a dropped backpack / rig / case is one pickup with its own tree (the item's grid as the root): picked up, it goes in by the pickup rule with every entry in its old place, its weapons / consumables / throwables bound again to free hotbar slots; all or nothing |
 
 ## 3. Intents (`inv_intent.h`)
 
@@ -152,7 +156,7 @@ prediction, on the client. `ctx` holds the two sides: `INV_SIDE_SELF` (the playe
 | `II_FOLD` | weapon uid | fold / unfold the stock (footprint changes) |
 | `II_UNLOAD` | weapon uid | rounds back into an ammo stack |
 | `II_BIND` | src uid (0 = clear), `aux` = hotbar slot | hotbar bind (`IIR_NOT_USABLE` unless `inv_bindable`) |
-| `II_TAKE_ALL` | — | everything in the loot root that fits; then, container by container, the contents of what stayed behind (a corpse's pack when the player wears one of its size) |
+| `II_TAKE_ALL` | — | everything in the loot root that fits; then, container by container, the contents of what stayed behind (a corpse's pack when the player wears one of its size). What still stays is reported on the screen ("No room for N items") |
 | `II_SORT` | dst side / container, `aux` key | re-pack one container by type / weight / size (all or nothing) |
 
 Results: `IIR_OK`, `IIR_NOOP`, `IIR_INVALID`, `IIR_NO_ROOM`, `IIR_FILTER`, `IIR_NESTING`,
@@ -221,14 +225,18 @@ for discarded items, healing).
   `inv_showcase`), with the equipment slots around it (left: headwear, earpiece, face cover,
   eyewear, armband; right: body armour, rig, backpack, secure container; below: primary,
   secondary, holster, melee) and the Discard zone. No backdrop behind the player: each equipment
-  slot carries its own (the theme's `panel` colour, a brighter edge, the slot name in `text_dim`)
-  and the Discard zone is a solid pill with a danger-tinted edge, so empty ones read over a bright
-  sky or floor. The showcase camera collides: a crate, a wall or a car in the way swings it 30 / 60
-  / 90 degrees to either side (along a wall), else it pulls in to the free distance (at once; it
-  eases back out).
+  slot carries its own (the side panels' backdrop blur under the theme's `panel` colour, a brighter
+  edge, the slot name in `text_dim`) and the Discard zone is a near-opaque pill (alpha 0.95) with a
+  danger-tinted edge, so empty ones read over a bright sky or floor and nothing sharp of the world
+  (a label, a floor marker) shows through as if it were in them. The showcase camera collides: a
+  crate, a wall or a car in the way swings it 30 / 60 / 90 degrees to either side (along a wall),
+  else it pulls in to the free distance (at once; it eases back out). A direction is clear only
+  with the hips and knees in view too (casts at chest, hip and knee height: a waist-high crate in
+  front swings it); a low blocker alone never pulls it in.
 * **Right:** the hotbar: one row of six tiles, each one grid cell (the backpack's cell size,
-  aligned with the grids' cells), the cell image at its grid aspect, the key number and the rounds
-  / stack count. Under the row the binds are listed (key, name, magazine / reserve or the stack);
+  aligned with the grids' cells), the cell image at its grid aspect, the key number (`text_dim`)
+  and the rounds / stack count. Under the row the binds are listed (key, name, magazine / reserve or
+  the stack; the empty-slot hint once, a dash on the other empty rows);
   with a world container open, the loot grid (crate, corpse, trunk) takes that place and the rest
   of the column (it scrolls; a corpse shows its equipment tiles, its rig / backpack grids, then its
   pockets).
@@ -242,8 +250,9 @@ for discarded items, healing).
 on a different single item swaps; Ctrl+click quick-moves; Alt+click equips; Shift+drag splits
 (dialog); double-click opens a container in a window (nested windows, movable) or inspects an
 item; right-click: Use, Equip, Unequip, Open, Inspect, Fold / Unfold, Unload, Split, Bind to
-hotbar, Discard; dragging out of the panel or onto Discard drops it. Rejected drops shake the
-target and print the reason.
+hotbar (only what `inv_bindable` takes: never ammo, worn gear, keys or attachments), Discard;
+dragging out of the panel or onto Discard drops it. Rejected drops shake the target and print the
+reason.
 
 **Inspect window:** the 3D preview (`item_view`), stats, the attachment slots (drag attachments
 in / out); the footprint line updates live (`4×2 → 5×2`).
@@ -263,6 +272,8 @@ cycle panels (grids → equipment → hotbar → loot), A picks up / places, X r
 | Command | |
 |---|---|
 | `inv_give <item> [count]` | add through the pickup rule |
+| `give <item> [count] [slot]` | the same from the dev console (refuses the built-in phone) |
+| `give_all [slot]` | one of every item, ending with a usable loadout: the roomiest container per slot first (a smaller one whose slot is taken is skipped), then the weapons each with its ammo (the guns take the hotbar), then consumables / throwables, then the rest |
 | `inv_fill <container uid or slot name> <item> [count]` | fill a container's free cells |
 | `inv_dump` | log the tree (uid, def, parent, loc, cell, rot, count) |
 | `inv_intent <type> ...` | run an intent (tests) |
@@ -299,6 +310,8 @@ view renderer (one per frame). Rotated items draw the same image turned a quarte
 (`gd_image_rot90`); `bake_cells` also writes `<id>_r.png` for tools. The HUD hotbar and the
 attachment chips use the cell images too; the HUD ticks them every frame (`inv_cells_tick`, once
 per frame), so the hotbar shows them from the start and `bake_cells` runs without the screen open.
+The baked PNGs are decoded and resampled on the jobs (the first HUD frame after a client joins
+doesn't wait on them); until the atlas is up the hotbar and the grids draw the item icons.
 
 ## 9. Tests
 
@@ -315,7 +328,10 @@ per frame), so the hotbar shows them from the start and `bake_cells` runs withou
   built-in phone, the flashlight binds); loot binds by every path (quick move, take all, onto a
   slot, a drag) and a full hotbar; a discarded backpack of 34 entries (over the old 32-drop limit)
   as one drop subtree, picked up whole with the same layout, all or nothing; take all emptying a
-  corpse's pack that can't come over; mounted attachments in the weights.
+  corpse's pack that can't come over; mounted attachments in the weights; a corpse's rig taken
+  whole with its medkits / grenades / bandages bound, and the rig dropped and picked up again
+  binding them again; every stocked world container (levels, building-kit prefabs: the ctest
+  arguments) holding its loot in its root.
 * `test_inventory_ui`: the layout at 16:9 / 21:9 / 4:3 / 720p / 4K / 3440×1440 with and without
   loot (inside the safe area, no overlaps, usable cells, an 8-wide trunk fits); pad navigation
   reaches every target at 16:9 and 21:9; the drag-and-drop state machine for every source →

@@ -42,8 +42,10 @@ void holdpoint_style_defaults(HoldPointStyle *s, const char *name) {
         s->state[HP_SPRINT] = P(0.10f, -0.32f, 0.22f, -45, 10, 15);
         s->eye_relief = 0.34f;
     } else if (melee1) {
-        s->state[HP_HIP] = P(0.20f, -0.26f, 0.32f, 55, -10, 0);
-        s->state[HP_SPRINT] = P(0.20f, -0.32f, 0.24f, 30, -10, 0);
+        // The blade rises forward into the lower right of the view (as the bat's does): pitched 55
+        // deg it lay sideways out of the fist, out of the frame.
+        s->state[HP_HIP] = P(0.18f, -0.24f, 0.34f, 20, -5, -18);
+        s->state[HP_SPRINT] = P(0.20f, -0.32f, 0.24f, -5, -5, -18);
     } else if (melee2) {
         s->state[HP_HIP] = P(0.16f, -0.25f, 0.36f, 25, 0, -12);
         s->state[HP_SPRINT] = P(0.16f, -0.30f, 0.24f, 10, 8, -15);

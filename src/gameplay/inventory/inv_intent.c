@@ -18,7 +18,15 @@ typedef struct Work {
     int last_side;
     u16 arrived[INV_MAX_ITEMS];   // self uids that came over from the loot side (bound on commit, like a pickup)
     int arrived_n;
+    bool hand_arrives;            // a pickup with contents (inv_give_with): what comes out of the hand binds too
 } Work;
+
+// Records a self uid that came over (a world container's item, a picked-up container's contents):
+// bound on commit by the pickup rule (finish).
+static void arrive(Work *W, int s, int d, u16 uid) {
+    if (d != INV_SIDE_SELF || !(s == INV_SIDE_LOOT || (s == SIDE_HAND && W->hand_arrives))) return;
+    if (W->arrived_n < INV_MAX_ITEMS) W->arrived[W->arrived_n++] = uid;
+}
 
 static InvTree g_scratch[WORK_SIDES];
 
@@ -104,7 +112,8 @@ static u16 transfer(Work *W, int s, u16 uid, int d, InvPlace p) {
     for (int k = 0; k < n; k++) memset(&S->items[idx[k]], 0, sizeof(InvItem));
     W->last_uid = new_uid[0];
     W->last_side = d;
-    if (s == INV_SIDE_LOOT && d == INV_SIDE_SELF && W->arrived_n < INV_MAX_ITEMS) W->arrived[W->arrived_n++] = new_uid[0];
+    // The whole subtree arrives: a corpse's rig brings its medkits / grenades bound, not only the rig.
+    for (int k = 0; k < n; k++) arrive(W, s, d, new_uid[k]);
     return new_uid[0];
 }
 
@@ -120,7 +129,7 @@ static u16 place_part(Work *W, int s, InvItem *a, int d, InvPlace p, int n) {
     a->s.count = (u16)(a->s.count - n);   // n < a's count (callers): a stays alive
     W->last_uid = it->uid;
     W->last_side = d;
-    if (s == INV_SIDE_LOOT && d == INV_SIDE_SELF && W->arrived_n < INV_MAX_ITEMS) W->arrived[W->arrived_n++] = it->uid;
+    arrive(W, s, d, it->uid);
     return it->uid;
 }
 
@@ -670,8 +679,9 @@ static void finish(Work *W) {
     for (int i = 0; i < INV_SIDES; i++) if (W->t[i]) inv_normalize(W->t[i], W->db);
     for (int k = 0; k < W->quick_n; k++)
         if (W->quick[k] && (!W->t[INV_SIDE_SELF] || !inv_get(W->t[INV_SIDE_SELF], W->quick[k]))) W->quick[k] = 0;
-    // Weapons / consumables / throwables taken from a world container bind like a pickup (after the
-    // stale binds cleared: a swap's outgoing item frees its slot first).
+    // Weapons / consumables / throwables taken from a world container (a container's contents with it)
+    // or picked up inside a dropped container bind like a pickup, in tree order until the hotbar is
+    // full (after the stale binds cleared: a swap's outgoing item frees its slot first).
     for (int k = 0; k < W->arrived_n; k++) auto_bind(W, W->arrived[k]);
 }
 
@@ -782,9 +792,9 @@ int inv_give_with(InvCtx *ctx, const InvSlot *s, const InvTree *contents) {
         h->parent = np;
     }
     W.last_uid = 0;
+    W.hand_arrives = true;   // the container and every bindable entry in it bind (a dropped rig's medkits come back bound)
     int r = auto_into_self(&W, SIDE_HAND, tu, true);
     if (r != IIR_OK || inv_get(H, tu)) return s->count;   // nothing committed
-    if (W.last_side == INV_SIDE_SELF) auto_bind(&W, W.last_uid);
     commit(&W, ctx);
     return 0;
 }

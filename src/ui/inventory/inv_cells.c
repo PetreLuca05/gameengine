@@ -4,11 +4,14 @@
 // live bake through the UI item view renderer (one per frame). Baked PNGs are square and
 // anamorphic: the item framed at its grid aspect, stretched to the square (the loader squeezes
 // it back), plus <id>_r.png, the same item turned a quarter (rotated items draw the image turned
-// with gd_image_rot90, so the variant is for tools and the reference sheet).
+// with gd_image_rot90, so the variant is for tools and the reference sheet). The baked PNGs are
+// decoded and resampled on the jobs (the first HUD frame, right after a client joins, doesn't wait
+// on 66 PNG decodes); until then the hotbar and the grids draw the item icons.
 #include "inv_screen.h"
 #include "ui/item_view.h"
 #include "ui/gui/gui.h"
 #include "core/engine.h"
+#include "core/jobs.h"
 #include "core/log.h"
 #include "core/platform.h"
 #include "game/game.h"
@@ -27,7 +30,8 @@
 typedef enum CellSrc { CS_NONE, CS_FILE, CS_LIVE_PENDING, CS_LIVE } CellSrc;
 
 static struct {
-    bool ready;
+    bool ready, loading;       // loading: the atlas is decoding on the jobs
+    u32 gen;                   // a decode for an older item set is dropped
     int item_count;
     TextureId atlas;
     u8 src[MAX_ITEM_DEFS];
@@ -79,37 +83,77 @@ static bool load_png(const char *rel, int w, int h, u8 *dst, int stride) {
     return true;
 }
 
+// The atlas decode: every item's rect (packed on the main thread) and its PNG paths; the worker
+// fills px and ok, the main thread uploads it (cells_done).
+typedef struct CellJob {
+    u32 gen;
+    int item_count;
+    u8 *px;
+    char path[MAX_ITEM_DEFS][2][128];   // the "cell_image" override, then assets/ui/cells/<id>.png
+    u16 x[MAX_ITEM_DEFS], y[MAX_ITEM_DEFS], w[MAX_ITEM_DEFS], h[MAX_ITEM_DEFS];   // its rect in the atlas
+    bool placed[MAX_ITEM_DEFS], ok[MAX_ITEM_DEFS];
+} CellJob;
+
+static void cells_job(void *user) {
+    CellJob *j = (CellJob *)user;
+    for (int i = 1; i < j->item_count; i++) {
+        if (!j->placed[i]) continue;
+        u8 *dst = j->px + ((size_t)j->y[i] * ATLAS_W + j->x[i]) * 4;
+        j->ok[i] = (j->path[i][0][0] && load_png(j->path[i][0], j->w[i], j->h[i], dst, ATLAS_W * 4)) || load_png(j->path[i][1], j->w[i], j->h[i], dst, ATLAS_W * 4);
+    }
+}
+
+static void cells_done(void *user) {
+    CellJob *j = (CellJob *)user;
+    if (j->gen == C.gen) {
+        int files = 0;
+        for (int i = 1; i < j->item_count; i++) {
+            if (!j->placed[i]) continue;
+            C.src[i] = j->ok[i] ? CS_FILE : CS_LIVE_PENDING;
+            files += j->ok[i];
+        }
+        C.atlas = render_texture_create(ATLAS_W, ATLAS_H, j->px, false, true);
+        if (!C.live) C.live = render_ui3d_target_create(BAKE_PX, BAKE_PX);
+        C.loading = false;
+        C.ready = true;
+        log_info("ui: cell images %dx%d: %d baked, %d rendered live", ATLAS_W, ATLAS_H, files, j->item_count - 1 - files);
+    }
+    free(j->px);
+    free(j);
+}
+
 static void setup(void) {
     const ItemDB *d = db();
     if (!d) return;
     if (C.atlas) render_texture_destroy(C.atlas);
+    C.atlas = 0;
+    C.ready = false;
+    C.gen++;
     C.item_count = d->item_count;
+    CellJob *j = (CellJob *)calloc(1, sizeof(CellJob));
     u8 *px = (u8 *)calloc((size_t)ATLAS_W * ATLAS_H, 4);
+    if (!j || !px) { free(j); free(px); C.loading = false; return; }
+    j->gen = C.gen;
+    j->item_count = d->item_count;
+    j->px = px;
     // Shelf packing, tallest first is not needed at this fill (~40 %): file order keeps it stable.
-    int sx = 0, sy = 0, shelf = 0, files = 0;
+    int sx = 0, sy = 0, shelf = 0;
     for (int i = 1; i < d->item_count; i++) {
         const ItemDef *it = &d->items[i];
         int w = DG_MAX(1, (int)it->grid_w) * CELL_PX, h = DG_MAX(1, (int)it->grid_h) * CELL_PX;
         if (sx + w > ATLAS_W) { sx = 0; sy += shelf; shelf = 0; }
-        if (sy + h > ATLAS_H) { C.src[i] = CS_NONE; continue; }
+        C.src[i] = CS_NONE;
+        if (sy + h > ATLAS_H) continue;
         C.x[i] = (u16)sx; C.y[i] = (u16)sy; C.w[i] = (u16)w; C.h[i] = (u16)h;
         sx += w;
         shelf = DG_MAX(shelf, h);
-        u8 *dst = px + ((size_t)C.y[i] * ATLAS_W + C.x[i]) * 4;
-        char rel[256];
-        bool ok = it->cell_image[0] && load_png(it->cell_image, w, h, dst, ATLAS_W * 4);
-        if (!ok) {
-            snprintf(rel, sizeof(rel), "assets/ui/cells/%s.png", it->id);
-            ok = load_png(rel, w, h, dst, ATLAS_W * 4);
-        }
-        C.src[i] = ok ? CS_FILE : CS_LIVE_PENDING;
-        files += ok;
+        j->placed[i] = true;
+        j->x[i] = C.x[i], j->y[i] = C.y[i], j->w[i] = C.w[i], j->h[i] = C.h[i];
+        dg_strcpy(j->path[i][0], sizeof(j->path[i][0]), it->cell_image);
+        snprintf(j->path[i][1], sizeof(j->path[i][1]), "assets/ui/cells/%s.png", it->id);
     }
-    C.atlas = render_texture_create(ATLAS_W, ATLAS_H, px, false, true);
-    free(px);
-    if (!C.live) C.live = render_ui3d_target_create(BAKE_PX, BAKE_PX);
-    C.ready = true;
-    log_info("ui: cell images %dx%d: %d baked, %d rendered live", ATLAS_W, ATLAS_H, files, d->item_count - 1 - files);
+    C.loading = true;
+    jobs_submit(cells_job, cells_done, j, NULL);
 }
 
 // An item framed at its grid aspect (rot: turned a quarter, the aspect inverted) into target.
@@ -140,7 +184,7 @@ void inv_cells_tick(void) {
     last_frame = g_engine.frame_index;
     const ItemDB *d = db();
     if (!d) return;
-    if (!C.ready || d->item_count != C.item_count) setup();
+    if ((!C.ready && !C.loading) || d->item_count != C.item_count) setup();
     if (!C.ready) return;
     static RenderUi3dPart parts[ITEM_VIEW_MAX_PARTS];
     for (int i = 1; i < C.item_count && !C.baking; i++) {

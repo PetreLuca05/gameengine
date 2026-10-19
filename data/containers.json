@@ -6,6 +6,7 @@
     { "id": "crate", "compartments": [ { "w": 6, "h": 4 } ] },
     { "id": "crate_small", "compartments": [ { "w": 4, "h": 3 } ] },
     { "id": "cabinet", "compartments": [ { "w": 4, "h": 2, "at": [0, 0] }, { "w": 4, "h": 2, "at": [0, 2] }, { "w": 4, "h": 2, "at": [0, 4] } ] },
+    { "id": "wardrobe", "_comment": "a hanging compartment (takes a backpack) over a drawer", "compartments": [ { "w": 4, "h": 4, "at": [0, 0] }, { "w": 4, "h": 2, "at": [0, 4] } ] },
     { "id": "trunk", "compartments": [ { "w": 8, "h": 5 } ] },
     { "id": "fabricator", "compartments": [ { "w": 4, "h": 2 } ], "allow": ["misc"] },
     { "id": "stash", "compartments": [ { "w": 10, "h": 12 } ] }
