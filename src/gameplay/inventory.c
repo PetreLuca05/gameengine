@@ -49,6 +49,16 @@ int inv_count(const Inventory *inv, u16 item) {
 
 bool inv_has(const Inventory *inv, u16 item) { return inv_count(inv, item) > 0; }
 
+u16 inv_armor_plate(const Inventory *inv, const ItemDB *db) {
+    for (int i = 0; i < INV_MAX_ITEMS; i++) {
+        const InvItem *it = &inv->t.items[i];
+        if (!inv_alive(it) || it->loc == INV_LOC_NONE) continue;
+        const ItemDef *d = item_def(db, it->s.item);
+        if (d->kind == ITEM_CONSUMABLE && d->armor > 0 && d->heal <= 0) return it->s.item;
+    }
+    return 0;
+}
+
 int inv_remove(Inventory *inv, u16 item, int count) {
     int removed = 0;
     // Stacks not in the hands first so the held one stays.

@@ -109,6 +109,17 @@ static void draw_vitals(World *w, GuiRect safe) {
     snprintf(b, sizeof(b), "%.0f", fmaxf(0.0f, h->armor));
     GuiText an = { gui_s(TH->t_small + 2), GW_SEMIBOLD, h->armor > 0 ? TH->info : TH->text_faint, GUI_LEFT, 0, false, true, 0 };
     gd_text(&an, x + bw + gui_s(10), ay + (row - gd_line_height(an.size)) * 0.5f, b);
+    // A plate would go in: its key (ACT_PLATE, V) right of the number.
+    if (h->armor < h->max_armor - 0.01f && p->sim.move.mode != MOVE_SEATED && p->sim.move.mode != MOVE_DEAD && inv_armor_plate(&p->inv, w->items)) {
+        char key[32];
+        binding_name(input_get_binding(ACT_PLATE, 0), key, sizeof(key));
+        GuiText kt = { gui_s(TH->t_tiny), GW_SEMIBOLD, TH->text_dark, GUI_CENTER, 0, false, false, 0 };
+        float ks = gui_s(18), kw = fmaxf(ks, gd_text_width(&kt, key) + gui_s(8));
+        GuiRect kr = { x + bw + numw, ay + (row - ks) * 0.5f, kw, ks };
+        gd_round(kr, gui_s(3), TH->text);   // a key cap: light, the key dark
+        gd_text(&kt, kr.x + kr.w * 0.5f, kr.y + (ks - gd_line_height(kt.size)) * 0.5f, key);
+        caps(kr.x + kr.w + gui_s(6), kr.y + (ks - gui_s(TH->t_tiny)) * 0.5f - gui_s(1), gui_s(TH->t_tiny), TH->text_dim, GUI_LEFT, "Plate");
+    }
     // Health.
     caps(x0, hy + (row - gui_s(TH->t_label)) * 0.5f - gui_s(2), gui_s(TH->t_label), TH->text_dim, GUI_LEFT, "Health");
     float low = hp < 0.3f ? 0.6f + 0.4f * sinf((float)gui_time() * 6.0f) : 1.0f;

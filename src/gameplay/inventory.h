@@ -36,6 +36,8 @@ int inv_add_att(Inventory *inv, const ItemDB *db, u16 item, int count, i16 ammo,
 int inv_count(const Inventory *inv, u16 item);
 int inv_remove(Inventory *inv, u16 item, int count);   // returns removed (stacks not in the hands first)
 bool inv_has(const Inventory *inv, u16 item);
+// The first armor plate carried (a consumable that only adds armor: docs/DAMAGE.md "Armor"), 0 none.
+u16 inv_armor_plate(const Inventory *inv, const ItemDB *db);
 
 // Selection k (0-based, INV_SEL_*): the payload of an equipped weapon or of the item in the hands,
 // or an empty slot.

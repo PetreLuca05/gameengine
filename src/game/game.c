@@ -1788,7 +1788,10 @@ static void cmd_status(int argc, const char **argv) {
                  G->recoil_pred_error_max);
     for (int s = 0; s < MAX_PLAYERS; s++) {
         Player *p = &w->players[s];
-        if (p->active) log_info("  slot %d %-16s %s peer %d hp %.0f", s, p->name, p->local ? "local" : "remote", p->peer, w->health[ENT_INDEX(p->ent)].hp);
+        if (p->active) {
+            const Health *h = &w->health[ENT_INDEX(p->ent)];
+            log_info("  slot %d %-16s %s peer %d hp %.0f armor %.0f / %.0f", s, p->name, p->local ? "local" : "remote", p->peer, h->hp, h->armor, h->max_armor);
+        }
     }
 }
 

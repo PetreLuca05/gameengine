@@ -27,8 +27,12 @@ def main(argv):
         if c["inv"] != "closed" or o["inv"] != "open" or a["inv"] != "closed":
             fails.append(f"Tab didn't toggle the inventory: {c['inv']} / {o['inv']} / {a['inv']}")
         tol_pos, tol_rot = c["dpos"] + EPS_POS, c["drot"] + EPS_DEG
+        # The two tracks start at different phases of the head's idle sway (the camera is on the
+        # head): their positions may differ by a bit more than one window's drift. A real jump (a
+        # third-person showcase camera) is metres.
+        sway = 1.5 * max(c["dpos"], o["dpos"]) + EPS_POS
         d = max(abs(o["pos"][i] - c["pos"][i]) for i in range(3))
-        if d > tol_pos:
+        if d > sway:
             fails.append(f"opening moved the camera {d:.5f} m")
         dr = max(abs(o["yaw"] - c["yaw"]), abs(o["pitch"] - c["pitch"]))
         if dr > tol_rot:

@@ -17,6 +17,7 @@ typedef enum Action {
     ACT_VEHICLE_CAM, ACT_LIGHTS, ACT_HORN,
     ACT_PHONE_UI, ACT_PHONE_GALLERY, ACT_PHONE, ACT_PHONE_SELFIE, ACT_PHONE_NAV,   // docs/PHONE.md
     ACT_HEAL_WHEEL, ACT_PING,                                         // docs/UI_WHEELS_HUD.md
+    ACT_PLATE,                                                        // docs/DAMAGE.md "Armor"
     ACT_COUNT
 } Action;
 

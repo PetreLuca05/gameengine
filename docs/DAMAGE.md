@@ -73,6 +73,11 @@ until it runs out, falls and drowning excepted).
   - With one in the body armor slot, its `"plates"` (4): `max_armor` 200.
   - The HUD draws one bar segment per plate.
   - Using a plate with the armor full is refused ("Armor full: a plate carrier holds 4 plates").
+  - **V** (`ACT_PLATE`, "Insert Armor Plate") puts one in: the first plate carried goes into the
+    hands and is used at once (the healing wheel's auto-use, whatever `wheel_heal_auto_use` says).
+    - With none carried, or the armor full, it only says so (a hint).
+    - In a seat V stays the vehicle camera.
+    - `tools/tests/plate_key.cfg` + `plate_key_check.py` test it.
 - **The carrier holds its plates:** `health_sync_armor`, on the host every tick, keeps the armor
   above the base plate in the worn carrier's `InvSlot.ammo`.
   - Taken off, dropped or looted from a corpse, the carrier keeps them; armor drops to at most 1 plate.

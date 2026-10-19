@@ -434,14 +434,33 @@ void menus_toggle_pause(void) {
 void menus_toggle_inventory(void) {
     Game *g = game();
     if (!g || !g->world) return;
-    if (screens_top() == SCR_INVENTORY) { screens_pop(); return; }
+    // Tab / I on the inventory: back to the game, whatever is open on it (its menu, a dialog, a drag) or
+    // under it (the pause menu it was opened from).
+    if (screens_top() == SCR_INVENTORY) { menus_close_all(); gui_sound(TH->snd_back); return; }
     if (M->depth) return;
     screens_push(SCR_INVENTORY);
+}
+
+// The key ui_key pressed, released a couple of frames later (menus_tick): input actions poll the
+// held keys once a frame, so a down and up in one frame would never show as a press.
+static SDL_Scancode g_key_up_sc;
+static int g_key_up_frames;
+
+static void key_event(SDL_Scancode sc, bool down) {
+    SDL_Event ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+    ev.key.scancode = sc;
+    ev.key.key = SDL_GetKeyFromScancode(sc, SDL_KMOD_NONE, false);
+    ev.key.down = down;
+    ev.common.timestamp = SDL_GetTicksNS();
+    SDL_PushEvent(&ev);
 }
 
 void menus_tick(float dt) {
     gui_frame_begin(dt);
     Game *g = game();
+    if (g_key_up_frames > 0 && --g_key_up_frames == 0) key_event(g_key_up_sc, false);
     // Gamepad Start: pause / resume. Tab / I / pad Back (or the inventory binding): inventory.
     if (gui_nav(NAV_MENU)) {
         gui_nav_consume(NAV_MENU);
@@ -452,8 +471,12 @@ void menus_tick(float dt) {
     // Enter: the chat line, in a multiplayer game (the lobby's chat backend).
     if (!M->depth && !console_is_open() && lobby_active() && game_world() && gui_key_pressed(SDL_SCANCODE_RETURN)) mainmenu_chat_open();
     mainmenu_tick(dt);
-    bool inv_key = gui_nav(NAV_VIEW) || (!M->depth && !console_is_open() && input_consume_press(ACT_INVENTORY));
-    if (inv_key && !console_is_open() && (!M->depth || screens_top() == SCR_INVENTORY) && inventory_wants_back()) {
+    // Tab / I reach both the GUI (NAV_VIEW) and the inventory binding, whose press is counted before
+    // the screen takes the focus: one toggle, and the press is always taken (a stale one would reopen
+    // the screen right after the next Tab closes it).
+    bool inv_press = input_consume_press(ACT_INVENTORY);
+    bool inv_key = gui_nav(NAV_VIEW) || (!M->depth && !console_is_open() && inv_press);
+    if (inv_key && !console_is_open() && (!M->depth || screens_top() == SCR_INVENTORY)) {
         gui_nav_consume(NAV_VIEW);
         menus_toggle_inventory();
     }
@@ -592,15 +615,26 @@ static void cmd_ui_nav(int argc, const char **argv) {
 }
 
 // ui_key <SDL key name>: a synthetic key press ("1".."9", "Return", "Q", "E" ...; scripted tests).
+// ui_key <key>: a key press and release through SDL's queue (the real keyboard's route: main.c
+// handle_event -> the console, the GUI, the game's input), not straight into the GUI.
 static void cmd_ui_key(int argc, const char **argv) {
     if (argc < 2) return;
     SDL_Scancode sc = SDL_GetScancodeFromName(argv[1]);
     if (sc == SDL_SCANCODE_UNKNOWN) { log_warn("ui_key: unknown key '%s'", argv[1]); return; }
-    SDL_Event ev;
-    memset(&ev, 0, sizeof(ev));
-    ev.type = SDL_EVENT_KEY_DOWN;
-    ev.key.scancode = sc;
-    gui_handle_event(&ev);
+    if (!g_engine.window) {
+        SDL_Event ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = SDL_EVENT_KEY_DOWN;
+        ev.key.scancode = sc;
+        ev.key.key = SDL_GetKeyFromScancode(sc, SDL_KMOD_NONE, false);
+        ev.key.down = true;
+        gui_handle_event(&ev);
+        return;
+    }
+    if (g_key_up_frames > 0) key_event(g_key_up_sc, false);   // the previous key, still down
+    key_event(sc, true);
+    g_key_up_sc = sc;
+    g_key_up_frames = 2;
 }
 
 // ui_mouse <x> <y> [down|up|click|rclick|dclick|wheel <n>] (fractions 0..1 of the window when <= 1)

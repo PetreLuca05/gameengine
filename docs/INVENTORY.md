@@ -27,7 +27,7 @@ Tarkov-style grid mechanics on a deliberately simple model:
 | Cell images (grid-aspect icons, baker) | `src/ui/inventory/inv_cells.c`, `tools/bake_icons/bake_cells.sh` |
 | Editor panel | `src/ui/inventory/inv_editor.c` (`inv_editor`) |
 | Drops (G tap, discards, downed) | `src/game/game_events.c` (`drop_held`, `spawn_dropped`), `src/gameplay/entities.c` (`spawn_pickup_tree`, `pickup_use`) |
-| Tests | `tests/test_inventory.c`, `tests/test_inventory_ui.c`, `tools/tests/lint_inventory.py`, `ui_inventory.cfg`, `ui_crate.cfg`, `inv_drop.cfg` + `inv_drop_check.py`, `inv_net.sh` + `inv_net_check.py`, `inv_camera.cfg` + `inv_camera_check.py`, `hud_vitals.cfg` + `hud_vitals_check.py` |
+| Tests | `tests/test_inventory.c`, `tests/test_inventory_ui.c`, `tools/tests/lint_inventory.py`, `ui_inventory.cfg`, `ui_crate.cfg`, `inv_drop.cfg` + `inv_drop_check.py`, `inv_net.sh` + `inv_net_check.py`, `inv_camera.cfg` + `inv_camera_check.py`, `inv_tab.cfg` + `inv_tab_check.py`, `hud_vitals.cfg` + `hud_vitals_check.py`, `plate_key.cfg` + `plate_key_check.py` |
 
 ## 1. Data model
 
@@ -280,21 +280,20 @@ World container saves migrate the same way (a three-drawer cabinet into its one 
 ## 5. Screen (`src/ui/inventory/`)
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────────────────┐
-│ INVENTORY                                                                    syncing…    │
-├─────────────────────────┬─────────────────────────────────┬──────────────────────────────┤
-│ PRIMARY             AUTO│                                 │ ALL WEAPONS ATTACHMENTS …    │
-│ ▬▬▬▬ Assault Rifle 30·90│        the player character     │ TOOLS MISC        [COMPACT]  │
-│ [OPT][MUZ][UND][MAG][STK]│      (a second render: idle,    │ CRATE / BODY / TRUNK 6 × 4   │
-│ SECONDARY               │       worn gear, its own light, │ (open only; a body: its gear)│
-│ [OPT][MUZ][UND][MAG][STK]│       head to mid-thigh)        │ ┌──────────┐   [Take all]    │
-│ HOLSTER                 │                                 │ └──────────┘                 │
-│ [HELMET][ARMOR][PACK]   │  drop a weapon / gear on it:    │ HIKING BACKPACK  7 / 80 cells│
-│ INSPECT                 │  it is worn                     │ ┌────────────────────┐       │
-│ (3D item, chips, stats) │          [ DISCARD ]            │ └────────────────────┘ scrolls│
-├─────────────────────────┴─────────────────────────────────┴──────────────────────────────┤
-│ hints  ·  last rejection                                                                 │
-└──────────────────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│ syncing…                    INVENTORY        [ALL][WEAPONS][ATTACHMENTS]…[MISC]  [COMPACT]  │
+├───────────────────────────┬──────────────────────────────┬────────────────────────┬─────────┤
+│ PRIMARY               AUTO│                              │ CRATE / BODY  6 / 24   │ HELMET  │
+│   (the rifle in 3D,       │     the player character     │ (open only; a body:    │  40/40  │
+│    turning when hovered)  │   (a second render: idle,    │  its gear) [Take all]  ├─────────┤
+│ Assault Rifle     30/30·90│    worn gear, its own light, │ ────────────────────── │ BODY    │
+│ [OPT][MUZ][UND][MAG][STK] │    head to mid-thigh)        │ HIKING BACKPACK 7 / 80 │ ARMOR   │
+│ SECONDARY (3D)            │                              │ ┌────────────────────┐ │  1/4    │
+│ [OPT][MUZ][UND][MAG][STK] │  drop a weapon / gear on it: │ │                    │ ├─────────┤
+│ HOLSTER (3D)              │  it is worn                  │ │                    │ │ BACKPACK│
+│                           │         [ DISCARD ]          │ └────────────────────┘ │  10 x 8 │
+│ hints  ·  last rejection                                 │      (scrolls)         │         │
+└──────────────────────────────────────────────────────────┴────────────────────────┴─────────┘
 ```
 
 * **The camera never moves.**
@@ -303,15 +302,19 @@ World container saves migrate the same way (a three-drawer cabinet into its one 
   - A full-screen UI blur (`gd_backdrop`) under the theme's `scrim` covers it.
   - The simulation pauses or runs as before (the pause menu rule).
   - `tools/tests/inv_camera.cfg` checks the camera's position, rotation and FOV over 60 frames.
+* **Header:** the title centred. The **category bar** and Compact sit above the divider, right of
+  the title, or on a centred row of their own under it when that half is narrower than ~700 design
+  px (4:3). The chips' padding shrinks to fit.
 * **Left column:**
-  - The weapon slots stacked.
-  - Primary and secondary each have a row of attachment chips under them: one per attachment slot
-    the weapon has, the mounted one or an outline with the slot name. Drag an attachment onto a
+  - The weapon slots stacked, as tall as the column allows (up to 210 design px). Each shows the
+    weapon **live in 3D** (`render_ui3d`, its own target per slot): as the hands hold it, with its
+    mounted attachments, from the side, zoomed so its bounds fill the slot. Hovered, it turns slowly
+    and eases back after.
+  - Primary and secondary each have a row of attachment chips under them: five squares across the
+    slot's width, one per attachment slot in slot order. A slot the weapon lacks is a faint outline;
+    otherwise the mounted attachment or an outline with the slot name. Drag an attachment onto a
     chip to mount it, drag a chip off to unmount it; a wrong one shakes.
-  - The holster.
-  - The gear row: helmet (durability), body armor (plates held / cap), backpack (its grid size).
-  - The **inspect panel** docked under them: the selected item turning in 3D (drag to turn, wheel
-    to zoom), its attachment chips, its description and stats.
+  - The holster (0.85x as tall).
 * **Centre:**
   - A second render of the player character (`chars_preview`): a separate instance of the same
     model with the same cosmetics and the worn helmet / carrier / pack. It plays its own idle pose
@@ -320,16 +323,23 @@ World container saves migrate the same way (a three-drawer cabinet into its one 
   - Drag on it to turn it; it eases back.
   - Dropping a weapon or gear on it equips it into its own slot.
   - The Discard zone sits along the bottom.
-* **Right column:**
-  - The **category bar**: All / Weapons / Attachments / Medical / Throwables / Tools / Misc. It only
-    dims what is outside the category and never moves anything.
-  - **Compact** packs the grid.
-  - Under the bar, scrolling, the open world container's grid sits above the player's grid. A body
+* **Right:**
+  - The **grid panel**, one panel from under the header to the bottom of the safe area. It scrolls:
+    the open world container's grid above the player's grid, with a divider between them. A body
     shows its equipment row first and Take all.
-  - The cell size is the same everywhere (ten cells across the column) and never shrinks for a
-    taller grid: the column scrolls.
+  - The cell size is the same everywhere (ten cells across the panel) and never shrinks for a
+    taller grid: the panel scrolls.
+  - Right of it, the **gear column**: helmet (durability), body armor (plates held / cap), backpack
+    (its grid size), square tiles stacked.
+* The category bar (All / Weapons / Attachments / Medical / Throwables / Tools / Misc) only dims
+  what is outside the category and never moves anything. **Compact** packs the grid.
+* **The inspect window** (right click > Inspect, or double click) floats over the screen, first
+  centred over the character. Drag its title bar to move it; its x or Esc closes it. It shows the
+  item turning in 3D (drag to turn, wheel to zoom, fitted to the item), a weapon's attachment chips
+  (drop targets too), the description and the stats, and is as tall as that content. Inspecting
+  another item switches it.
 * **Text** never goes below 10 px (`INV_MIN_TEXT_PX`).
-* **No floating windows** except the context menu and the split dialog.
+* **Floating windows:** the inspect window, the context menu and the split dialog.
 
 **Mouse:**
 - Drag between any grids, slots, chips and the character. The footprint shows green (fits) or red
@@ -343,12 +353,21 @@ World container saves migrate the same way (a three-drawer cabinet into its one 
 
 **Gamepad:**
 - A cell cursor: d-pad / stick move it (a whole item is one stop).
-- LB / RB cycle the regions (slots, chips, loot, grid, inspect chips).
+- LB / RB cycle the regions (slots, chips, loot, grid, the inspect window's chips).
 - A picks up / places, X rotates while carrying (the menu when idle), Y quick-moves, B cancels /
   closes.
 
-**Opening:** Tab opens and closes it (a toggle, also I and the pad's Back); Esc closes it. The pause
+**Opening:** Tab opens and closes it (a toggle, also I and the pad's Back), whatever is open on it
+(the context menu, a dialog, the inspect window, a drag) or under it (the pause menu it was opened
+from). Esc closes the context menu, a dialog or the inspect window first, then the screen. The pause
 menu's Inventory entry opens the same screen.
+- Tab reaches both the GUI (`NAV_VIEW`) and the inventory binding (`ACT_INVENTORY`). `menus_tick`
+  always takes the binding's press: one counted while the GUI's Tab opened the screen would reopen
+  it right after the next Tab.
+- Input doesn't count keys already held when the game gets the focus back (`focus_settle`). Tab is
+  still down when the screen it closed hands the focus back.
+- `tools/tests/inv_tab.cfg` + `inv_tab_check.py` cover each case. `ui_key` holds a key two frames,
+  like a real press.
 
 ## 6. HUD (`src/ui/hud.c`)
 
@@ -361,6 +380,8 @@ menu's Inventory entry opens the same screen.
 * **Health and armor, bottom centre** (`hud_vitals_*`):
   - The armor bar above the health bar, one segment per plate the player can hold (1, or 4 with a
     plate carrier). Each has its number.
+  - While a plate would go in (armor not full, a plate carried, not seated), a **V Plate** key cap
+    sits right of the armor number (docs/DAMAGE.md "Armor").
   - `tools/tests/hud_vitals.cfg` checks the block is centred at 16:9, 21:9 and 4:3.
 * The ammo readout stays bottom right.
 
@@ -381,7 +402,7 @@ menu's Inventory entry opens the same screen.
 | `inv_editor` | The editor panel: item set, fill, run intents, fit visualisation. |
 | `slot <1-4>`, `wield <item>` | Select a weapon slot / the hands; take a carried item in hand. |
 | `bake_cells [dir] [quit]` | Grid-aspect cell images into `assets/ui/cells/<id>.png`. |
-| `ui_inv_drag <from> <to> [shift] [rot]`, `ui_inv_click <target> [ctrl\|alt\|shift\|right\|double]` | Scripted gestures. Targets: `c:<self\|loot>:<grid\|uid>:<loc>:<x>:<y>`, `e:<slot>`, `a1:` / `a2:<attachment slot>` (the primary's / secondary's chips), `a:<slot>` (the inspect panel's), `char`, `discard`, `out`. |
+| `ui_inv_drag <from> <to> [shift] [rot]`, `ui_inv_click <target> [ctrl\|alt\|shift\|right\|double]` | Scripted gestures. Targets: `c:<self\|loot>:<grid\|uid>:<loc>:<x>:<y>`, `e:<slot>`, `a1:` / `a2:<attachment slot>` (the primary's / secondary's chips), `a:<slot>` (the inspect window's), `char`, `discard`, `out`. |
 | `ui_inv_cat <category\|all>` | The category bar (tests; logs what stays lit). |
 | `sv_inv_reach` (cvar, locked) | Reach to an open world container (tests raise it). |
 
@@ -426,8 +447,10 @@ menu's Inventory entry opens the same screen.
   - Every stocked world container (levels, building-kit prefabs) holding its loot.
 * `test_inventory_ui`:
   - The layout at 16:9 / 21:9 / 4:3 / 720p / 4K / 3440×1440, for every pack, with and without a
-    trunk or a corpse: inside the safe area, no overlaps, the chips under their weapons, the loot
-    above the grid, one cell size, a tall stash scrolls.
+    trunk or a corpse: inside the safe area, no overlaps, the category bar in the header clear of
+    the title, the grid panel and the gear column down to the bottom, the gear stacked, tall weapon
+    slots, square chips across their weapon's width, the loot above the grid, one cell size, a tall
+    stash scrolls.
   - Pad navigation reaches every target.
   - The drag-and-drop state machine for every source → target (cell, slot, chip, the character,
     discard, outside, panel); rotation while dragging, split, clicks, Esc, the pad carry.
@@ -447,4 +470,8 @@ menu's Inventory entry opens the same screen.
   - `inv_net.sh`: host + two clients, `net_fakelag 150`, checked by `inv_net_check.py`.
   - `inv_camera.cfg` + `inv_camera_check.py`: Tab opens and closes the screen, and the camera
     doesn't move for 60 frames.
+  - `inv_tab.cfg` + `inv_tab_check.py`: Tab closes the screen with a selection, the context menu or
+    the inspect window open, over the pause menu, and on a looted crate.
   - `hud_vitals.cfg` + `hud_vitals_check.py`: the vitals centred at three aspects.
+  - `plate_key.cfg` + `plate_key_check.py`: V puts plates in (and the HUD key hint), nothing with
+    none left or the armor full.

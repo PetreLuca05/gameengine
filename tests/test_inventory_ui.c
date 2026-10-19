@@ -70,25 +70,38 @@ static void test_layout(void) {
                 if (cell0 < 0) cell0 = L.cell;
                 CHECK(fabsf(L.cell - cell0) < 0.01f, "%s: one cell size for every pack and container (%.1f vs %.1f)", n, L.cell, cell0);
                 CHECK(L.cell >= 20.0f * res[r].scale, "%s: cells usable (%.1f px)", n, L.cell);
-                CHECK(inside(L.left, in.safe) && inside(L.center, in.safe) && inside(L.right, in.safe), "%s: columns in the safe area", n);
-                CHECK(!overlaps(L.left, L.center) && !overlaps(L.center, L.right) && L.left.x < L.center.x && L.center.x < L.right.x, "%s: left, centre, right apart", n);
+                float sb = in.safe.y + in.safe.h;
+                CHECK(inside(L.left, in.safe) && inside(L.center, in.safe) && inside(L.right, in.safe) && inside(L.gear, in.safe), "%s: columns in the safe area", n);
+                CHECK(!overlaps(L.left, L.center) && !overlaps(L.center, L.right) && !overlaps(L.right, L.gear) && L.left.x < L.center.x && L.center.x < L.right.x && L.right.x < L.gear.x,
+                      "%s: left, centre, grid panel, gear apart", n);
                 CHECK(L.player.w >= 280.0f * res[r].scale && fabsf(L.player.x - L.center.x) < 0.5f, "%s: the character between the panels (%.0f px)", n, L.player.w);
+                // The header: the category bar above the divider (the header's bottom), right of the title or on a row of its own.
+                CHECK(inside(L.cats, L.header) && fabsf(L.header.x - in.safe.x) < 0.5f && fabsf(L.header.w - in.safe.w) < 0.5f, "%s: the category bar in the header", n);
+                CHECK(L.cats.x >= L.header.x + L.header.w * 0.5f + 60 * res[r].scale || L.cats.y >= L.header.y + 40 * res[r].scale, "%s: the category bar clear of the centred title", n);
+                CHECK(L.right.y >= L.header.y + L.header.h && L.left.y >= L.header.y + L.header.h, "%s: the columns under the divider", n);
+                // The grid panel and the gear column reach the bottom of the safe area; the footer stays left of them.
+                CHECK(fabsf(L.right.y + L.right.h - sb) < 0.5f && fabsf(L.gear.y + L.gear.h - sb) < 0.5f, "%s: the grid panel down to the bottom", n);
+                CHECK(L.footer.x + L.footer.w <= L.right.x + 0.5f && L.footer.y >= L.left.y + L.left.h - 0.5f, "%s: the footer under the left and centre columns", n);
+                static const int weapons[3] = { EQ_PRIMARY, EQ_SECONDARY, EQ_HOLSTER }, gear[3] = { EQ_HEADWEAR, EQ_BODY_ARMOR, EQ_BACKPACK };
+                for (int a = 0; a < 3; a++) {
+                    GuiRect wr = L.equip[weapons[a]], gr = L.equip[gear[a]];
+                    CHECK(inside(wr, L.left) && fabsf(wr.w - L.left.w) < 0.5f && wr.h >= 90 * res[r].scale, "%s: %s across the left column, tall (%.0f px)", n, equip_slot_name(weapons[a]), wr.h);
+                    CHECK(inside(gr, L.gear) && fabsf(gr.w - gr.h) < 0.5f && gr.w >= 48 * res[r].scale, "%s: %s a square in the gear column", n, equip_slot_name(gear[a]));
+                    if (a) CHECK(gr.y > L.equip[gear[a - 1]].y + L.equip[gear[a - 1]].h - 0.5f && fabsf(gr.x - L.equip[gear[a - 1]].x) < 0.5f, "%s: %s stacked under %s", n, equip_slot_name(gear[a]), equip_slot_name(gear[a - 1]));
+                }
                 for (int a = 0; a < EQ_COUNT; a++) {
-                    CHECK(inside(L.equip[a], L.left) && L.equip[a].w > 10 && L.equip[a].h > 10, "%s: %s in the left column", n, equip_slot_name(a));
                     for (int b = a + 1; b < EQ_COUNT; b++) CHECK(!overlaps(L.equip[a], L.equip[b]), "%s: %s / %s apart", n, equip_slot_name(a), equip_slot_name(b));
                     for (int c = 0; c < INV_UI_WEAPON_ROWS; c++) CHECK(!overlaps(L.equip[a], L.att_row[c]), "%s: %s clear of the chip rows", n, equip_slot_name(a));
                 }
                 for (int c = 0; c < INV_UI_WEAPON_ROWS; c++) {
                     int slot = c == 0 ? EQ_PRIMARY : EQ_SECONDARY;
-                    CHECK(inside(L.att_row[c], L.left) && L.att_row[c].y >= L.equip[slot].y + L.equip[slot].h - 0.5f && L.att_row[c].h >= 20 * res[r].scale,
+                    CHECK(inside(L.att_row[c], L.left) && L.att_row[c].y >= L.equip[slot].y + L.equip[slot].h - 0.5f && L.att_row[c].h >= 30 * res[r].scale,
                           "%s: the %s's chips right under it", n, equip_slot_name(slot));
+                    CHECK(fabsf(L.chip * ATT_SLOTS + L.chip_gap * (ATT_SLOTS - 1) - L.equip[slot].w) < 0.5f && fabsf(L.att_row[c].h - L.chip) < 0.5f,
+                          "%s: the %s's chips are squares across its width", n, equip_slot_name(slot));
                 }
-                CHECK(L.equip[EQ_HEADWEAR].y > L.equip[EQ_HOLSTER].y && fabsf(L.equip[EQ_HEADWEAR].y - L.equip[EQ_BACKPACK].y) < 0.5f &&
-                      fabsf(L.equip[EQ_BODY_ARMOR].y - L.equip[EQ_BACKPACK].y) < 0.5f, "%s: helmet, armor, backpack in one row under the weapons", n);
-                CHECK(inside(L.inspect, L.left) && L.inspect.y >= L.equip[EQ_BACKPACK].y + L.equip[EQ_BACKPACK].h, "%s: the inspect panel under the slots", n);
-                CHECK(inside(L.cats, L.right) && inside(L.view, L.right) && L.view.y >= L.cats.y + L.cats.h, "%s: the category bar above the scrolled column", n);
-                CHECK(L.grid.w >= 10 * L.cell + 2 * L.pad - 0.5f && L.grid.h >= L.title_h + rows[k] * L.cell, "%s: the player's grid fits its panel (%d rows)", n, rows[k]);
-                CHECK(fabsf(L.grid.x - L.right.x) < 0.5f && L.grid.y >= L.view.y - 0.5f, "%s: the grid in the right column", n);
+                CHECK(inside(L.view, L.right) && L.grid.w >= 10 * L.cell - 0.5f && L.grid.h >= L.title_h + rows[k] * L.cell, "%s: the player's grid fits the panel (%d rows)", n, rows[k]);
+                CHECK(fabsf(L.grid.x - L.view.x) < 0.5f && L.grid.y >= L.view.y - 0.5f, "%s: the grid in the grid panel", n);
                 if (loot) {
                     CHECK(L.loot.w >= in.loot_cols * L.cell && L.loot.h >= L.title_h + in.loot_rows * L.cell, "%s: the loot grid fits", n);
                     CHECK(L.loot.y + L.loot.h <= L.grid.y + 0.5f && fabsf(L.loot.y - L.view.y) < 0.5f, "%s: the world container above the player's grid", n);
@@ -96,8 +109,8 @@ static void test_layout(void) {
                 CHECK(fabsf(L.content_h - (L.grid.y + L.grid.h - L.view.y)) < 0.5f, "%s: content height", n);
                 CHECK(inside(L.discard, L.center), "%s: discard zone", n);
             }
-        // A 10x12 stash over a 10x8 pack doesn't shrink the cells: the column scrolls.
-        InvLayoutIn big = layout_in(res[r].w, res[r].h, res[r].scale, res[r].safe_aspect, 8, true, 10, 12, false);
+        // A 10x20 stash over a 10x8 pack doesn't shrink the cells: the column scrolls.
+        InvLayoutIn big = layout_in(res[r].w, res[r].h, res[r].scale, res[r].safe_aspect, 8, true, 10, 20, false);
         InvLayout L;
         inv_layout(&big, &L);
         CHECK(fabsf(L.cell - cell0) < 0.01f && L.content_h > L.view.h, "%s: a tall stash scrolls (content %.0f > view %.0f), cells unchanged", res[r].name, L.content_h, L.view.h);
@@ -115,11 +128,11 @@ static void test_nav(void) {
         int n = 0;
         for (int e = 0; e < EQ_COUNT; e++) t[n++] = L.equip[e];
         for (int c = 0; c < INV_UI_WEAPON_ROWS; c++)
-            for (int k = 0; k < 5; k++) t[n++] = (GuiRect){ L.att_row[c].x + k * (L.att_row[c].h + 6), L.att_row[c].y, L.att_row[c].h, L.att_row[c].h };
+            for (int k = 0; k < ATT_SLOTS; k++) t[n++] = (GuiRect){ L.att_row[c].x + k * (L.chip + L.chip_gap), L.att_row[c].y, L.chip, L.chip };
         for (int y = 0; y < in.loot_rows; y++)
-            for (int x = 0; x < in.loot_cols; x++) t[n++] = (GuiRect){ L.loot.x + L.pad + x * L.cell, L.loot.y + L.title_h + y * L.cell, L.cell, L.cell };
+            for (int x = 0; x < in.loot_cols; x++) t[n++] = (GuiRect){ L.loot.x + x * L.cell, L.loot.y + L.title_h + y * L.cell, L.cell, L.cell };
         for (int y = 0; y < in.grid_rows; y++)
-            for (int x = 0; x < in.grid_cols; x++) t[n++] = (GuiRect){ L.grid.x + L.pad + x * L.cell, L.grid.y + L.title_h + y * L.cell, L.cell, L.cell };
+            for (int x = 0; x < in.grid_cols; x++) t[n++] = (GuiRect){ L.grid.x + x * L.cell, L.grid.y + L.title_h + y * L.cell, L.cell, L.cell };
         bool seen[512] = { false };
         int stack[512], sp = 0, reached = 0;
         stack[sp++] = 0;

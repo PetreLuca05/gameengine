@@ -240,9 +240,10 @@ static bool equip_item(u16 item) {
     return true;
 }
 
-static void start_auto_use(u16 item) {
+// always: start using it whatever wheel_heal_auto_use says (V: the plate goes straight in).
+static void start_auto_use(u16 item, bool always) {
     if (!equip_item(item)) return;
-    if (W.heal_auto->i) {
+    if (W.heal_auto->i || always) {
         W.auto_use = item;
         W.auto_use_t = 0;
         W.auto_use_seen = false;
@@ -257,15 +258,27 @@ static void quick_heal(void) {
     int n = build_inventory_slots(def, slots, RADIAL_MAX_SLOTS);
     for (int k = 0; k < n; k++) {
         if (!wheel_slot_selectable(&slots[k])) continue;
-        start_auto_use(slots[k].item);
+        start_auto_use(slots[k].item, false);
         return;
     }
     game_add_hint(n ? "Full health" : "No healing items");
 }
 
+// V (ACT_PLATE): an armor plate from the inventory into the hands, used at once (docs/DAMAGE.md
+// "Armor"). Not in a seat: V is the vehicle camera there.
+static void quick_plate(void) {
+    Player *p = game_local_player();
+    if (!p || p->sim.move.mode == MOVE_SEATED) return;
+    u16 plate = inv_armor_plate(&p->inv, G->world->items);
+    if (!plate) { game_add_hint("No armor plates"); return; }
+    const char *r = heal_reason(item_def(G->world->items, plate));
+    if (r) { game_add_hint(r); return; }
+    start_auto_use(plate, true);
+}
+
 static void execute(int kind, const WheelSlot *s) {
     switch (kind) {
-    case WK_HEAL: start_auto_use(s->item); break;
+    case WK_HEAL: start_auto_use(s->item, false); break;
     case WK_THROW: equip_item(s->item); break;
     case WK_PING: game_ping_request(ping_type_from_id(s->id)); break;
     case WK_DOOR:
@@ -389,6 +402,8 @@ bool wheels_frame(float dt, bool ui_blocking) {
                     (!W.auto_use_seen && W.auto_use_t > 1.0f) || input_peek_press(ACT_ATTACK);
         if (done) W.auto_use = 0;
     }
+    bool plate = input_consume_press(ACT_PLATE);   // consumed in a seat / a menu too: no stale press after
+    if (plate && !ui_blocking && alive) quick_plate();
     if (ui_blocking || !alive || !W.enable->i) {
         close_wheel(false);
         for (int k = 0; k < WK_COUNT; k++) W.gate[k].down = false;

@@ -19,6 +19,7 @@ typedef struct InputSystem {
     float wheel_accum;
     InputFrame frame;
     bool game_focus;
+    bool focus_settle;         // focus just came back: keys already held are not presses (Tab closing a screen)
     bool ads;
     SDL_Gamepad *pad;
     int capture_action, capture_slot;
@@ -36,7 +37,7 @@ static const char *k_action_names[ACT_COUNT] = {
     "slot1", "slot2", "slot3", "slot4", "slot5", "slot6", "slot7", "slot8", "slot9",
     "nextitem", "previtem", "firemode", "flashlight", "vehiclecam", "headlights", "horn",
     "phoneui", "phonegallery", "phone", "phoneselfie", "phonenav",
-    "healwheel", "ping",
+    "healwheel", "ping", "plate",
 };
 
 static const char *k_action_labels[ACT_COUNT] = {
@@ -46,7 +47,7 @@ static const char *k_action_labels[ACT_COUNT] = {
     "Wheel Option / Seat 7", "Wheel Option / Seat 8", "Wheel Option / Seat 9",
     "Next Item", "Previous Item", "Fire Mode", "Flashlight / Enter Vehicle", "Vehicle Camera", "Headlights", "Horn",
     "Phone: Use Screen (cursor)", "Phone: Gallery", "Phone: Take Out / Put Away", "Phone: Front / Back Camera", "Phone: Navigate Screen (hold)",
-    "Healing Wheel (hold) / Quick Heal (tap)", "Ping (tap) / Ping Wheel (hold)",
+    "Healing Wheel (hold) / Quick Heal (tap)", "Ping (tap) / Ping Wheel (hold)", "Insert Armor Plate",
 };
 
 const char *action_name(Action a) { return (a >= 0 && a < ACT_COUNT) ? k_action_names[a] : "?"; }
@@ -105,6 +106,7 @@ void input_reset_bindings(void) {
     IN->binds[ACT_HEAL_WHEEL][1] = padb(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
     IN->binds[ACT_PING][0] = mouse(SDL_BUTTON_MIDDLE);
     IN->binds[ACT_PING][1] = key(SDL_SCANCODE_Z);
+    IN->binds[ACT_PLATE][0] = key(SDL_SCANCODE_V);   // shared with the vehicle camera: no plating in a seat
 }
 
 static bool binding_eq(Binding a, Binding b) { return a.type == b.type && a.code == b.code; }
@@ -364,9 +366,10 @@ void input_end_frame(float dt) {
                 }
             }
         }
-        if (down && !IN->phys_down[a]) IN->press_count[a]++;
+        if (down && !IN->phys_down[a] && !IN->focus_settle) IN->press_count[a]++;
         IN->phys_down[a] = down;
     }
+    IN->focus_settle = false;
 
     // Look
     float scale = input_aim_sensitivity_scale();
@@ -419,6 +422,7 @@ float input_aim_sensitivity_scale(void) { return IN->ads ? IN->ads_mult->f * (IN
 void input_set_game_focus(bool focus) {
     if (IN->game_focus == focus) return;
     IN->game_focus = focus;
+    IN->focus_settle = focus;
     if (g_engine.window) SDL_SetWindowRelativeMouseMode(g_engine.window, focus);
     if (!focus) {
         memset(IN->mouse_buttons, 0, sizeof(IN->mouse_buttons));

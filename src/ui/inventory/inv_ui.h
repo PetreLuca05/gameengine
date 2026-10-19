@@ -1,9 +1,10 @@
-// Inventory screen (docs/INVENTORY.md "Screen"): the pure parts. Layout (left: the weapon slots with
-// their attachment chips, the gear row (helmet, plate carrier, backpack) and the inspect panel;
-// centre: the player character, rendered alone; right: the category bar, an open world container's
-// grid above the player's grid, scrolling when they don't fit) and the drag-and-drop state machine
-// that turns pointer / pad input into intents (gameplay/inventory/inv_intent.h). No renderer, no SDL
-// (tests/test_inventory_ui.c).
+// Inventory screen (docs/INVENTORY.md "Screen"): the pure parts. Layout (header: the title centred, the
+// category bar above the divider; left: the weapon slots (live item previews) with their attachment
+// chips; centre: the player character, rendered alone; right: the grid panel down to the bottom of the
+// screen (an open world container's grid above the player's, scrolling when they don't fit) and,
+// right of it, the helmet / plate carrier / backpack slots stacked) and the drag-and-drop state
+// machine that turns pointer / pad input into intents (gameplay/inventory/inv_intent.h). No
+// renderer, no SDL (tests/test_inventory_ui.c).
 #ifndef DG_INV_UI_H
 #define DG_INV_UI_H
 
@@ -28,18 +29,21 @@ typedef struct InvLayoutIn {
 typedef struct InvLayout {
     float cell;                // grid cell size (px), the same in every grid
     float pad, gap, title_h;   // panel padding, gaps, panel title height
-    GuiRect header, footer;
-    GuiRect left, center, right;
-    GuiRect equip[EQ_COUNT];   // left: primary, secondary, holster stacked; helmet, body armor, backpack in a row
-    GuiRect att_row[INV_UI_WEAPON_ROWS];   // under primary / secondary: the attachment chips
-    GuiRect inspect;           // left, under the slots: the selected item
+    float chip, chip_gap;      // attachment chip size / spacing
+    GuiRect header;            // the title (centred) and the category bar, above the divider (its bottom edge)
+    GuiRect cats;              // in the header: the category bar and Compact (right of the title, or a second row)
+    GuiRect footer;            // under the left and centre columns: hints, the last rejection
+    GuiRect left, center;      // the weapon slots; the character
+    GuiRect right;             // the grid panel: from under the header to the bottom of the safe area
+    GuiRect gear;              // right of the grid panel: helmet, body armor, backpack stacked
+    GuiRect equip[EQ_COUNT];   // primary, secondary, holster in the left column; the gear in the gear column
+    GuiRect att_row[INV_UI_WEAPON_ROWS];   // under primary / secondary: ATT_SLOTS square chips (chip, chip_gap) across the slot's width
     GuiRect player;            // centre: the character render (no backdrop of its own: the screen's blur)
     GuiRect discard;           // drop zone (bottom of the centre)
-    GuiRect cats;              // right, top: the category bar and Compact
-    GuiRect view;              // right, under the bar: the scrolled area
-    GuiRect loot;              // in view (unscrolled): the world container panel (title, equipment row, grid); loot open only
-    GuiRect grid;              // in view (unscrolled): the player's grid panel (title + grid)
-    float content_h;           // the right column's content height (> view.h: it scrolls)
+    GuiRect view;              // inside the grid panel: the scrolled area
+    GuiRect loot;              // in view (unscrolled): the world container (title, equipment row, grid, Take all); loot open only
+    GuiRect grid;              // in view (unscrolled): the player's grid (title + grid)
+    float content_h;           // the scrolled content's height (> view.h: it scrolls)
 } InvLayout;
 
 void inv_layout(const InvLayoutIn *in, InvLayout *out);
