@@ -122,6 +122,7 @@ static void parse_attachment(AttachmentDef *a, const cJSON *j, const char *file)
     a->fresnel = jnum(l, "fresnel", 0.04f);
     a->chromatic = jnum(l, "chromatic", 1.5f);
     a->dof_near_blur = jnum(j, "ads_dof_near_blur", a->slot == ATT_OPTIC ? 2.0f : 0.0f);
+    a->pip_resolution = clampf(jnum(j, "pip_resolution", 1.0f), 0.1f, 4.0f);
     const cJSON *m = cJSON_GetObjectItemCaseSensitive(j, "modifiers");
     a->ads_time = jnum(m, "ads_time", jnum(j, "ads_time", 1.0f));
     a->sway_scale = jnum(m, "sway_scale", jnum(j, "sway_scale", 1.0f));

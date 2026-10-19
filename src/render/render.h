@@ -146,17 +146,17 @@ typedef struct RenderCamera {
     float yaw, pitch, roll;
     float fov_deg;      // vertical FOV
     float znear, zfar;
-    float vm_fov_deg;   // arms / held item FOV when r_viewmodel_fov is 0 (the hip FOV); 0 = fov_deg
+    float vm_fov_deg;   // the arms layer's hip FOV (game_arms.c: cl_hands_fov); 0 = fov_deg
     float ads_t;        // 0..1 aim progress: the weapon's FOV narrows by vm_ads_zoom (fov_deg already has
                         // the mild ADS world zoom; the sight stays on the view axis = screen centre)
     float vm_ads_zoom;  // arms / weapon magnification once aimed against RENDER_ADS_REF_FOV (tan ratio; <= 1 = none)
 } RenderCamera;
 // The authored ADS FOVs ("ads_fov" of weapons and optics) are degrees against this reference view.
 #define RENDER_ADS_REF_FOV 75.0f
-// The weapon (viewmodel) FOV for a camera: hip value (r_viewmodel_fov / vm_fov_deg / fov_deg) blended
-// into the aimed FOV with the aim progress. The aimed FOV is absolute: RENDER_ADS_REF_FOV narrowed by
-// vm_ads_zoom (the weapon's / sight's ads_fov), the same whatever cl_fov or the hands FOV is.
-float render_vm_fov_for(const RenderCamera *c, float r_viewmodel_fov);
+// The arms layer's FOV for a camera: the hip value (an override > 1 / vm_fov_deg / fov_deg) blended into
+// the aimed FOV with the aim progress. The aimed FOV is absolute: RENDER_ADS_REF_FOV narrowed by
+// vm_ads_zoom (the weapon's / sight's ads_fov), the same whatever cl_fov or cl_hands_fov is.
+float render_vm_fov_for(const RenderCamera *c, float hip_override);
 
 // Interior volumes (docs/STORY.md "Rendering"): inside a box the sky ambient and the environment
 // reflections fall to `sky` (0..1), rising to 1 towards its glass faces (open_faces bits: -x +x -y +y -z +z)
@@ -309,6 +309,7 @@ typedef struct SkinnedDraw {
     u32 flags;              // MaterialFlags (MAT_SHADOW_ONLY, MAT_HIGHLIGHT, ...)
     float fade;             // LOD cross-fade: 0 = visible, (0, 1] fading in, [-1, 0) fading out
     bool cast_shadow;
+    bool view_only;         // the first-person view's own draws (the masked body, the arms layer): never in phone cameras
     vec3 center;            // bounding sphere (world) for culling
     float radius;
     u32 object_id;          // stable id (0 = none): previous palette -> per-bone velocity
@@ -613,7 +614,7 @@ typedef struct RenderSight {
     float base_fov;               // the world camera's base FOV (sv_fov): the zoom reference
     float sight_fov;              // the base FOV at the sight's magnification (ads_debug)
     float eye_box, eye_box_depth, eye_relief;
-    float pip_scale;              // PiP resolution / render height
+    float pip_scale;              // PiP resolution / render height: r_scope_pip_scale x the sight's pip_resolution (level-bounded)
     // ADS depth of field (complete only): fixed far focus, near-field (weapon) blur.
     bool ads_dof;
     float dof_focus, dof_fstop, dof_near_blur;
@@ -622,6 +623,10 @@ typedef struct RenderSight {
 void render_set_sight(const RenderSight *s);   // every frame (kind NONE = no sight)
 const RenderSight *render_sight(void);         // what was set this frame
 float render_scope_pip_fov(void);              // last PiP camera FOV (deg), 0 = none
+u32 render_scope_pip_px(float pip_scale);      // PiP target size (px) for a RenderSight.pip_scale: x the render height, 128..2048
+// Last PiP target size (px, 0 = none); *screen_frac (optional): the picture's extent on screen, as a
+// fraction of the view height (x render_height() = the output pixels its texels are spread over).
+u32 render_scope_pip_size(float *screen_frac);
 // Time-of-day sky diagnostics (src/render/sky): SH irradiance in use (CPU copy, a frame late), the
 // luminance of its DC term and of the latest refilter, refilter cycles completed.
 vec3 render_sky_irradiance(vec3 dir);
@@ -671,6 +676,20 @@ void render_poll_shader_hot_reload(void);
 bool render_world_to_screen(vec3 world, vec2 *out_px); // false if behind camera
 vec3 render_viewmodel_to_world(vec3 viewmodel_point);   // same pixel under the world FOV (muzzle flash / tracers)
 float render_vm_fov(void);   // the viewmodel (arms + held item) projection FOV this frame
+// First-person arms layer (docs/CAMERA_HOLDPOINT.md "Rule 3", src/render/arms_layer.c): every
+// MAT_VIEWMODEL draw (the arms from the shoulders down, the held item) is seen through this camera
+// and FOV instead of the world camera's; arm vertices near the shoulders blend back to the world
+// camera (the seam). Set after render_set_camera each frame (which clears it).
+typedef struct RenderArmsLayer {
+    bool valid;
+    mat4 view;              // world -> arms camera (rigid layer and scale included)
+    float fov_deg;          // vertical
+    float znear;
+    vec3 shoulder[2];       // the upper-arm joints (world): the seam centres
+    float seam_r0, seam_r1; // m: world camera within r0, arms camera past r1
+} RenderArmsLayer;
+void render_set_arms_layer(const RenderArmsLayer *a);
+bool render_camera_overridden(void);   // this frame's camera was replaced by a flythrough (perf_audit, bench_fidelity)
 mat4 render_view_proj(void);
 mat4 render_view_matrix(void);     // this frame's world -> view
 #define RENDER_VM_ZNEAR 0.01f      // the viewmodel pass's near plane (m; the world's is the camera's znear)

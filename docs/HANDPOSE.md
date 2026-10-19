@@ -30,14 +30,15 @@ case with the same code (`src/anim/handpose.c`).
 | Startup scan, hot reload, commands, saving, runtime case lookup | `src/editor/handpose/hp_system.c` | |
 | Control rig: controls, hierarchy, transforms -> data (pure) | `src/editor/handpose/hp_rig.c` | |
 | Blender-style modal transforms (pure) | `src/editor/handpose/hp_xform.c` | |
-| Field logic + undo / redo (pure) | `src/editor/handpose/hp_edit.c` | |
-| Editor scene: viewport, gizmo, outliner, N-panel, timeline, `hpe` | `src/editor/handpose/hp_editor.c` | |
+| Field logic + undo / redo (pure; a grip step carries its gun's muzzle through `HpSocketIO`) | `src/editor/handpose/hp_edit.c` | |
+| Muzzle socket: the weapon file patch, the number format, the bore / tip helpers (pure) | `src/editor/handpose/hp_muzzle.c` | `data/weapons/*.json` `hold.sockets.muzzle` |
+| Editor scene: viewport, gizmo, outliner, N-panel, timeline, the muzzle marker, `hpe` | `src/editor/handpose/hp_editor.c` | |
 | Simulated cases: props, seating, ledge, timeline driver | `src/editor/handpose/hp_case.c` | |
 | Frozen world | `src/game/game_freeze.c` (+ `weather_freeze`, `g_chars_frozen`) | |
 | Weapon / item hold (root, IK, fingers) | `src/anim/weapon_hold.c` | |
 | Interactions (first + third person), vehicle controls, ledges | `src/player/hands.c`, `src/gameplay/characters.c`, `src/game/game_vehicles.c` | |
 | Migration tool | `tools/handpose_migrate` | |
-| Tests | `tests/test_handpose.c`, `tests/test_hp_edit.c`, `tests/test_handpose_rig.c`, `tools/tests/hp_scene.cfg`, `tools/tests/hp_gameplay.cfg` | |
+| Tests | `tests/test_handpose.c`, `tests/test_hp_edit.c`, `tests/test_handpose_rig.c`, `tools/tests/hp_scene.cfg`, `tools/tests/hp_gameplay.cfg`, `tools/tests/hp_muzzle.cfg` + `hp_muzzle_check.py` | |
 
 ## Data model
 
@@ -163,7 +164,8 @@ view is an orbit camera (or first person).
   unreviewed / edited filters. Marks: `*` unreviewed, `+` overrides (grips) / keys (cases), `!`
   edited and not saved. Selecting a case opens its simulated scene.
 - **OUTLINER** (left bottom): the rig hierarchy; click to select (Shift extends), whole-finger rows,
-  whole-hand buttons. Controls that can't be edited for the target are marked `(-)`.
+  whole-hand buttons. Controls that can't be edited for the target are marked `(-)`. A gun adds a
+  **Muzzle (item socket)** row (below: "Muzzle").
 - **Toolbar** (top): the tool (Select / Move / Rotate / Scale: the gizmo), the transform
   orientation (Global / Local / Parent / Normal), the pivot (Individual Origins / Median Point /
   Active Element), **mirror** (edit one hand, the other follows mirrored, live), **neutral light**
@@ -175,8 +177,9 @@ view is an orbit camera (or first person).
   Location X / Y / Z, Rotation X / Y / Z (Euler, plus the quaternion; fingers: curl / spread /
   twist with their limits), Scale (the root of a grip). Drag to scrub, double-click to type,
   per-channel locks (loc / rot / scale), reset location / rotation / scale, copy / paste transform,
-  the finger curl slider. **Hand**: finger presets, mirror L <-> R, IK weight. **View**: orbit /
-  first person, focus on the control / the root, yaw / pitch / distance / FOV, onion skin.
+  the finger curl slider. **Hand**: finger presets, mirror L <-> R, IK weight. **Muzzle** (guns):
+  the muzzle socket in mm and its helpers (below). **View**: orbit / first person, focus on the
+  control / the root, yaw / pitch / distance / FOV, onion skin.
 - **TIMELINE** (bottom, cases): |< < play/pause > >| (step = 1/60 s), loop, speed, store key (I),
   delete the key under the cursor, the scrub slider, a strip with the markers (contact green, use
   yellow, release red), the keys (purple, white = under the cursor) and the cursor, the markers and
@@ -190,17 +193,18 @@ view is an orbit camera (or first person).
 | `X` / `Y` / `Z` | constrain to the axis (in the chosen orientation); again: the other of Global / the chosen one; a third time: free |
 | `Shift` + axis | the plane without that axis (move) |
 | `Ctrl` (held) | snap: 5 mm, 5 deg, 0.05 |
+| `Shift` (held during a transform) | precision: the mouse motion made while it is held counts a tenth (no jump on release); with `Ctrl`: snap 1 mm, 1 deg, 0.01. The status line shows `(precision)` |
 | `0-9 . -` `Backspace` | type the value (`-` negates): metres / degrees / factor along the constraint |
 | `Enter` / left click | confirm; `Esc` / right click: cancel (the target goes back exactly) |
 | gizmo handle drag | a transform constrained to that axis (releasing confirms) |
-| `Alt+G` / `Alt+R` / `Alt+S` | clear location / rotation / scale of the selection (IK / pole: back to inherited) |
+| `Alt+G` / `Alt+R` / `Alt+S` | clear location / rotation / scale of the selection (IK / pole: back to inherited; the muzzle: `Alt+G` back to the default) |
 | click / `Shift`+click | select / extend; click on nothing: deselect; `A` all / none |
 | `[` / `]` | select the parent / the children (`Shift`: extend); `;` the siblings; `M` the mirror control |
 | `1` `2`/`W` `3`/`E` `4` | tools Select / Move / Rotate / Scale |
 | `I` | store a keyframe at the timeline time (cases) |
 | `Space`, `Left` / `Right` | play / pause, step the timeline |
 | `Ctrl+Z` / `Ctrl+Shift+Z`, `Ctrl+Y` | undo / redo (64 steps; one transform or one drag = one step) |
-| `Ctrl+C` / `Ctrl+V` | copy / paste the active control's transform (same kind of control) |
+| `Ctrl+C` / `Ctrl+V` | copy / paste the active control's transform (same kind of control); the muzzle selected: its position |
 | `Ctrl+S` | save |
 | middle / right drag, `Alt`+left drag, wheel | orbit, zoom |
 
@@ -219,12 +223,62 @@ anywhere and edit: a hand edit at a time without a key adds one there (seeded fr
 pose, so nothing jumps); the root (anchor) needs no key. Onion skin draws the arms re-solved onto
 the neighbouring keys (blue before, orange after).
 
+### Muzzle
+
+A gun's grip (or a case that edits it) also places the gun's **muzzle socket**,
+`hold.sockets.muzzle` in its weapon file. It is in item space: the origin is the right grip, x
+points right, y up, and -z along the barrel. Shots leave it along the item's -Z (docs/AIM.md), and
+the first-person flash is drawn on it. A mounted muzzle device (suppressor, compensator, ...)
+replaces it with its own front face; the socket stays where it is under the device.
+
+- **Marker**: a light green ring across the bore and a cross on the socket. A dim line runs back
+  through the barrel (is it on the bore?) and 1.5 m ahead along the shot line. Hover is yellow;
+  selected is white, with the label. With a device mounted, its front face is a cyan cross with the
+  device's name, joined to the socket by a cyan line. The shots leave the cyan cross, so moving the
+  socket changes nothing until the device comes off.
+- **Select** by clicking the marker (it wins over a rig control under it), the outliner row, or the
+  Muzzle tab. The muzzle is always selected alone, never with rig controls.
+- **Move** with `G` or the move gizmo, in the item's axes (Local / Parent / Normal = the item,
+  Global = the world). `X` / `Y` / `Z` constrain, typed values are metres (`G` `-Z` `0.03` = 3 cm
+  forward along the barrel), `Ctrl` snaps (5 mm), `Shift` gives precision. `R` / `S` refuse: the
+  muzzle is a point. `Alt+G` puts it back on the default, `Ctrl+C` / `Ctrl+V` copy and paste it.
+- **Muzzle tab** (N-panel): the weapon file and whether the value is edited, select / show the
+  marker, X / Y / Z in mm (drag to scrub, double-click to type), and these buttons:
+  - **to bore**: onto the barrel's centre line, z kept;
+  - **to tip**: the centre of the barrel's front face;
+  - **default**: what the game uses without a socket, 1 cm in front of the barrel face;
+  - **revert to file**, **save muzzle**.
+
+  The tab also shows the barrel tip, the muzzle - tip offset and any mounted device. The barrel is
+  the forward-most model part, leaving out the iron sight parts.
+- Values are kept at the files' 0.1 mm. A muzzle edit is an undo step of its gun's grip: undo /
+  redo restore the socket with the grip. An edited muzzle marks the grip `!` in the list, and the
+  tab shows "edited, not saved". A muzzle the editor did not write (re-read by `weapon_reload`)
+  drops the mark: the edit is gone.
+- The game uses the edit at once. The live weapon definition is edited, and the characters rebuild
+  the held gun's sockets from it every tick (`update_item_sockets`), so the next shot, the aim
+  claim and the flash use the new value. `hpe muzzle` prints the game's side next to the marker:
+  the socket the character holds, the point the shots leave from, and the aim claim (the muzzle in
+  the player's view, as the UserCmd carries it) turned back into the world.
+
 ### Saving
 
 **Save** writes the canonical file (only the overrides, stable key order) to `assets/handposes`
 in the source tree and to the runtime copy, and marks it reviewed. It refuses a grip or an
 interaction / seat key whose hand ends more than 5 mm from its IK target (unreachable socket: move
 the root or the IK control closer). `handpose_editor_dir <dir>` makes Save write only there (tests).
+
+Save also writes the gun's muzzle when it was edited (**save muzzle** in the Muzzle tab writes the
+muzzle alone):
+
+- `hold.sockets.muzzle` in the weapon file is patched in the text, and only that value changes. A
+  missing key is added to `hold.sockets` (and a missing `sockets` object to `hold`), indented like
+  its neighbours. The file's formatting and line endings are kept. A file without a `hold` block
+  is refused.
+- It goes to the source tree and the runtime copy, or with `handpose_editor_dir` only to
+  `<dir>/data/weapons/<file>`.
+- `weapon_reload` reads the saved value back. Muzzles edited and not saved stay in memory until
+  `weapon_reload` (`handpose_reload` keeps them); leaving the scene warns about them.
 
 ### Frozen world
 
@@ -248,7 +302,12 @@ hpe time <s> | play | stop | keyframe
 hpe tool <name> | orient <name> | pivot individual|median|active | mirror on|off | onion on|off
 hpe light neutral|world | state <hold state> | view orbit|fp|root|ctrl|<yaw> <pitch> <dist>
 hpe save | undo | redo | dump | freeze begin|check
+hpe muzzle [<x> <y> <z> | select | deselect | bore | tip | default | revert | save | show on|off]
 ```
+
+`hpe muzzle` with no argument prints the muzzle (item space, edited / selected, the file's value),
+the marker in the world, and the game's side (see "Muzzle"). `<x> <y> <z>` set it (item space, m).
+With the muzzle selected, `hpe xform move` moves it like `G`.
 
 ## Adding a case
 
@@ -269,7 +328,7 @@ hpe save | undo | redo | dump | freeze begin|check
   root / the other hand, fingers only rotate and stay within their limits (gizmo and typed values),
   locks, the item is not a control, mirror, undo / redo round trips 28 operations, the modal
   transforms (constraints, second press, plane, typed values, snapping, pivots, cancel, view plane
-  grab, screen rotation sign, scale).
+  grab, screen rotation sign, scale, Shift precision).
 - `tests/test_handpose.c` (ctest `handpose`): the style files reproduce the removed curl tables bone
   for bone, inheritance, lossless grip / case round trips, the schema 0 / 1 migration (the hip grip
   kept, differences reported, interactables / vehicles -> cases), the case timeline (phase mapping,
@@ -277,12 +336,23 @@ hpe save | undo | redo | dump | freeze begin|check
   runtimes, hand glue with random grip + root tweaks for every weapon, every held item and every
   case keyframe, discovery (grips + case stubs, never over a file, orphans).
 - `tests/test_hp_edit.c` (ctest `hp_edit`): field provenance, seeding, reset, limits, presets,
-  mirror, contacts, the root, case keys as targets, undo / redo (coalescing, bounds, reorder, cases).
+  mirror, contacts, the root, case keys as targets, undo / redo (coalescing, bounds, reorder, cases,
+  a grip step carrying its gun's muzzle). The muzzle: the 0.1 mm rounding and the number format; the
+  text patch (in place, inserted, one-line and empty objects, CRLF kept, refusals); the bore / tip
+  helpers; every shipped weapon file patched (exactly one line changes) and read back.
 - `tools/tests/hp_scene.cfg`: the editor end to end (rig, transforms, finger, root, undo / redo,
   save, the frozen world for 600 ticks: `hpe freeze: PASS`, the door knob keyed at contact /
   release with onion skin, the car with the wheel moved, the ledge, the phone), screenshots
   `t_hp_scene_*.png`. `tools/tests/hp_gameplay.cfg`: hip / ADS / sprint first and third person,
   the car and the motorcycle, `vehicle_test glue`.
+- `tools/tests/hp_muzzle.cfg` + `hp_muzzle_check.py`: the rifle's muzzle selected, moved by a typed
+  grab (`G -Z 3 cm`), typed exactly, snapped to the tip and the bore, undo / redo, a suppressor
+  mounted, saved into `handpose_editor_dir`. The check asserts each value, that one tick after an
+  edit the game's socket, its shot origin and the aim claim are on the marker (the device's front
+  with the suppressor), that the saved file differs from the shipped one in exactly the muzzle
+  line, and the screenshots `t_hp_muzzle_*.png`. Run from `build/bin`:
+  `./deadground.exe --test --nosound --log t_hp_muzzle.log --script ../../tools/tests/hp_muzzle.cfg`,
+  then `python ../../tools/tests/hp_muzzle_check.py t_hp_muzzle.log t_hp_muzzle`.
 
 ## Adding a scene
 

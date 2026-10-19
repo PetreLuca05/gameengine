@@ -18,6 +18,7 @@ typedef struct ViewState {
     vec3 eye;
     float bob_roll;
     float fov_hip;             // smoothed hip FOV (sprint widening), the ADS blend starts from it
+    vec3 shake;                // the movement shake's eye offset this frame (cl_move_shake: bob + landing dip; world)
 } ViewState;
 
 // ADS input (game_sights.c). The world FOV narrows by world_zoom and the arms / weapon projection by
@@ -37,6 +38,7 @@ RenderCamera camera_update(ViewState *v, const PlayerMove *m, float dt, const Ca
 // cap), kept at sv_fov_max_aspect's horizontal FOV on wider screens; before sprint widening, the ADS
 // world zoom and the fire FOV punch.
 float camera_base_fov(void);
+float camera_hands_fov(void);   // the arms layer's hip FOV (cl_hands_fov, Hor+)
 float camera_fov_for_aspect(float fov_v, float max_aspect, float aspect);   // pure
 float camera_fov_setting(float cl_fov, float sv_fov, float sv_fov_max);    // pure: override > cap > the player's
 // The world FOV at ADS progress t (0..1) for a sight's world zoom (tangent ratio): pure.

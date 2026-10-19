@@ -171,6 +171,7 @@ typedef struct HoldPointOutput {
     Xform ads_item;                   // the exact ADS item transform (tests / debug)
     int state;
     float blend;                      // 0..1 progress of the current blend
+    float ads_w;                      // 0..1 how far the item is into ADS (eased, both ways): the presentation's weight
     float pull;                       // collision pull 0..1
     vec3 cast_from, cast_to;          // world, last collision cast (debug)
     bool cast_hit;

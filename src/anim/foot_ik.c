@@ -60,14 +60,14 @@ void proc_lean(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     const Skeleton *s = in->skel;
     int hips = s->role[BR_HIPS];
     if (hips < 0 || in->dt <= 0) return;
-    // Acceleration lean (model space) + slope lean from the average foot normal.
+    // Slope lean from the average foot normal. No acceleration lean: starting / stopping a run is
+    // the clips' (no procedural pose while running).
     quat inv_yaw = quat_conj(in->root.r);
-    vec3 acc = quat_rotate(inv_yaw, v3_scale(v3_sub(in->velocity, st->prev_vel), 1.0f / in->dt));
     vec3 n = v3_norm(v3_add(st->foot[0].ground_n, st->foot[1].ground_n));
     if (v3_len2(n) < 0.5f) n = v3(0, 1, 0);
     vec3 nm = quat_rotate(inv_yaw, n);
-    float pitch_t = clampf(-acc.z * in->params->accel_lean, -0.2f, 0.2f) + clampf(-nm.z * in->params->slope_lean, -0.15f, 0.15f);
-    float roll_t = clampf(acc.x * in->params->accel_lean, -0.15f, 0.15f);
+    float pitch_t = clampf(-nm.z * in->params->slope_lean, -0.15f, 0.15f);
+    float roll_t = 0.0f;
     if (!in->grounded) { pitch_t = 0; roll_t = 0; }
     float k = 1.0f - expf(-in->dt * 6.0f);
     st->lean.x = lerpf(st->lean.x, pitch_t, k);

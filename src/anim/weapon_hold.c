@@ -116,6 +116,17 @@ static void hand_hold_update(HandHold *h, const HandHold *tg, u32 key, float dt,
 
 static float socket_error_angle(quat a, quat b) { return quat_angle_between(a, b) * DG_RAD2DEG; }
 
+// Fire animation layer 3 on a hand socket (model space): the hand error (camera space, behind the
+// gun by the one-tick kick) turned about the item's pivot, so the hand lags where the gun went.
+static Xform fire_hand_lag(Xform sock, quat cam_rm, vec3 pivot, const ProcInput *in) {
+    quat rc = euler_deg(v3(in->hand_lag_rot.x, -in->hand_lag_rot.y, in->hand_lag_rot.z));   // kick convention: yaw + = right
+    quat rm = quat_mul(quat_mul(cam_rm, rc), quat_conj(cam_rm));
+    sock.t = v3_add(pivot, quat_rotate(rm, v3_sub(sock.t, pivot)));
+    sock.r = quat_norm(quat_mul(rm, sock.r));
+    sock.t = v3_add(sock.t, quat_rotate(cam_rm, in->hand_lag_pos));
+    return sock;
+}
+
 void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     const Skeleton *s = in->skel;
     const ProcParams *p = in->params;
@@ -196,7 +207,7 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     hi.aim_max_ads = in->hp_aim_max_ads;
     hi.length = it->length * rs;
     hi.has_item = true;
-    hi.ads = in->ads_t > 0.5f;
+    hi.ads = false;   // the pose never aims down the sights: the model stays unchanged (the arms layer aims)
     hi.sprint = in->sprinting;
     hi.crouch = in->crouched;
     hi.prone = in->prone;
@@ -230,7 +241,18 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     hi.sway_scale = in->hp_sway_scale;
     hi.bob_scale = in->hp_bob_scale;
     hi.kick_params = in->hold_kick;
-    holdpoint_eval(&st->hp, &hi, &st->hp_out);
+    if (!in->hp_given) holdpoint_eval(&st->hp, &hi, &st->hp_out);
+    // Presentation hold point: the same inputs with ADS (docs/CAMERA_HOLDPOINT.md "Rule 3"). Nothing
+    // in the pose follows it; the first-person arms layer draws the arms + item moved rigidly onto it
+    // and the aim claims (muzzle / barrel) come from it, on the shooter and on the host alike.
+    if (in->hp_view && !in->hp_given) {
+        HoldPointInput hv = hi;
+        hv.ads = in->ads_t > 0.5f;
+        holdpoint_eval(&st->hp_view, &hv, &st->hp_view_out);
+        st->hp_view_valid = true;
+    } else if (!in->hp_given) {
+        st->hp_view_valid = false;
+    }
     st->item_cam = st->hp_out.item;
     // The universal grip (sockets in item space incl. the wrist offset and the root scale, poles,
     // fingers): one per item, whatever the state.
@@ -241,6 +263,11 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     }
     const Xform sock_r = st->hand[1].sock, sock_l0 = st->hand[0].sock;
     Xform desired = xf_mul(xf_mul(cam, st->hp_out.item), root);
+    st->hold_item_cam = xf_mul(st->hp_out.item, root);
+    if (!in->hp_given) {
+        st->view_item_cam = xf_mul(st->hp_view_valid ? st->hp_view_out.item : st->hp_out.item, root);
+        st->view_item_model = xf_mul(cam, st->view_item_cam);
+    }
     st->item_scale = rs;
     // Upper body follows the hold point: clavicle additive from its offset to the hip pose.
     vec3 off = st->hp_out.offset;
@@ -356,10 +383,36 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
         log_warn("hold point '%s' / %s: grip_l out of reach (pitch %.0f deg): hold point pulled %.0f mm along the item + %.0f mm towards the shoulder",
                  hs.name, holdpoint_state_name(st->hp_out.state), pitch * DG_RAD2DEG, shift * 1000.0f, v3_len(extra) * 1000.0f);
     }
-    // Fingers last: they never move the wrist.
+    // Fire animation layer 3: the hands trail the gun's one-tick kick (the item stays where the
+    // kick put it) and catch up in 1-2 ticks.
+    if (w > 0.0f && (v3_len2(in->hand_lag_pos) > 1e-12f || v3_len2(in->hand_lag_rot) > 1e-10f)) {
+        vec3 pivot = xf_point(item, v3_scale(it->pivot, rs));
+        Xform hand_r = proc_hand_for_socket(fire_hand_lag(xf_mul(item, sock_r), cam.r, pivot, in), hf->palm[1]);
+        anim_ik_arm_pose(s, pose, model, ra, rf, rh, hand_r.t, &hand_r.r, quat_rotate(yaw_q, st->hand[1].pole), w * st->hand[1].ikw);
+        if (hs.left_hand && it->has_left && la >= 0 && lf >= 0 && lh >= 0) {
+            Xform grip_l = sock_l0;
+            grip_l.t.z += slide;
+            Xform hand_l = proc_hand_for_socket(fire_hand_lag(xf_mul(item, grip_l), cam.r, pivot, in), hf->palm[0]);
+            anim_ik_arm_pose(s, pose, model, la, lf, lh, hand_l.t, &hand_l.r, quat_rotate(yaw_q, st->hand[0].pole), w * st->hand[0].ikw);
+        }
+    }
+    // Fingers last: they never move the wrist. On a shot the trigger finger pulls and the support
+    // grip tightens (fire animation layer 3).
     if (!in->no_fingers) {
         handpose_apply_fingers(s, pose, model, 1, st->hand[1].j, hf, w);
         if (hs.left_hand && it->has_left) handpose_apply_fingers(s, pose, model, 0, st->hand[0].j, hf, w);
+        float t = in->trigger;
+        if (t > 1e-3f && w > 0.0f) {
+            HandFingers j;
+            memset(j, 0, sizeof(HandFingers));
+            for (int k = 0; k < 3; k++) j[HF_INDEX][k].curl = 12.0f * t * (k == 0 ? 1.0f : 0.6f);
+            handpose_apply_fingers(s, pose, model, 1, j, hf, w);
+            if (hs.left_hand && it->has_left) {
+                memset(j, 0, sizeof(HandFingers));
+                for (int f = HF_INDEX; f < HAND_FINGERS; f++) j[f][0].curl = 4.0f * t;
+                handpose_apply_fingers(s, pose, model, 0, j, hf, w);
+            }
+        }
     }
     st->reach_shift = shift;
     st->grip_l_slide = slide;

@@ -393,9 +393,9 @@ add_test(NAME detmath COMMAND test_detmath)
 # Engine-free subset: anim core + FBX import + cache (+ log / platform helpers).
 set(DG_ANIMCORE_SOURCES
   src/anim/anim.c src/anim/skeleton.c src/anim/retarget.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
-  src/anim/weapon_hold.c src/anim/handpose.c src/editor/handpose/hp_discover.c src/editor/handpose/hp_edit.c src/editor/handpose/hp_rig.c src/editor/handpose/hp_xform.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/swim.c src/anim/anim_net.c src/anim/ragdoll_def.c
+  src/anim/weapon_hold.c src/anim/handpose.c src/editor/handpose/hp_discover.c src/editor/handpose/hp_edit.c src/editor/handpose/hp_muzzle.c src/editor/handpose/hp_rig.c src/editor/handpose/hp_xform.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/swim.c src/anim/anim_net.c src/anim/ragdoll_def.c
   src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c src/core/detmath.c
-  src/world/time_of_day.c src/world/weather.c src/world/wind.c src/world/water/water.c src/world/water/water_waves.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/sway.c src/anim/fire_anim.c src/player/camera_fp_math.c src/gameplay/phone/phone_orient.c src/gameplay/aim.c
+  src/world/time_of_day.c src/world/weather.c src/world/wind.c src/world/water/water.c src/world/water/water_waves.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/sway.c src/anim/fire_anim.c src/player/camera_fp_math.c src/gameplay/phone/phone_orient.c src/gameplay/aim.c src/render/arms_layer.c src/anim/eye_nominal.c
   src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c src/render/skeletal_mesh.c
   src/core/log.c src/core/platform.c)
 add_library(dg_animcore STATIC ${DG_ANIMCORE_SOURCES})
@@ -683,6 +683,10 @@ if(MSVC)
 endif()
 add_test(NAME skin_reference COMMAND test_skin_reference WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
+add_executable(test_arms_layer tests/test_arms_layer.c)
+set_target_properties(test_arms_layer PROPERTIES C_STANDARD 11)
+target_link_libraries(test_arms_layer PRIVATE dg_animcore)
+add_test(NAME arms_layer COMMAND test_arms_layer)
 add_executable(test_anim tests/test_anim.c)
 set_target_properties(test_anim PROPERTIES C_STANDARD 11)
 target_link_libraries(test_anim PRIVATE dg_animcore)
@@ -697,6 +701,7 @@ add_test(NAME handpose COMMAND test_handpose WORKING_DIRECTORY $<TARGET_FILE_DIR
 add_executable(test_hp_edit tests/test_hp_edit.c)
 set_target_properties(test_hp_edit PROPERTIES C_STANDARD 11)
 target_link_libraries(test_hp_edit PRIVATE dg_animcore)
+target_compile_definitions(test_hp_edit PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")   # the shipped weapon files (muzzle patch)
 add_test(NAME hp_edit COMMAND test_hp_edit)
 add_executable(test_handpose_rig tests/test_handpose_rig.c)
 set_target_properties(test_handpose_rig PROPERTIES C_STANDARD 11)

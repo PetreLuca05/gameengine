@@ -24,6 +24,7 @@
 #include "net/replication.h"
 #include "net/net.h"
 #include "net/protocol.h"
+#include "render/fidelity/fidelity.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,6 +77,13 @@ static struct {
     bool sight_valid;
     SightTest t;
 } S;
+
+// The scope PiP resolution with optic a (RenderSight.pip_scale, x the render height): r_scope_pip_scale
+// x the sight's pip_resolution, bounded by the fidelity level's r_scope_pip_scale range, so no sight
+// costs more than the level allows (docs/ATTACHMENTS.md "PiP resolution per sight").
+static float sight_pip_scale(const AttachmentDef *a) {
+    return fid_clamp_current(FF_SCOPE_PIP_SCALE, S.pip_scale->f * (a ? a->pip_resolution : 1.0f));
+}
 
 // ------------------------------------------------------------------ FOV + sensitivity
 
@@ -220,7 +228,7 @@ void sights_frame(const RenderCamera *cam, bool first_person) {
             rs->eye_box = a->eye_box;
             rs->eye_box_depth = a->eye_box_depth;
             rs->eye_relief = holdpoint_ads_relief(a->eye_relief > 0 ? a->eye_relief : 0.1f);
-            rs->pip_scale = S.pip_scale->f;
+            rs->pip_scale = sight_pip_scale(a);
             rs->dof_near_blur = a->dof_near_blur;
         } else {
             rs->dof_near_blur = S.iron_blur->f;
@@ -280,9 +288,12 @@ void sights_draw(void) {
         }
     }
     const char *kinds[] = { "iron", "red dot", "scope (PiP)" };
-    snprintf(line, sizeof(line), "%s %s  |  world FOV %.2f  hands FOV %.2f (x%.2f aimed)  sight %.2fx (FOV %.2f)  PiP FOV %.2f  |  sens x%.3f (%s %.2f)  |  DoF %s",
+    float pip_screen = 0.0f;
+    u32 pip_px = render_scope_pip_size(&pip_screen);
+    pip_screen *= (float)render_height();
+    snprintf(line, sizeof(line), "%s %s  |  world FOV %.2f  hands FOV %.2f (x%.2f aimed)  sight %.2fx (FOV %.2f)  PiP FOV %.2f, %u px over %.0f  |  sens x%.3f (%s %.2f)  |  DoF %s",
              S.have_wd ? S.wd.id : "-", kinds[DG_CLAMP(S.kind, 0, 2)], G->view.fov, render_vm_fov(), S.vm_zoom, attach_sight_zoom(S.optic), S.sight_fov,
-             render_scope_pip_fov(), S.sens_scale, S.sens_mode->str, S.sens_coef->f, S.rs.ads_dof ? "ADS" : "user");
+             render_scope_pip_fov(), pip_px, pip_screen, S.sens_scale, S.sens_mode->str, S.sens_coef->f, S.rs.ads_dof ? "ADS" : "user");
     ui_text_shadow(cx, y, FONT_SMALL, white, UI_ALIGN_CENTER, line);
 }
 
@@ -583,11 +594,11 @@ static void align_frame(void) {
 // them (the user's DoF mode is back).
 static void fov_frame(const RenderCamera *cam) {
     SightTest *t = &S.t;
-    Cvar *rvm = cvar_find("r_viewmodel_fov");
-    float vm = render_vm_fov_for(cam, rvm ? rvm->f : 0.0f);
+    float vm = render_vm_fov();
     RenderCamera hip_cam = *cam;
     hip_cam.ads_t = 0;
-    float vm_hip = render_vm_fov_for(&hip_cam, rvm ? rvm->f : 0.0f);
+    hip_cam.vm_fov_deg = camera_hands_fov();
+    float vm_hip = render_vm_fov_for(&hip_cam, 0.0f);
     float vm_target = S.vm_zoom > 1.0f ? 2.0f * atanf(tanf(RENDER_ADS_REF_FOV * 0.5f * DG_DEG2RAD) / S.vm_zoom) * DG_RAD2DEG : vm_hip;   // absolute (render_vm_fov_for)
     bool complete = S.complete;
     bool was = t->prev_t >= 1.0f;
@@ -626,6 +637,33 @@ static void cmd_fov_report(int argc, const char **argv) {
              sv ? sv->f : 0.0f, svm ? svm->f : 0.0f, camera_base_fov(), G->view.fov, render_vm_fov(), S.world_zoom);
 }
 
+// sight_pip_res [optic multiplier]: every scope's pip_resolution and the PiP size it gets at the current
+// render height and fidelity level; with a value, sets that optic's multiplier live (dev tuning, not
+// saved: copy it into assets/attachments/<optic>.json).
+static void cmd_sight_pip_res(int argc, const char **argv) {
+    if (argc == 2 || argc > 3) { log_info("usage: sight_pip_res [optic multiplier]"); return; }
+    if (argc == 3) {
+        u8 id = attach_find(&G->items, argv[1]);
+        if (!id || G->items.attachments[id].sight != SIGHT_SCOPE) { log_warn("sight_pip_res: '%s' is not a scope", argv[1]); return; }
+        G->items.attachments[id].pip_resolution = clampf((float)atof(argv[2]), 0.1f, 4.0f);
+    }
+    FidBounds b = fid_bounds(fid_level(), fid_era(), FF_SCOPE_PIP_SCALE);
+    log_info("sight_pip_res: r_scope_pip_scale %.2f, fidelity %s allows %.2f .. %.2f", (double)S.pip_scale->f, fid_level_name(fid_level()), (double)b.lo, (double)b.hi);
+    for (int i = 1; i <= G->items.attachment_count; i++) {
+        const AttachmentDef *a = &G->items.attachments[i];
+        if (a->sight != SIGHT_SCOPE) continue;
+        float s = sight_pip_scale(a);
+        u32 n = render_scope_pip_px(s);
+        log_info("  %-12s pip_resolution %.2f -> %.3f x the render height -> PiP %ux%u (%.2f Mpx)%s", a->id, (double)a->pip_resolution, (double)s, n, n,
+                 (double)n * n * 1e-6, a == S.optic ? "  (mounted)" : "");
+    }
+    float frac = 0.0f;
+    u32 now = render_scope_pip_size(&frac);
+    float screen = frac * (float)render_height();
+    if (now) log_info("  now: PiP %u px over %.0f px of the screen (%.0f %% of its height; %.2f texels per pixel)", now, (double)screen, (double)(frac * 100.0f),
+                      (double)((float)now / fmaxf(screen, 1.0f)));
+}
+
 static void cmd_sight_test_report(int argc, const char **argv) {
     (void)argc;
     (void)argv;
@@ -646,7 +684,7 @@ bool sights_dof_managed(void) { return S.ads_dof && S.ads_dof->i; }
 void sights_register(void) {
     S.look_lag = cvar_reg_float("wpn_look_lag", 0.5f, 0.0f, 2.0f, CVAR_LOCKED, "how far the weapon trails mouse turns at the hip (x the hold style's look lag; 0 = locked to the view)");
     S.relief_scale = cvar_reg_float("ads_eye_relief_scale", 0.5f, 0.2f, 1.5f, CVAR_LOCKED, "ADS: sight distance from the eye x this (1 = the stock weld / the scope eye relief)");
-    S.pip_scale = cvar_reg_float("r_scope_pip_scale", 1.0f, 0.2f, 2.0f, CVAR_TIER, "scope picture-in-picture resolution (fraction of the render height; > 1 supersamples, max 2048 px)");
+    S.pip_scale = cvar_reg_float("r_scope_pip_scale", 1.0f, 0.2f, 2.0f, CVAR_TIER, "scope picture-in-picture resolution (fraction of the render height x the sight's pip_resolution; > 1 supersamples, max 2048 px)");
     S.brightness = cvar_reg_float("sight_brightness", 1.0f, 0.25f, 2.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "red dot / illuminated reticle brightness");
     S.ads_debug = cvar_reg_bool("ads_debug", false, CVAR_LOCKED, "ADS overlay: the sight socket projected against the exact screen centre, world / hands FOV, sight zoom, sensitivity");
     S.sight_debug = cvar_reg_int("sight_debug", 0, 0, 6, CVAR_LOCKED, "sight shader views: 1 lens mask, 2 PiP raw, 3 eye box, 4 reticle only, 5 glass only");
@@ -658,5 +696,6 @@ void sights_register(void) {
     S.iron_blur = cvar_reg_float("ads_dof_near_blur", 1.5f, 0.0f, 16.0f, CVAR_LOCKED, "ADS near-field (weapon) blur with iron sights, CoC pixels (optics: their own value)");
     cmd_register("sight_test", cmd_sight_test, "sight_test align [weapon|all] [quit] | sweep | fov | parallax | aspect | net | dump: attachment / sight tests");
     cmd_register("sight_test_report", cmd_sight_test_report, "end sight_test fov and print the result");
+    cmd_register("sight_pip_res", cmd_sight_pip_res, "sight_pip_res [optic multiplier]: scope PiP resolution per sight (pip_resolution x r_scope_pip_scale, bounded by the fidelity level) and the PiP size now; a value sets it live (not saved)");
     cmd_register("fov_report", cmd_fov_report, "fov_report: cl_fov / sv_fov / base / current world and hands FOV (tests)");
 }

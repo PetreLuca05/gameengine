@@ -12,6 +12,7 @@
   "eye_relief": 0.085,
   "zoom": 8.0,
   "main_zoom": 1.15,
+  "pip_resolution": 1.5,
   "rail_offset": "auto",
   "reticle": {
     "shape": "mildot",

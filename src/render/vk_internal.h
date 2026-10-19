@@ -237,6 +237,14 @@ typedef struct FrameData {
     // level, 1..2 flicker (the off share).
     vec4 city;
     vec4 city_power[2];
+    // First-person arms layer (docs/CAMERA_HOLDPOINT.md "Rule 3"): an arms-layer point (its real world
+    // position) -> where it appears in the world (the world camera, same pixel and view depth); the
+    // shoulder seam: the upper-arm joints (world) this and the previous frame, x r0 / y r1 (m) / z on.
+    mat4 vm_apparent;
+    vec4 arms_shoulder[2];
+    vec4 arms_shoulder_prev[2];
+    vec4 arms_seam;
+    vec4 arms_eye;        // xyz the arms camera's eye in pose space (the arms layer's view vectors)
 } FrameData;
 
 typedef struct PushLit {
@@ -475,6 +483,12 @@ typedef struct Renderer {
     float shadow_dbg_bias_m;                    // cascade 0 constant bias (m), readout
     u32 shadow_drawn;                           // tiles rendered this frame: bits 0..3 atlas, 4 viewmodel, 5 moon
     u32 shadow_unrendered;                      // frames that sampled an unrendered tile (must stay 0)
+    // First-person arms layer this frame (render_set_arms_layer; invalid: the arms follow the world
+    // camera) and the view the arms were drawn with (world -> arms camera), the shoulders last frame.
+    RenderArmsLayer arms;
+    mat4 arms_view;
+    vec3 arms_shoulder_prev[2];
+    bool arms_had_prev;
     // temporal state (TAA / motion blur / velocity)
     mat4 proj_j, vm_proj_j;                     // jittered projections (this frame)
     mat4 view_proj_nj, prev_view_proj_nj, vm_view_proj_nj, prev_vm_view_proj_nj;
@@ -486,6 +500,8 @@ typedef struct Renderer {
     float fx_ads_focus;
     RenderSight sight;                          // this frame's weapon sight (render_set_sight)
     float pip_fov;                              // scope PiP camera FOV (deg)
+    u32 pip_size;                               // scope PiP target size (px, 0 = none this frame)
+    float pip_screen_frac;                      // the PiP picture's extent on screen (fraction of the view height)
     mat4 *prev_models_cpu;                      // this frame's previous-model list (index = DrawItem.prev_slot - 1)
     u32 prev_model_count;
     struct ObjSlot *obj_slots;                  // object_id -> last model / palette (hash, OBJ_SLOTS)
@@ -502,9 +518,9 @@ typedef struct Renderer {
     i64 shader_src_mtime;
 
     // cvars
-    Cvar *r_vsync, *r_wireframe, *r_render_scale, *r_aniso, *r_texture_quality;
+    Cvar *r_vsync, *r_wireframe, *r_arms_wireframe, *r_render_scale, *r_aniso, *r_texture_quality;
     Cvar *r_aa, *r_brightness, *r_gamma, *r_grid, *r_vignette, *r_shader_hotreload, *r_culling;
-    Cvar *r_vm_fov, *r_cpu_skinning, *r_bloom, *r_bloom_intensity, *r_hdr_output;
+    Cvar *r_cpu_skinning, *r_bloom, *r_bloom_intensity, *r_hdr_output;
     // Unity-style shadow quality (docs/SHADOWS_UNITY_MODEL.md)
     Cvar *r_shadows, *r_shadow_resolution, *r_shadow_projection, *r_shadow_cascades, *r_shadow_max_distance, *r_soft_shadow_quality;
     Cvar *r_shadow_split2, *r_shadow_split4[3], *r_shadow_border, *r_shadow_near_offset, *r_shadowmask_mode, *r_shadowmask_distance;

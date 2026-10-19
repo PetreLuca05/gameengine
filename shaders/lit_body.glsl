@@ -202,7 +202,8 @@ void main() {
     if ((flags & MAT_UNLIT) != 0u) {
         color = base.rgb;
     } else {
-        vec3 v = normalize(frame.camera_pos.xyz - v_world);
+        // The arms layer is seen from its own eye (the pose eye x the layer), not the world camera.
+        vec3 v = normalize(((flags & MAT_VIEWMODEL) != 0u ? frame.arms_eye.xyz : frame.camera_pos.xyz) - v_world);
         float rough = clamp(surf_rough >= 0.0 ? surf_rough : MAT_PARAMS.x, 0.04, 1.0);
         float metal = clamp(surf_metal >= 0.0 ? surf_metal : MAT_PARAMS.y, 0.0, 1.0);
         if (vertex_pbr) { rough = clamp(v_uv.x, 0.04, 1.0); metal = clamp(v_uv.y, 0.0, 1.0); }

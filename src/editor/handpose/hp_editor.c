@@ -4,11 +4,14 @@
 // outliner, an N-panel, and for cases a timeline over the simulated scene (hp_case.c). The world
 // is frozen while the scene is open (game_freeze.c). Every edit goes straight into the live DB
 // (g_engine.anim->handposes): the runtime resolves it on the next tick with the same code, so the
-// preview is the game. Pure parts: hp_rig.c (controls -> data), hp_xform.c (modal transforms),
-// hp_edit.c (fields, undo); saving goes through hp_system.
+// preview is the game. A gun's muzzle socket (hold.sockets.muzzle) is placed here too: a marker on
+// the item with the barrel line, moved like a control, saved into the weapon file. Pure parts:
+// hp_rig.c (controls -> data), hp_xform.c (modal transforms), hp_edit.c (fields, undo), hp_muzzle.c
+// (the weapon file patch, bore helpers); saving goes through hp_system.
 #include "hp_editor.h"
 #include "hp_case.h"
 #include "hp_edit.h"
+#include "hp_muzzle.h"
 #include "hp_rig.h"
 #include "hp_system.h"
 #include "hp_xform.h"
@@ -20,9 +23,9 @@
 #include "game/game.h"
 #include "game/game_internal.h"
 #include "game/scene.h"
+#include "gameplay/aim.h"
 #include "gameplay/attachments.h"
 #include "gameplay/characters.h"
-
 #include "gameplay/items.h"
 #include "gameplay/weapons.h"
 #include "player/hands.h"
@@ -40,6 +43,9 @@
 
 #define MAX_DIRTY 128
 #define GLUE_REFUSE_M 0.005f   // a grip / key whose hand ends further than this from its IK target can't be saved
+#define MZ_XF_ID HP_RIG_CTRLS  // the muzzle in a modal transform (not a rig control)
+#define MZ_COLOR 0xFF40FF80u   // the muzzle marker (light green)
+#define MZ_DIM 0x9040FF80u     // the barrel line
 
 enum { TOOL_SELECT, TOOL_MOVE, TOOL_ROTATE, TOOL_SCALE };
 static const char *k_tool_names[] = { "Select", "Move", "Rotate", "Scale" };
@@ -86,11 +92,24 @@ static struct {
     HandJoint xf_j0[HP_RIG_CTRLS];
     HpTarget xf_target;
     HpUndoSnap *xf_snap;       // the target before the transform (cancel restores it)
-    char xf_status[160];
+    char xf_status[220];
+    bool xf_mz;                // the transform moves the muzzle
+    Xform xf_mz_item;          // the item frame it started in
     // clipboard (copy / paste transform)
     bool clip_valid;
     int clip_kind;
     HpLocal clip;
+    // muzzle socket (docs/HANDPOSE.md "Muzzle"): the edited gun's hold.sockets.muzzle, selected
+    // alone (not a rig control: it lives in the weapon def, saved into the weapon file)
+    bool mz_sel, mz_hover, mz_show;
+    bool mz_valid;             // the edited gun is in hand this frame: the frame / points below are current
+    Xform mz_item;             // the item in the world, unscaled (the game's item_cur: shots ignore the root scale)
+    vec3 mz_world, mz_eff;     // the socket / the effective muzzle (a mounted device's front face)
+    char mz_device[32];        // the mounted muzzle device that moves it ("" = the socket is the muzzle)
+    bool mz_dirty[MAX_WEAPON_DEFS];   // edited, not written to the weapon file
+    vec3 mz_live[MAX_WEAPON_DEFS];    // the value the editor last wrote (another change = weapon_reload)
+    bool mz_clip_valid;
+    vec3 mz_clip;
     // editing
     HpUndo undo;
     u32 dirty[MAX_DIRTY];
@@ -115,7 +134,7 @@ static struct {
     u32 fz_tick;
     double last_time;
 } E = { .active = HP_RIG_IK(1), .hover = -1, .cat = -1, .yaw = 2.4f, .pitch = -0.25f, .dist = 0.9f, .fov = 45.0f, .tool = TOOL_MOVE, .orient = HPX_LOCAL,
-        .pivot = HPX_PIVOT_MEDIAN, .neutral_light = true, .onion = true };
+        .pivot = HPX_PIVOT_MEDIAN, .neutral_light = true, .onion = true, .mz_show = true };
 
 static float S(float v) { return v * ui_scale(); }
 static HandPoseDB *db(void) { return g_engine.anim ? &g_engine.anim->handposes : NULL; }
@@ -198,9 +217,62 @@ static HpTarget target_for_hands(void) {
     return t;
 }
 
+// ------------------------------------------------------------------ the muzzle socket (data)
+
+// The gun whose muzzle a grip places: a firearm's own grip (also through the reload / item case
+// that edits it). The live def: the characters re-derive the held sockets from it every tick, so
+// an edit is where the game shoots from on the next one (docs/AIM.md).
+static WeaponDef *muzzle_weapon_of(int entry) {
+    Game *g = game();
+    HandPoseDB *d = db();
+    if (!g || !d || entry < 0 || entry >= d->count || d->e[entry].category != HPC_WEAPON) return NULL;
+    for (int i = 0; i < g->items.weapon_count; i++) {
+        WeaponDef *wd = &g->items.weapons[i];
+        if (!strcmp(wd->id, d->e[entry].id)) return wd->kind != WPN_MELEE ? wd : NULL;
+    }
+    return NULL;
+}
+static WeaponDef *muzzle_weapon(void) { return muzzle_weapon_of(target().entry); }
+static int weapon_index(const WeaponDef *wd) { return (int)(wd - game()->items.weapons); }
+
+// Every editor write of a muzzle goes through here.
+static void mz_write(WeaponDef *wd, vec3 m) {
+    wd->sockets.muzzle = m;
+    E.mz_live[weapon_index(wd)] = m;
+}
+
+// A muzzle the editor did not write changed: the weapon file was read again (weapon_reload), so
+// the edit is gone and nothing is left to save.
+static void mz_sync(void) {
+    Game *g = game();
+    for (int i = 0; g && i < g->items.weapon_count; i++) {
+        vec3 m = g->items.weapons[i].sockets.muzzle;
+        if (!memcmp(&m, &E.mz_live[i], sizeof(m))) continue;
+        E.mz_dirty[i] = false;
+        E.mz_live[i] = m;
+    }
+}
+
+// Undo accessors (HpSocketIO): a grip's steps carry its gun's muzzle.
+static bool mz_io_get(void *ctx, u32 grip_hash, HpItemSockets *out) {
+    (void)ctx;
+    WeaponDef *wd = db() ? muzzle_weapon_of(handpose_find_hash(db(), grip_hash)) : NULL;
+    if (wd) out->muzzle = wd->sockets.muzzle;
+    return wd != NULL;
+}
+static void mz_io_set(void *ctx, u32 grip_hash, const HpItemSockets *in) {
+    (void)ctx;
+    WeaponDef *wd = db() ? muzzle_weapon_of(handpose_find_hash(db(), grip_hash)) : NULL;
+    if (wd) mz_write(wd, in->muzzle);
+}
+static void undo_io(void) { E.undo.io = (HpSocketIO){ mz_io_get, mz_io_set, NULL }; }
+
 // ------------------------------------------------------------------ edits + undo
 
-static void begin_edit(HpTarget t, u32 key) { hp_undo_push(&E.undo, db(), t, key); }
+static void begin_edit(HpTarget t, u32 key) {
+    undo_io();
+    hp_undo_push(&E.undo, db(), t, key);
+}
 static void end_edit(HpTarget t) {
     HandPoseDB *d = db();
     if (E.mirror_live && hp_target_has_layers(d, t)) {
@@ -215,20 +287,26 @@ static void end_edit(HpTarget t) {
 
 static void undo_redo(bool redo) {
     HandPoseDB *d = db();
+    Game *g = game();
+    int wn = g ? g->items.weapon_count : 0;
+    vec3 mz0[MAX_WEAPON_DEFS];
+    for (int i = 0; i < wn; i++) mz0[i] = g->items.weapons[i].sockets.muzzle;
+    u32 h0 = d->hash;
+    undo_io();
     HpTarget t = redo ? hp_redo(&E.undo, d) : hp_undo(&E.undo, d);
     if (t.entry < 0 && t.ci < 0) { status("nothing to %s", redo ? "redo" : "undo"); return; }
     hp_edit_commit(d);
     g_engine.anim->manifest.hash[AC_HAND_POSES] = d->hash;
-    set_dirty(target_hash(t), true);
-    status("%s (%s)", redo ? "redo" : "undo", t.entry >= 0 ? d->e[t.entry].id : d->c[t.ci].id);
+    bool muzzle = false;
+    for (int i = 0; i < wn; i++)
+        if (memcmp(&mz0[i], &g->items.weapons[i].sockets.muzzle, sizeof(vec3))) E.mz_dirty[i] = muzzle = true;
+    if (!muzzle || d->hash != h0) set_dirty(target_hash(t), true);   // a muzzle step leaves the grip as it was
+    status("%s (%s%s)", redo ? "redo" : "undo", t.entry >= 0 ? d->e[t.entry].id : d->c[t.ci].id, muzzle ? ": muzzle" : "");
 }
 
 static void snap_take(HpUndoSnap *s, HpTarget t) {
-    HandPoseDB *d = db();
-    memset(s, 0, sizeof(*s));
-    s->is_case = t.entry < 0;
-    if (t.entry >= 0) { s->e = d->e[t.entry]; s->hash = s->e.hash; }
-    else if (t.ci >= 0) { s->c = d->c[t.ci]; s->hash = s->c.hash; }
+    undo_io();
+    hp_undo_snap(&E.undo, db(), t, s);
 }
 static void snap_restore(const HpUndoSnap *s) {
     HandPoseDB *d = db();
@@ -238,6 +316,7 @@ static void snap_restore(const HpUndoSnap *s) {
     } else {
         int i = handpose_find_hash(d, s->hash);
         if (i >= 0) { memcpy(d->e[i].grip, s->e.grip, sizeof(s->e.grip)); d->e[i].root = s->e.root; d->e[i].has_root = s->e.has_root; }
+        if (s->sock.valid) mz_io_set(NULL, s->hash, &s->sock);
     }
     hp_edit_commit(d);
 }
@@ -505,7 +584,8 @@ static bool ctrl_usable(int i) {
     return true;
 }
 
-static int pick(vec2 m) {
+static int pick(vec2 m, float *dist) {
+    *dist = 1e9f;
     if (!E.ctx_valid) return -1;
     float best = S(12.0f);
     int bi = -1;
@@ -519,6 +599,7 @@ static int pick(vec2 m) {
         else d = sqrtf((m.x - a.x) * (m.x - a.x) + (m.y - a.y) * (m.y - a.y));
         if (d < best) { best = d; bi = i; }
     }
+    if (bi >= 0) *dist = best;
     return bi;
 }
 
@@ -578,15 +659,21 @@ static vec3 pivot_point(void) {
     return n ? v3_scale(sum, 1.0f / (float)n) : (E.active >= 0 ? E.world[E.active].t : v3(0, 0, 0));
 }
 
-static int gizmo_mode(void) { return E.tool == TOOL_MOVE ? HPX_GRAB : E.tool == TOOL_ROTATE ? HPX_ROTATE : E.tool == TOOL_SCALE ? HPX_SCALE : HPX_NONE; }
+// The muzzle's axes: the item's (x right, y up, z back along the barrel), or the world's (Global).
+static quat mz_basis(int orient) { return orient == HPX_GLOBAL ? quat_identity() : E.mz_item.r; }
+
+static int gizmo_mode(void) {
+    if (E.mz_sel) return E.tool == TOOL_SELECT || !E.mz_valid ? HPX_NONE : HPX_GRAB;   // the muzzle is a point: it only moves
+    return E.tool == TOOL_MOVE ? HPX_GRAB : E.tool == TOOL_ROTATE ? HPX_ROTATE : E.tool == TOOL_SCALE ? HPX_SCALE : HPX_NONE;
+}
 
 // The gizmo handle under the mouse (axis 0..2, -1 none).
 static int gizmo_pick(vec2 m) {
     int mode = gizmo_mode();
-    if (mode == HPX_NONE || E.active < 0 || !E.sel[E.active]) return -1;
-    vec3 p = pivot_point();
+    if (mode == HPX_NONE || (!E.mz_sel && (E.active < 0 || !E.sel[E.active]))) return -1;
+    vec3 p = E.mz_sel ? E.mz_world : pivot_point();
     float sz = gizmo_size(p);
-    quat b = orient_basis(E.active, E.orient);
+    quat b = E.mz_sel ? mz_basis(E.orient) : orient_basis(E.active, E.orient);
     static const vec3 e[3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
     vec2 ps;
     if (!render_world_to_screen(p, &ps)) return -1;
@@ -622,11 +709,12 @@ static int gizmo_pick(vec2 m) {
 
 static void draw_gizmo(void) {
     int mode = hpx_active(&E.xf) ? E.xf.mode : gizmo_mode();
-    if (mode == HPX_NONE || E.active < 0 || !E.sel[E.active]) return;
-    vec3 p = hpx_active(&E.xf) ? E.xf.pivot : pivot_point();
+    bool mz = hpx_active(&E.xf) ? E.xf_mz : E.mz_sel;
+    if (mode == HPX_NONE || (!mz && (E.active < 0 || !E.sel[E.active]))) return;
+    vec3 p = hpx_active(&E.xf) ? E.xf.pivot : mz ? E.mz_world : pivot_point();
     float sz = gizmo_size(p);
     int orient = hpx_active(&E.xf) ? E.xf.orient : E.orient;
-    quat b = hpx_active(&E.xf) ? E.xf.basis[orient] : orient_basis(E.active, orient);
+    quat b = hpx_active(&E.xf) ? E.xf.basis[orient] : mz ? mz_basis(orient) : orient_basis(E.active, orient);
     static const vec3 e[3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
     static const u32 col[3] = { DBG_RED, DBG_GREEN, DBG_BLUE };
     for (int a = 0; a < 3; a++) {
@@ -779,6 +867,132 @@ static void draw_onion(void) {
     }
 }
 
+// ------------------------------------------------------------------ the muzzle socket (viewport)
+
+// The marker this frame: the edited gun's socket on the item in hand (the frame the game shoots
+// from), and the effective muzzle with the slot's attachments (a muzzle device's front face).
+static void muzzle_frame(void) {
+    mz_sync();
+    E.mz_valid = false;
+    E.mz_device[0] = 0;
+    Game *g = game();
+    WeaponDef *wd = muzzle_weapon();
+    CharacterInst *c = local_char();
+    if (!wd || !c || !g || !g->world || !c->rt.proc.has_item) return;
+    const WeaponDef *eff = weapon_equipped_def(g->world, g->local_slot);
+    if (!eff || strcmp(eff->id, wd->id)) return;   // the preview item is not in hand yet
+    Xform m2w = model_to_world(c);
+    m2w.s = v3(1, 1, 1);
+    E.mz_item = xf_mul(m2w, c->rt.proc.item_model);
+    E.mz_item.s = v3(1, 1, 1);
+    E.mz_world = xf_point(E.mz_item, wd->sockets.muzzle);
+    E.mz_eff = xf_point(E.mz_item, eff->sockets.muzzle);
+    const AttachmentDef *dev = attach_def(&g->items, eff->att_applied[ATT_MUZZLE]);
+    if (dev && v3_dist(eff->sockets.muzzle, wd->sockets.muzzle) > 1e-6f) dg_strcpy(E.mz_device, sizeof(E.mz_device), dev->id);
+    E.mz_valid = true;
+}
+
+// A ring across the bore + a cross on the socket, the barrel line through the barrel behind it (is
+// it on the bore?) and the shot line ahead of where the bullets leave (docs/AIM.md).
+static void draw_muzzle(void) {
+    if (!E.mz_valid || !E.mz_show) return;
+    dbg_set_shape_depth(false);
+    u32 c = E.mz_sel ? DBG_WHITE : E.mz_hover ? DBG_YELLOW : MZ_COLOR;
+    vec3 fwd = quat_rotate(E.mz_item.r, v3(0, 0, -1)), up = quat_rotate(E.mz_item.r, v3(0, 1, 0));
+    vec3 shot = E.mz_device[0] ? E.mz_eff : E.mz_world;
+    dbg_line(v3_madd(E.mz_world, fwd, -0.4f), E.mz_world, MZ_DIM, 0, false);
+    dbg_line(shot, v3_madd(shot, fwd, 1.5f), MZ_DIM, 0, false);
+    dbg_circle(E.mz_world, fwd, 0.009f, c, 0);
+    dbg_cross(E.mz_world, E.mz_sel || E.mz_hover ? 0.014f : 0.009f, c, 0);
+    if (E.mz_sel || E.mz_hover) dbg_text(v3_madd(E.mz_world, up, 0.03f), "Muzzle", c, 0.008f, 0);
+    if (E.mz_device[0]) {
+        // A mounted device: the shots leave its front face, the socket waits under it.
+        dbg_line(E.mz_world, E.mz_eff, DBG_CYAN, 0, false);
+        dbg_cross(E.mz_eff, 0.012f, DBG_CYAN, 0);
+        dbg_text(v3_madd(E.mz_eff, up, -0.03f), E.mz_device, DBG_CYAN, 0.007f, 0);
+    }
+    dbg_set_shape_depth(true);
+}
+
+static float muzzle_pick_dist(vec2 m) {
+    vec2 s;
+    if (!E.mz_valid || !E.mz_show || !render_world_to_screen(E.mz_world, &s)) return 1e9f;
+    return sqrtf((m.x - s.x) * (m.x - s.x) + (m.y - s.y) * (m.y - s.y));
+}
+
+// ------------------------------------------------------------------ the muzzle socket (edits, save)
+
+// The weapon file the muzzle is saved into / read back from: the source tree's (dev builds), else
+// the runtime copy.
+static const char *weapon_src_path(const WeaponDef *wd, char *buf, int size) {
+#ifdef DG_SOURCE_DIR
+    snprintf(buf, (size_t)size, "%s/%s", DG_SOURCE_DIR, wd->file);
+    if (platform_file_exists(buf)) return buf;
+#endif
+    return platform_data_path(wd->file, buf, (size_t)size);
+}
+
+static bool muzzle_on_disk(const WeaponDef *wd, vec3 *out) {
+    char path[700];
+    char *text = platform_read_file(weapon_src_path(wd, path, sizeof(path)), NULL);
+    bool ok = hp_muzzle_json_read(text, out);
+    free(text);
+    return ok;
+}
+
+// Sets the edited gun's muzzle (item space, m; kept at the files' 0.1 mm) as one undo step of its
+// grip (a non-zero key: one field drag coalesces). False: the target is not a gun.
+static bool muzzle_set(vec3 m, u32 key, const char *what) {
+    HpTarget t = target();
+    WeaponDef *wd = muzzle_weapon_of(t.entry);
+    if (!wd) { status("muzzle: the target is not a gun (select a weapon's grip)"); return false; }
+    begin_edit(t, key);
+    mz_write(wd, hp_muzzle_round(m));
+    E.mz_dirty[weapon_index(wd)] = true;
+    vec3 v = v3_scale(wd->sockets.muzzle, 1000.0f);
+    if (what) status("muzzle %s: %.1f %.1f %.1f mm (%s)", what, v.x, v.y, v.z, wd->id);
+    return true;
+}
+
+static void muzzle_revert(WeaponDef *wd) {
+    vec3 m;
+    if (!muzzle_on_disk(wd, &m)) { status("muzzle: %s sets no hold.sockets.muzzle (default: the model's barrel tip)", wd->file); return; }
+    if (muzzle_set(m, 0, "back to the file")) E.mz_dirty[weapon_index(wd)] = false;
+}
+
+// Writes the gun's muzzle into its file (hold.sockets.muzzle; the text patched in place, the hand
+// formatting kept): the source tree + the runtime copy, or only handpose_editor_dir/<file> (tests).
+// The game uses the value already (the live def); weapon_reload reads the same value back.
+static bool muzzle_save(WeaponDef *wd) {
+    char src[700], out[760], rt[700];
+    weapon_src_path(wd, src, sizeof(src));
+    char *text = platform_read_file(src, NULL);
+    char *patched = text ? hp_muzzle_json_patch(text, wd->sockets.muzzle) : NULL;
+    free(text);
+    if (!patched) { status("muzzle not saved: cannot read %s, or it has no \"hold\" block", src); return false; }
+    size_t n = strlen(patched);
+    bool ok;
+    if (E.save_dir && E.save_dir->str[0]) {
+        snprintf(out, sizeof(out), "%s/%s", E.save_dir->str, wd->file);
+        char dir[760];
+        snprintf(dir, sizeof(dir), "%s", out);
+        char *sl = strrchr(dir, '/');
+        if (sl) { *sl = 0; SDL_CreateDirectory(dir); }
+        ok = platform_write_file(out, patched, n);
+    } else {
+        snprintf(out, sizeof(out), "%s", src);
+        ok = platform_write_file(src, patched, n);
+        snprintf(rt, sizeof(rt), "%s%s", platform_base_dir(), wd->file);
+        if (ok && strcmp(rt, src) && platform_file_exists(rt)) ok = platform_write_file(rt, patched, n);
+    }
+    free(patched);
+    if (ok) E.mz_dirty[weapon_index(wd)] = false;
+    char v[96];
+    hp_muzzle_format(wd->sockets.muzzle, v, sizeof(v));
+    status("%s muzzle %s -> %s", ok ? "saved" : "cannot write the", v, out);
+    return ok;
+}
+
 // ------------------------------------------------------------------ transforms
 
 static void apply_xform_result(void) {
@@ -786,6 +1000,12 @@ static void apply_xform_result(void) {
     HpTarget t = E.xf_target;
     // From the start state every update (absolute, no drift).
     snap_restore(E.xf_snap);
+    if (E.xf_mz) {
+        // The muzzle: the moved point back into the item frame the transform started in.
+        WeaponDef *wd = muzzle_weapon_of(t.entry);
+        if (wd) mz_write(wd, hp_muzzle_round(xf_point(xf_inverse(E.xf_mz_item), E.xf.out[0].t)));
+        return;
+    }
     for (int i = 0; i < E.xf.count; i++) {
         int ctrl = E.xf.ids[i];
         hp_rig_apply(d, t, &E.xf_ctx, &E.defs, ctrl, E.xf.start[i], E.xf.out[i], &E.xf_j0[ctrl], E.locks[ctrl]);
@@ -812,8 +1032,31 @@ static int xform_ctrls(int mode, int *out) {
     return k;
 }
 
+// The muzzle (selected alone): a grab of the point in the item's axes, one undo step of its grip.
+static bool muzzle_xform_begin(int mode, vec2 mouse, bool drag) {
+    HpTarget t = target();
+    if (mode != HPX_GRAB) { status("the muzzle is a point: it only moves (G, the move gizmo, the Muzzle fields)"); return false; }
+    if (!E.mz_valid || !muzzle_weapon_of(t.entry)) { status("muzzle: the gun is not in hand yet"); return false; }
+    int id = MZ_XF_ID;
+    Xform start = xf_make(E.mz_world, E.mz_item.r);
+    quat basis[HPX_ORIENT_COUNT];
+    for (int o = 0; o < HPX_ORIENT_COUNT; o++) basis[o] = mz_basis(o);
+    hpx_begin(&E.xf, HPX_GRAB, mouse, 1, &id, &start, 0, basis, E.orient, E.pivot);
+    E.xf_drag = drag;
+    E.xf_mz = true;
+    E.xf_mz_item = E.mz_item;
+    E.xf_target = t;
+    if (!E.xf_snap) E.xf_snap = (HpUndoSnap *)malloc(sizeof(HpUndoSnap));
+    snap_take(E.xf_snap, t);
+    begin_edit(t, 0);
+    hp_undo_break(&E.undo);
+    return true;
+}
+
 static bool xform_begin(int mode, vec2 mouse, bool drag) {
-    if (!E.ctx_valid || hpx_active(&E.xf)) return false;
+    if (hpx_active(&E.xf)) return false;
+    if (E.mz_sel) return muzzle_xform_begin(mode, mouse, drag);
+    if (!E.ctx_valid) return false;
     int ids[HP_RIG_CTRLS];
     int n = xform_ctrls(mode, ids);
     if (!n) {
@@ -836,6 +1079,7 @@ static bool xform_begin(int mode, vec2 mouse, bool drag) {
     for (int o = 0; o < HPX_ORIENT_COUNT; o++) basis[o] = orient_basis(E.active >= 0 ? E.active : ids[0], o);
     hpx_begin(&E.xf, mode, mouse, n, ids, start, act, basis, E.orient, E.pivot);
     E.xf_drag = drag;
+    E.xf_mz = false;
     E.xf_ctx = E.ctx;
     E.xf_target = t;
     for (int i = 0; i < HP_RIG_CTRLS; i++) {
@@ -850,12 +1094,26 @@ static bool xform_begin(int mode, vec2 mouse, bool drag) {
     return true;
 }
 
+// The status line of the running transform (+ where the muzzle is now, mm).
+static void xform_status(void) {
+    hpx_status(&E.xf, E.xf_status, sizeof(E.xf_status));
+    WeaponDef *wd = E.xf_mz ? muzzle_weapon_of(E.xf_target.entry) : NULL;
+    if (wd) {
+        size_t n = strlen(E.xf_status);
+        vec3 v = v3_scale(wd->sockets.muzzle, 1000.0f);
+        snprintf(E.xf_status + n, sizeof(E.xf_status) - n, "  muzzle %.1f %.1f %.1f mm", v.x, v.y, v.z);
+    }
+}
+
 static void xform_confirm(void) {
     if (!hpx_active(&E.xf)) return;
     apply_xform_result();
-    hpx_status(&E.xf, E.xf_status, sizeof(E.xf_status));
+    xform_status();
     hpx_end(&E.xf);
-    end_edit(E.xf_target);
+    if (E.xf_mz) {
+        WeaponDef *wd = muzzle_weapon_of(E.xf_target.entry);
+        if (wd) E.mz_dirty[weapon_index(wd)] = true;
+    } else end_edit(E.xf_target);
     status("%s", E.xf_status);
 }
 
@@ -867,23 +1125,39 @@ static void xform_cancel(void) {
     status("transform cancelled");
 }
 
+static bool key_down(int sc);
+
 static void xform_update(vec2 mouse, bool snap) {
     if (!hpx_active(&E.xf)) return;
     HpxView v = { project, NULL, E.cam_valid ? E.cam.pos : v3(0, 0, 0) };
+    E.xf.precise = key_down(SDL_SCANCODE_LSHIFT) || key_down(SDL_SCANCODE_RSHIFT);   // a tenth of the mouse motion
     hpx_update(&E.xf, mouse, &v, snap);
     apply_xform_result();
-    hpx_status(&E.xf, E.xf_status, sizeof(E.xf_status));
+    xform_status();
 }
 
 // ------------------------------------------------------------------ selection
 
+// The muzzle is selected alone (the rig controls carry the item, not its socket).
+static void select_muzzle(bool on) {
+    if (on && !muzzle_weapon()) { status("muzzle: the target is not a gun (select a weapon's grip)"); return; }
+    if (on) memset(E.sel, 0, sizeof(E.sel));
+    E.mz_sel = on;
+    if (on) status("muzzle selected: G / the move gizmo moves it (Ctrl snap, Shift precision), the Muzzle fields type it");
+}
+
 static void select_only(int i) {
     memset(E.sel, 0, sizeof(E.sel));
+    E.mz_sel = false;
     if (i >= 0) { E.sel[i] = true; E.active = i; }
 }
 
 static void select_click(int i, bool extend) {
-    if (i < 0) { if (!extend) memset(E.sel, 0, sizeof(E.sel)); return; }
+    if (i < 0) {
+        if (!extend) { memset(E.sel, 0, sizeof(E.sel)); E.mz_sel = false; }
+        return;
+    }
+    E.mz_sel = false;
     if (extend) {
         if (E.sel[i] && E.active == i) E.sel[i] = false;
         else { E.sel[i] = true; E.active = i; }
@@ -891,7 +1165,7 @@ static void select_click(int i, bool extend) {
 }
 
 static void select_rel(int which, bool extend) {
-    if (E.active < 0) return;
+    if (E.active < 0 || E.mz_sel) return;
     int out[HP_RIG_CTRLS], n = 0;
     if (which == 0) { int p = hp_rig_parent(E.active); if (p >= 0) out[n++] = p; }
     else if (which == 1) n = hp_rig_children(E.active, out, HP_RIG_CTRLS);
@@ -927,16 +1201,20 @@ static bool scene_cam(World *w, RenderCamera *cam) {
     if (t.entry >= 0) te = &db()->e[t.entry];
     edit_defaults(te, &E.defs);
     E.ctx_valid = build_ctx(&E.ctx);
+    if (E.mz_sel && !muzzle_weapon()) E.mz_sel = false;   // the target is no gun any more
+    muzzle_frame();
     if (E.ctx_valid) {
         if (hpx_active(&E.xf)) hp_rig_world(db(), E.xf_target, &E.ctx, &E.defs, E.world);
         else hp_rig_world(db(), t, &E.ctx, &E.defs, E.world);
         draw_rig();
+        draw_muzzle();
         draw_onion();
         draw_gizmo();
     }
     CharacterInst *ch = local_char();
     if (E.fp_view || !ch) { E.cam_valid = false; return false; }
-    vec3 focus = E.ctx_valid ? (E.focus == 1 ? E.world[HP_RIG_ROOT].t : (E.active >= 0 ? E.world[E.active].t : E.world[HP_RIG_IK(1)].t)) : ch->root.t;
+    vec3 ctrl_p = E.mz_sel && E.mz_valid ? E.mz_world : (E.active >= 0 ? E.world[E.active].t : E.world[HP_RIG_IK(1)].t);
+    vec3 focus = E.ctx_valid ? (E.focus == 1 ? E.world[HP_RIG_ROOT].t : ctrl_p) : ch->root.t;
     Player *p = game_local_player();
     float yaw = p->sim.move.yaw + E.yaw;
     vec3 fwd = dir_from_angles(yaw, E.pitch);
@@ -996,6 +1274,14 @@ static void handle_keys(struct nk_context *ctx) {
     if (ctrl && key_pressed(SDL_SCANCODE_Z)) { undo_redo(shift); return; }
     if (ctrl && key_pressed(SDL_SCANCODE_Y)) { undo_redo(true); return; }
     if (ctrl && key_pressed(SDL_SCANCODE_S)) { save_target(); return; }
+    WeaponDef *mw = E.mz_sel ? muzzle_weapon() : NULL;
+    if (mw) {
+        // The muzzle: copy / paste its position, Alt+G back to the default (the model's barrel tip).
+        if (ctrl && key_pressed(SDL_SCANCODE_C)) { E.mz_clip = mw->sockets.muzzle; E.mz_clip_valid = true; status("copied the muzzle of %s", mw->id); return; }
+        if (ctrl && key_pressed(SDL_SCANCODE_V)) { if (E.mz_clip_valid) muzzle_set(E.mz_clip, 0, "pasted"); return; }
+        if (alt && key_pressed(SDL_SCANCODE_G)) { muzzle_set(mw->muzzle_offset, 0, "back to the default"); return; }
+        if (alt && (key_pressed(SDL_SCANCODE_R) || key_pressed(SDL_SCANCODE_S))) { status("the muzzle is a point: location only"); return; }
+    }
     if (ctrl && key_pressed(SDL_SCANCODE_C) && E.active >= 0) {
         E.clip = hp_rig_local(db(), target(), E.active, &E.defs);
         E.clip_kind = hp_rig_ctrl(E.active)->kind;
@@ -1026,9 +1312,10 @@ static void handle_keys(struct nk_context *ctx) {
     else if (key_pressed(SDL_SCANCODE_R)) xform_begin(HPX_ROTATE, E.mouse, false);
     else if (key_pressed(SDL_SCANCODE_S)) xform_begin(HPX_SCALE, E.mouse, false);
     else if (key_pressed(SDL_SCANCODE_A)) {
-        bool any = false;
+        bool any = E.mz_sel;
         for (int i = 0; i < HP_RIG_CTRLS; i++) any |= E.sel[i];
         for (int i = 0; i < HP_RIG_CTRLS; i++) E.sel[i] = !any && !alt && ctrl_usable(i);
+        E.mz_sel = false;
     }
     else if (key_pressed(SDL_SCANCODE_LEFTBRACKET)) select_rel(0, shift);
     else if (key_pressed(SDL_SCANCODE_RIGHTBRACKET)) select_rel(1, shift);
@@ -1075,12 +1362,16 @@ static void handle_mouse(struct nk_context *ctx) {
         return;
     }
     if (!over_ui && in->mouse.scroll_delta.y != 0) E.dist = clampf(E.dist * powf(0.9f, in->mouse.scroll_delta.y), 0.12f, 6.0f);
-    if (over_ui) { E.hover = -1; return; }
-    E.hover = pick(E.mouse);
+    if (over_ui) { E.hover = -1; E.mz_hover = false; return; }
+    float rd, md = muzzle_pick_dist(E.mouse);
+    int h = pick(E.mouse, &rd);
+    E.mz_hover = md < S(12.0f) && md <= rd;   // the muzzle marker wins over a control under it
+    E.hover = E.mz_hover ? -1 : h;
     if (nk_input_is_mouse_pressed(in, NK_BUTTON_LEFT)) {
         int ax = gizmo_pick(E.mouse);
         if (ax >= 0 && xform_begin(gizmo_mode(), E.mouse, true)) { hpx_axis(&E.xf, ax, false); return; }
-        select_click(E.hover, shift);
+        if (E.mz_hover) select_muzzle(true);
+        else select_click(E.hover, shift);
     }
 }
 
@@ -1242,6 +1533,15 @@ static void save_target(void) {
     }
     hp_edit_commit(d);
     status("%s %s%s", ok ? "saved" : "cannot write", where, rel);
+    // The gun's muzzle with its grip, when edited.
+    WeaponDef *wd = ok && t.entry >= 0 ? muzzle_weapon_of(t.entry) : NULL;
+    if (wd && E.mz_dirty[weapon_index(wd)]) {
+        char grip[sizeof(E.status)], mz[sizeof(E.status)];
+        snprintf(grip, sizeof(grip), "%s", E.status);
+        muzzle_save(wd);
+        snprintf(mz, sizeof(mz), "%s", E.status);
+        status("%s; %s", grip, mz);
+    }
 }
 
 static void store_key(void) {
@@ -1286,6 +1586,12 @@ static void select_grip(int e) {
 
 // ------------------------------------------------------------------ panels
 
+// Edited and not saved: the grip, or its gun's muzzle.
+static bool entry_dirty(int i) {
+    const WeaponDef *wd = muzzle_weapon_of(i);
+    return is_dirty(db()->e[i].hash) || (wd && E.mz_dirty[weapon_index(wd)]);
+}
+
 static void draw_list(struct nk_context *ctx) {
     HandPoseDB *d = db();
     float h = ui_height() * 0.52f;
@@ -1318,9 +1624,9 @@ static void draw_list(struct nk_context *ctx) {
                     if (E.cat >= 0 && e->category != E.cat) continue;
                     if (e->category > HPC_ATTACHMENT) continue;
                     if (E.f_unreviewed && e->reviewed) continue;
-                    if (E.f_edited && !is_dirty(e->hash)) continue;
+                    if (E.f_edited && !entry_dirty(i)) continue;
                     if (E.filter[0] && !strstr(e->id, E.filter) && !strstr(e->label, E.filter)) continue;
-                    snprintf(b, sizeof(b), "%c%c%c %s", e->reviewed ? ' ' : '*', handpose_entry_has_overrides(e) ? '+' : ' ', is_dirty(e->hash) ? '!' : ' ', e->id);
+                    snprintf(b, sizeof(b), "%c%c%c %s", e->reviewed ? ' ' : '*', handpose_entry_has_overrides(e) ? '+' : ' ', entry_dirty(i) ? '!' : ' ', e->id);
                     nk_bool on = !E.case_mode && e->hash == E.sel_entry;
                     if (nk_selectable_label(ctx, b, NK_TEXT_LEFT, &on) && on) select_grip(i);
                 }
@@ -1378,6 +1684,7 @@ static void draw_outliner(struct nk_context *ctx) {
                     nk_bool on = all;
                     if (nk_selectable_label(ctx, b, NK_TEXT_LEFT, &on)) {
                         if (!(key_down(SDL_SCANCODE_LSHIFT) || key_down(SDL_SCANCODE_RSHIFT))) memset(E.sel, 0, sizeof(E.sel));
+                        E.mz_sel = false;
                         hp_rig_select_finger(E.sel, hd, f, on);
                         E.active = HP_RIG_FINGER(hd, f, 0);
                     }
@@ -1389,9 +1696,14 @@ static void draw_outliner(struct nk_context *ctx) {
         nk_layout_row_dynamic(ctx, S(17), 1);
         outliner_row(ctx, HP_RIG_POLE(0), 1);
         outliner_row(ctx, HP_RIG_POLE(1), 1);
+        if (muzzle_weapon()) {
+            // The gun's muzzle socket (on the item, not a rig control).
+            nk_bool mo = E.mz_sel;
+            if (nk_selectable_label(ctx, "   Muzzle (item socket)", NK_TEXT_LEFT, &mo)) select_muzzle(mo);
+        }
         nk_layout_row_dynamic(ctx, S(22), 2);
-        if (nk_button_label(ctx, "whole hand L")) { memset(E.sel, 0, sizeof(E.sel)); hp_rig_select_hand(E.sel, 0, true); E.active = HP_RIG_IK(0); }
-        if (nk_button_label(ctx, "whole hand R")) { memset(E.sel, 0, sizeof(E.sel)); hp_rig_select_hand(E.sel, 1, true); E.active = HP_RIG_IK(1); }
+        if (nk_button_label(ctx, "whole hand L")) { select_only(-1); hp_rig_select_hand(E.sel, 0, true); E.active = HP_RIG_IK(0); }
+        if (nk_button_label(ctx, "whole hand R")) { select_only(-1); hp_rig_select_hand(E.sel, 1, true); E.active = HP_RIG_IK(1); }
         nk_layout_row_dynamic(ctx, S(14), 1);
         nk_label(ctx, "[ parent  ] child  ; siblings  M mirror  A all", NK_TEXT_LEFT);
     }
@@ -1418,7 +1730,7 @@ static void draw_toolbar(struct nk_context *ctx) {
         }
         nk_layout_row_dynamic(ctx, S(18), 1);
         char b[300];
-        if (hpx_active(&E.xf)) snprintf(b, sizeof(b), "%s   (X/Y/Z axis, Shift+axis plane, Ctrl snap, type a value, Enter / click: confirm, Esc / right click: cancel)", E.xf_status);
+        if (hpx_active(&E.xf)) snprintf(b, sizeof(b), "%s   (X/Y/Z axis, Shift+axis plane, Ctrl snap, Shift precision, type a value, Enter / click: confirm, Esc / right click: cancel)", E.xf_status);
         else snprintf(b, sizeof(b), "%s", E.status[0] ? E.status : "G move  R rotate  S scale  Alt+G/R/S clear  I keyframe  Ctrl+Z / Ctrl+Shift+Z  Ctrl+S save  MMB / RMB orbit");
         nk_label(ctx, b, NK_TEXT_LEFT);
     }
@@ -1436,6 +1748,55 @@ static bool prop3(struct nk_context *ctx, const char *names[3], vec3 *v, float l
         } else nk_property_float(ctx, names[i], lo, f[i], hi, step, step * 0.25f);
     }
     return memcmp(&o, v, sizeof(o)) != 0;
+}
+
+// The Muzzle tab (guns): the edited gun's hold.sockets.muzzle in item space (mm), the bore
+// helpers, revert / save, where the barrel ends and what a mounted device does.
+static void draw_muzzle_panel(struct nk_context *ctx) {
+    WeaponDef *wd = muzzle_weapon();
+    if (!wd || !nk_tree_push(ctx, NK_TREE_TAB, "Muzzle", NK_MAXIMIZED)) return;
+    char b[220];
+    int wi = weapon_index(wd);
+    nk_layout_row_dynamic(ctx, S(17), 1);
+    struct nk_color fc = E.mz_dirty[wi] ? nk_rgb(255, 200, 90) : nk_rgb(150, 220, 150);
+    nk_label_colored(ctx, wd->file, NK_TEXT_LEFT, fc);
+    nk_label_colored(ctx, E.mz_dirty[wi] ? "edited, not saved" : "as in the file", NK_TEXT_LEFT, fc);
+    nk_layout_row_dynamic(ctx, S(22), 2);
+    nk_bool on = E.mz_sel;
+    if (nk_selectable_label(ctx, E.mz_sel ? "selected (G)" : "select", NK_TEXT_CENTERED, &on)) select_muzzle(on);
+    E.mz_show = nk_check_label(ctx, "show marker", E.mz_show);
+    // Item space, mm (x right, y up, -z the barrel forward): drag to scrub, double-click to type.
+    vec3 mm = v3_scale(wd->sockets.muzzle, 1000.0f), m0 = mm;
+    nk_layout_row_dynamic(ctx, S(20), 1);
+    nk_property_float(ctx, "#X (mm)", -3000.0f, &mm.x, 3000.0f, 0.1f, 0.05f);
+    nk_property_float(ctx, "#Y (mm)", -3000.0f, &mm.y, 3000.0f, 0.1f, 0.05f);
+    nk_property_float(ctx, "#Z (mm)", -3000.0f, &mm.z, 3000.0f, 0.1f, 0.05f);
+    if (memcmp(&mm, &m0, sizeof(mm))) muzzle_set(v3_scale(mm, 0.001f), 0xB000u, NULL);
+    nk_layout_row_dynamic(ctx, S(16), 1);
+    nk_label(ctx, "item space: -z = shot direction", NK_TEXT_LEFT);
+    nk_layout_row_dynamic(ctx, S(22), 3);
+    if (nk_button_label(ctx, "to bore")) muzzle_set(hp_muzzle_snap(wd, wd->sockets.muzzle, HPM_BORE), 0, "on the bore");
+    if (nk_button_label(ctx, "to tip")) muzzle_set(hp_muzzle_snap(wd, wd->sockets.muzzle, HPM_TIP), 0, "on the barrel tip");
+    if (nk_button_label(ctx, "default")) muzzle_set(wd->muzzle_offset, 0, "back to the default");
+    nk_layout_row_dynamic(ctx, S(22), 2);
+    if (nk_button_label(ctx, "revert to file")) muzzle_revert(wd);
+    if (nk_button_label(ctx, "save muzzle")) muzzle_save(wd);
+    nk_layout_row_dynamic(ctx, S(16), 1);
+    int bp = hp_muzzle_barrel_part(wd);
+    if (bp >= 0) {
+        vec3 tip = v3_scale(hp_muzzle_snap(wd, wd->sockets.muzzle, HPM_TIP), 1000.0f), m = v3_scale(wd->sockets.muzzle, 1000.0f);
+        snprintf(b, sizeof(b), "tip: %.1f %.1f %.1f mm", tip.x, tip.y, tip.z);
+        nk_label(ctx, b, NK_TEXT_LEFT);
+        snprintf(b, sizeof(b), "muzzle - tip: %.1f %.1f %.1f mm", m.x - tip.x, m.y - tip.y, m.z - tip.z);
+        nk_label(ctx, b, NK_TEXT_LEFT);
+    }
+    if (E.mz_device[0]) {
+        // The shots leave the device's front face (cyan), not the socket.
+        snprintf(b, sizeof(b), "device: %s", E.mz_device);
+        nk_label_colored(ctx, b, NK_TEXT_LEFT, nk_rgb(120, 220, 255));
+        nk_label_colored(ctx, "shots leave its front (cyan)", NK_TEXT_LEFT, nk_rgb(120, 220, 255));
+    }
+    nk_tree_pop(ctx);
 }
 
 static void draw_npanel(struct nk_context *ctx) {
@@ -1483,9 +1844,10 @@ static void draw_npanel(struct nk_context *ctx) {
             for (int s = 0; s < HP_STATE_COUNT; s++) st[s] = holdpoint_state_name(s);
             E.preview_state = nk_combo(ctx, st, HP_STATE_COUNT, E.preview_state, (int)S(20), nk_vec2(S(180), S(260)));
         }
-        // ---- the active control
+        draw_muzzle_panel(ctx);
+        // ---- the active control (the muzzle selected: its tab above)
         int a = E.active;
-        if (a >= 0 && nk_tree_push(ctx, NK_TREE_TAB, "Transform", NK_MAXIMIZED)) {
+        if (a >= 0 && !E.mz_sel && nk_tree_push(ctx, NK_TREE_TAB, "Transform", NK_MAXIMIZED)) {
             const HpCtrl *c = hp_rig_ctrl(a);
             nk_layout_row_dynamic(ctx, S(18), 1);
             snprintf(b, sizeof(b), "%s%s", c->name, ctrl_usable(a) ? "" : "  (not editable here)");
@@ -1772,7 +2134,10 @@ static void scene_leave_fn(void) {
     cvar_set_int(cvar_find("holdpoint_force_state"), E.saved_force);
     cvar_set_int(cvar_find("holdpoint_static"), E.saved_static);
     E.case_mode = false;
-    if (E.dirty_count) log_warn("scene handpose: %d edited grip(s) / case(s) not saved (they stay in memory until handpose_reload)", E.dirty_count);
+    int mz = 0;
+    for (int i = 0; i < MAX_WEAPON_DEFS; i++) mz += E.mz_dirty[i] ? 1 : 0;
+    if (E.dirty_count || mz)
+        log_warn("scene handpose: %d edited grip(s) / case(s) and %d muzzle(s) not saved (in memory: grips until handpose_reload, muzzles until weapon_reload)", E.dirty_count, mz);
 }
 
 static const GameScene k_scene = {
@@ -1787,6 +2152,56 @@ static const GameScene k_scene = {
 };
 
 // ------------------------------------------------------------------ hpe command (scripts / tests)
+
+static void muzzle_print(void) {
+    WeaponDef *wd = muzzle_weapon();
+    if (!wd) { log_info("hpe muzzle: the target is not a gun"); return; }
+    muzzle_frame();   // the value just set (a script's edit is not drawn yet)
+    vec3 m = wd->sockets.muzzle, f;
+    char file[96] = "unset";
+    if (muzzle_on_disk(wd, &f)) hp_muzzle_format(f, file, sizeof(file));
+    log_info("hpe muzzle: %s %.4f %.4f %.4f (item space, m)%s%s; file %s", wd->id, m.x, m.y, m.z, E.mz_dirty[weapon_index(wd)] ? " edited" : "", E.mz_sel ? " selected" : "", file);
+    if (!E.mz_valid) return;
+    vec3 fw = quat_rotate(E.mz_item.r, v3(0, 0, -1));
+    log_info("hpe muzzle:   world %.4f %.4f %.4f  barrel %.4f %.4f %.4f  effective %.4f %.4f %.4f%s%s", E.mz_world.x, E.mz_world.y, E.mz_world.z, fw.x, fw.y, fw.z, E.mz_eff.x,
+             E.mz_eff.y, E.mz_eff.z, E.mz_device[0] ? " device " : "", E.mz_device);
+    // The game's side (docs/AIM.md): the held gun's sockets as the character rebuilt them on its last
+    // tick (the live def + attachments), the point shots leave from, and the aim claim (the muzzle in
+    // the player's view, what the UserCmd carries) back in the world. All three = the effective
+    // marker one tick after an edit.
+    Game *g = game();
+    Player *p = game_local_player();
+    CharacterInst *c = local_char();
+    vec3 pos, dir, cam;
+    int age = 0;
+    if (!g || !p || !c || !c->item_weapon || !chars_item_muzzle(g->world, p->ent, &pos, &dir)) return;
+    vec3 s = c->item_sock.muzzle;
+    log_info("hpe muzzle:   game socket %.4f %.4f %.4f  shoots from %.4f %.4f %.4f (%.1f mm from the effective marker)", s.x, s.y, s.z, pos.x, pos.y, pos.z,
+             v3_dist(pos, E.mz_eff) * 1000.0f);
+    if (chars_muzzle_cam(g->world, p->ent, &cam, &age)) {
+        vec3 cw = aim_cam_to_world(player_eye_pos(&p->sim.move), p->sim.move.yaw, p->sim.move.pitch, cam);
+        log_info("hpe muzzle:   aim claim %.4f %.4f %.4f (view space)  world %.4f %.4f %.4f (%.1f mm from the effective marker, %d ticks old)", cam.x, cam.y, cam.z, cw.x, cw.y, cw.z,
+                 v3_dist(cw, E.mz_eff) * 1000.0f, age);
+    }
+}
+
+// hpe muzzle [<x> <y> <z> | select | deselect | bore | tip | default | revert | save | show on|off]
+static void cmd_muzzle(int argc, const char **argv) {
+    if (!argc) { muzzle_print(); return; }
+    WeaponDef *wd = muzzle_weapon();
+    const char *a = argv[0];
+    if (!wd) { log_warn("hpe muzzle: the target is not a gun (hpe select <weapon>)"); return; }
+    if (((a[0] >= '0' && a[0] <= '9') || a[0] == '-' || a[0] == '.') && argc >= 3) muzzle_set(v3((float)atof(argv[0]), (float)atof(argv[1]), (float)atof(argv[2])), 0, "set");
+    else if (!strcmp(a, "select") || !strcmp(a, "deselect")) select_muzzle(a[0] == 's');
+    else if (!strcmp(a, "bore")) muzzle_set(hp_muzzle_snap(wd, wd->sockets.muzzle, HPM_BORE), 0, "on the bore");
+    else if (!strcmp(a, "tip")) muzzle_set(hp_muzzle_snap(wd, wd->sockets.muzzle, HPM_TIP), 0, "on the barrel tip");
+    else if (!strcmp(a, "default")) muzzle_set(wd->muzzle_offset, 0, "back to the default");
+    else if (!strcmp(a, "revert")) muzzle_revert(wd);
+    else if (!strcmp(a, "save")) muzzle_save(wd);
+    else if (!strcmp(a, "show") && argc > 1) E.mz_show = !strcmp(argv[1], "on");
+    else { log_warn("hpe muzzle [<x> <y> <z> (item space, m) | select | deselect | bore | tip | default | revert | save | show on|off]"); return; }
+    muzzle_print();
+}
 
 static void dump_target(void) {
     HpTarget t = target();
@@ -1810,6 +2225,7 @@ static void dump_target(void) {
             log_info("hpe:   %s: set %04x ik %.4f %.4f %.4f, index curl %.2f %.2f %.2f, thumb %.2f", h ? "right" : "left", hp_target_layer(d, t, h)->set, p.socket.t.x, p.socket.t.y, p.socket.t.z,
                      p.j[HF_INDEX][0].curl, p.j[HF_INDEX][1].curl, p.j[HF_INDEX][2].curl, p.j[HF_THUMB][0].curl);
         }
+    if (muzzle_weapon_of(t.entry)) muzzle_print();
 }
 
 // World freeze check (tests): the time of day, the weather and every zombie / NPC / vehicle
@@ -1875,7 +2291,8 @@ static void cmd_hpe(int argc, const char **argv) {
     if (!d || argc < 2) {
         log_info("hpe select <grip> | case <id> | ctrl <name> [add] | key <name>... | xform move|rotate|scale [x|y|z|-x|...] <value> | local <loc|rot|scale> x [y z] | "
                  "clear g|r|s | time <s> | play | stop | keyframe | mirror on|off | tool <name> | orient <name> | pivot <name> | light neutral|world | save | undo | redo | "
-                 "view orbit|fp|root|ctrl|<yaw> <pitch> <dist> | freeze begin|check | solve [all] | contact <finger> | dump");
+                 "view orbit|fp|root|ctrl|<yaw> <pitch> <dist> | freeze begin|check | solve [all] | contact <finger> | dump | "
+                 "muzzle [<x> <y> <z>|select|deselect|bore|tip|default|revert|save|show on|off]");
         return;
     }
     const char *c = argv[1];
@@ -1939,6 +2356,7 @@ static void cmd_hpe(int argc, const char **argv) {
     if (!strcmp(c, "undo") || !strcmp(c, "redo")) { undo_redo(c[0] == 'r'); return; }
     if (!strcmp(c, "save")) { save_target(); return; }
     if (!strcmp(c, "dump")) { dump_target(); return; }
+    if (!strcmp(c, "muzzle")) { cmd_muzzle(argc - 2, argv + 2); return; }
     if (!strcmp(c, "mirror") && argc > 2) { E.mirror_live = !strcmp(argv[2], "on"); return; }
     if (!strcmp(c, "onion") && argc > 2) { E.onion = !strcmp(argv[2], "on"); return; }
     if (!strcmp(c, "tool") && argc > 2) {

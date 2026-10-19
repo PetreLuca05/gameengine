@@ -21,7 +21,6 @@ void sway_profile_defaults(SwayProfile *p) {
     p->bob_pos = 0.012f;
     p->bob_rot = 1.2f;
     p->bob_freq = 1.0f;
-    p->sprint_bob = 1.4f;
     p->land_k = 110.0f;
     p->land_d = 13.0f;
     p->land_gain = 0.06f;
@@ -64,7 +63,6 @@ void sway_profile_parse(SwayProfile *p, const cJSON *j) {
     p->bob_pos = jf(o, "pos", p->bob_pos);
     p->bob_rot = jf(o, "rot", p->bob_rot);
     p->bob_freq = jf(o, "freq", p->bob_freq);
-    p->sprint_bob = jf(o, "sprint", p->sprint_bob);
     const cJSON *n = jget(j, "landing");
     p->land_k = jf(n, "stiffness", p->land_k);
     p->land_d = jf(n, "damping", p->land_d);
@@ -167,7 +165,8 @@ void sway_eval(SwayState *st, const SwayProfile *p, const SwayInput *in, SwayOut
     st->bob_amt += (bob_target - st->bob_amt) * (1.0f - dm_expf(-8.0f * dt));
     if (in->phase_valid) st->bob_phase = in->stride * p->bob_freq;
     else st->bob_phase += dt * (4.5f + speed * 1.1f) * p->bob_freq;
-    float bob = st->bob_amt * S * (in->sprint ? p->sprint_bob : in->bob_scale);
+    // Sprinting: none (the sprint clip carries the arms and the item, docs/CAMERA_HOLDPOINT.md).
+    float bob = st->bob_amt * S * (in->sprint ? 0.0f : in->bob_scale);
     vec3 bob_pos = v3(dm_sinf(st->bob_phase) * p->bob_pos * bob, -fabsf(dm_cosf(st->bob_phase)) * p->bob_pos * 1.2f * bob, 0);
     vec3 bob_rot = v3(0, 0, dm_sinf(st->bob_phase) * p->bob_rot * bob);
     // Landing: a dip on touchdown, stronger for harder landings, settling on a spring.

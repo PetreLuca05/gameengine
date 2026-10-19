@@ -433,10 +433,12 @@ static void graphics_comfort(GuiCursor *c) {
             gw_label(r, buf, gui_s(TH->t_body), GW_REGULAR, TH->text_faint, GUI_LEFT);
         } else {
             row_slider_cvar(c, "Field of view", "cl_fov", 60, 120, 1, "%.0f\xC2\xB0",
-                            svm && svm->f >= 1.0f ? "Vertical camera FOV (this server caps it). Your hands and weapon follow it; aiming zooms by the sight's own amount."
-                                                  : "Vertical camera FOV (75 = 107\xC2\xB0 horizontal at 16:9). Your hands and weapon follow it; aiming zooms by the sight's own amount.");
+                            svm && svm->f >= 1.0f ? "Vertical camera FOV of the world (this server caps it). Aiming zooms by the sight's own amount."
+                                                  : "Vertical camera FOV of the world (75 = 107\xC2\xB0 horizontal at 16:9). Aiming zooms by the sight's own amount.");
         }
     }
+    row_slider_cvar(c, "Hands FOV", "cl_hands_fov", 50, 90, 1, "%.0f\xC2\xB0",
+                    "Vertical FOV of your arms and the held item only (the world keeps Field of view). Aiming uses the sight's own FOV.");
     row_slider_cvar(c, "Sprint FOV effect", "cl_sprint_fov", 0, 7, 0.5f, "%.1f\xC2\xB0", "The view widens a little while sprinting (0 = off).");
     row_slider_cvar(c, "Screen effects", "r_post_feedback", 0.5f, 1, 0.05f, "%.2f", "Damage, flash and low-health effects (photosensitivity).");
     static const char *const gore[] = { "Off", "Low", "High" };

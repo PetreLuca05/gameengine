@@ -2,8 +2,9 @@
 // the editor feeds mouse positions, keys and a projection; the module returns each transformed
 // control's new world transform. Grab / rotate / scale (G / R / S), axis constraints (X / Y / Z,
 // pressed again: the next orientation, Shift+axis: the plane without it), Ctrl snapping, typed
-// values, Esc / right click cancel, Enter / click confirm; orientation Global / Local / Parent /
-// Normal; pivot individual origins / median / active.
+// values, Esc / right click cancel, Enter / click confirm, Shift precision (a tenth of the mouse
+// motion, finer snapping); orientation Global / Local / Parent / Normal; pivot individual origins /
+// median / active.
 #ifndef DG_HP_XFORM_H
 #define DG_HP_XFORM_H
 
@@ -33,6 +34,8 @@ typedef struct HpXform {
     int axis_presses;              // repeated presses of the same axis key cycle global -> local -> free
     char num[24];                  // typed value ("" = mouse)
     vec2 mouse0;                   // where the transform started (screen px)
+    bool precise;                  // set by the caller (Shift held): mouse motion counts a tenth, snaps 1/5 the step
+    vec2 mouse_last, mouse_off;    // precision: the transform follows the mouse + mouse_off
     vec3 pivot;                    // world
     quat basis[HPX_ORIENT_COUNT];  // the axis frames per orientation (active control)
     int count, active;
@@ -51,7 +54,8 @@ void hpx_begin(HpXform *x, int mode, vec2 mouse, int n, const int *ids, const Xf
 void hpx_axis(HpXform *x, int axis, bool shift);   // X / Y / Z (0..2)
 // Typed input: '0'..'9', '.', '-' (negates), '\b' (backspace). False: not a numeric character.
 bool hpx_char(HpXform *x, char c);
-// Recomputes out[] for the current mouse position; snap = Ctrl held.
+// Recomputes out[] for the current mouse position; snap = Ctrl held (5 mm / 5 deg / 0.05, with
+// precise 1 mm / 1 deg / 0.01).
 void hpx_update(HpXform *x, vec2 mouse, const HpxView *v, bool snap);
 void hpx_cancel(HpXform *x);       // out = start, mode none
 void hpx_end(HpXform *x);          // mode none (out keeps the result)

@@ -40,6 +40,7 @@ Attachment space uses the item convention: -Z points forward (along the barrel),
 | `reticle` | See the next table |
 | `lens` | See the table after it |
 | `ads_dof_near_blur` | Near-field (weapon) blur while aimed, in CoC pixels |
+| `pip_resolution` | Scopes: the picture-in-picture resolution, a multiplier on `r_scope_pip_scale` × the render height (default 1; 4x 0.75, 8x 1.5). The product is clamped to the Engine Fidelity level's `r_scope_pip_scale` range: no sight costs more than the level allows. See "The PiP pass". |
 | `modifiers` | Multipliers. Default 1, see below. |
 | `muzzle_length`, `muzzle_device` | Muzzle devices: the muzzle moves to the device's front face. `muzzle_device` is a block, `{ "kind": "hider|comp|suppressor", "flash": {...}, "ports", "report_db", "velocity_mul", "poi_moa", "pop_cold_s", ... }`. Its fields are the flash component multipliers, the report level, velocity / point of impact, and the suppressor pop / heat ([BALLISTICS.md](BALLISTICS.md) "Muzzle devices"). A plain string picks only the VFX device. |
 | `grip_l` | Underbarrel grips: the left-hand socket, as `{pos, fingers, back}` (palm frame) |
@@ -223,9 +224,8 @@ per-frame re-solve. The barrel pull is used only if the slide isn't enough.
   (at most 2.35x aimed, `REDDOT_MAX_VM_ZOOM`, the rifle's: a 1x optic on the sniper / DMR, whose irons
   are narrow, doesn't fill the screen), a scope `main_zoom`; each as a FOV against a 75° view, so the gun and sight look as they did
   when this zoomed the whole view. The default irons are `75 · 0.8` = 60° against 75°, the
-  1.25x ADS hands zoom. The hip value is `RenderCamera.vm_fov_deg` (the hip FOV) or
-  `cam_weapon_fov`: the Settings → Graphics → View "Hands / weapon FOV" slider (40..120; the
-  "Hands FOV follows camera" toggle sets 0 = the camera FOV, and moving the slider turns it off).
+  1.25x ADS hands zoom. The hip value is `cl_hands_fov`: the Settings → Graphics → Comfort "Hands
+  FOV" slider (50..90, default 65; the arms layer's own FOV, docs/CAMERA_HOLDPOINT.md "Rule 3").
   The slider sets only the hip value; aiming narrows it by the same `attach_ads_vm_zoom` as before
   (`render_vm_fov_for`), so the sights look the same at any hands FOV. The sight is on the view
   axis, so it projects to the exact screen centre under either projection.
@@ -298,8 +298,10 @@ scope image, where `k = zoom · tan(main/2) / tan(base/2)`. Effects:
 
 **The PiP pass** (`exec_scope_pip`) renders the world through the scope **exactly like the main
 view**: the same frame data (lights, shadows, local light shadows, weather / wetness / puddles,
-foliage wind, sky, fog settings), only the camera and the target differ. The target size is
-`r_scope_pip_scale` × the render height, 128..2048 px. In order:
+foliage wind, sky, fog settings), only the camera and the target differ. The target is square,
+`r_scope_pip_scale` × the optic's `pip_resolution` × the render height, 128..2048 px
+(`game_sights.c` `sight_pip_scale`, `render_scope_pip_px`); the product of the two factors is
+clamped to the fidelity level's `r_scope_pip_scale` range (`fid_clamp_current`). In order:
 
 | Pass | What |
 |---|---|
@@ -316,6 +318,45 @@ supersampled against the lens and the reticle must stay sharp) and the distortio
 (heat haze refracts the main view's image). A near plane at 0.3 m keeps the player's own body and
 weapon out. `tools/tests/scope_match.py` checks that the lens and the world around it match
 (fog wall, ≤ 4/255 per channel).
+
+#### PiP resolution per sight
+
+The PiP covers the ocular plus a 15 % margin (`1.15 · t_lens / k` in PiP tangents), and `scope.frag`
+samples it with one bilinear tap (no mips). What decides the look is therefore the PiP texels per
+screen pixel across the lens. Aimed, the hands / weapon FOV is fixed per sight, so the lens covers a
+fixed share of the screen height for each optic: a per-sight multiplier on the height-based size is a
+per-sight texel density, and the target size stays constant through the ADS transition (no frame
+graph image of a new size every frame).
+
+Measured at 1080p (`sight_pip_res` while aimed, sighting lane):
+
+| Sight | Picture on screen | Before (both 1080 px) | `pip_resolution` | After |
+|---|---|---|---|---|
+| `scope_4x` | 783 px (72 % of the height) | 1.38 texels / px: the sub-pixel 1 MOA grid at 100 m is drawn at full contrast (aliased, too crisp) | 0.75 | 810 px, 1.03 texels / px (0.66 Mpx, -44 %) |
+| `scope_8x` | 984 px (91 %) | 1.10 texels / px: the 200 m grid lines alias into uneven weights | 1.5 | 1620 px, 1.65 texels / px (2.62 Mpx, +125 %) |
+
+PiP size at a 1920x1080 output per Engine Fidelity level (default `r_scope_pip_scale`; the level's
+render height: High / Medium upscale from 810, Low from 712, Off renders 648):
+
+| Level | `r_scope_pip_scale` (max) | Before, any scope | 4x | 8x |
+|---|---|---|---|---|
+| Modern | 1 (2) | 1080 | 810 | 1620 |
+| High | 1 (1.5) | 810 | 608 | 1215 |
+| Medium | 0.75 (1) | 608 | 456 | 810 (1.125 clamped to 1) |
+| Low | 0.6 (0.75) | 427 | 320 | 534 (0.9 clamped to 0.75) |
+| Off | 0.5 (0.5) | 324 | 243 | 324 (0.75 clamped to 0.5) |
+
+Modern at 2560x1440: 4x 1080, 8x 2048 (was 1440 for both); at 3840x2160: 4x 1620, 8x 2048 (was 2048).
+
+Above about 1.5 texels per pixel more PiP pixels add little but cost and shimmer (one tap, no
+mips); below 1 the lens goes soft. `sight_pip_res <optic> <multiplier>` tunes a sight live; copy the
+value into its JSON.
+
+**Known limitation.** The PiP's screen-space inputs are the main view's: AO, contact shadows, SSR,
+SSGI and the froxel fog are looked up through the main projection at the main render resolution. In
+the lens each main-view pixel of them is magnified by k (about 2.7 on the 4x, 5.3 on the 8x at the
+1.5 ADS world zoom), so they look blocky through the 8x whatever `pip_resolution` is: a higher PiP
+resolution sharpens the geometry, textures and shadow-map lookups, not those inputs.
 
 ### Depth of field
 
@@ -341,13 +382,14 @@ ADS DoF switches on exactly while the aim is complete (`ads_dof`):
 |---|---|
 | `attach [slot] [id/none]` | Equipped weapon; no arguments lists the slots and options |
 | `bench` | Toggle the bench UI |
-| `ads_debug 1` | The sight socket projected against the exact screen centre (px, mm off axis, degrees, eye relief), world / hands FOV, sight zoom, PiP FOV, sensitivity, DoF mode |
+| `ads_debug 1` | The sight socket projected against the exact screen centre (px, mm off axis, degrees, eye relief), world / hands FOV, sight zoom, PiP FOV, PiP size and the screen pixels it covers, sensitivity, DoF mode |
 | `sight_debug 1..6` | 1 lens mask, 2 raw PiP, 3 eye box, 4 reticle only, 5 glass only, 6 lens hit / occlusion |
 | `cl_fov` | World camera vertical FOV (50..120, default 75; Settings "Field of view") |
 | `cl_ads_world_zoom` | ADS world zoom (tangent ratio 1..1.5, default 1.5, not saved, no Settings slider); sights override it with `world_zoom` |
 | `sv_fov`, `sv_fov_max`, `sv_fov_max_aspect` | Host override of every player's FOV (0 = off), cap of `cl_fov` (0 = none), the widest Hor+ aspect (16:9; 0 = unlimited); replicated |
 | `fov_report` | cl_fov / sv_fov / base / current world and hands FOV |
-| `r_scope_pip_scale` | PiP resolution (fraction of the render height) |
+| `r_scope_pip_scale` | PiP resolution (fraction of the render height), × the optic's `pip_resolution`, bounded by the fidelity level |
+| `sight_pip_res [optic multiplier]` | Every scope's `pip_resolution`, the scale and PiP size it gets at the current level / height, and while aimed the picture's screen extent and texels per pixel; with a value, sets that optic's multiplier live (not saved). The size is also logged (`scope: PiP NxN`, debug) when it changes. |
 | `sight_brightness` | Red dot / illuminated reticle brightness |
 | `ads_sens_mode`, `ads_sens_coef` | Sensitivity scaling |
 | `ads_dof`, `ads_dof_focus`, `ads_dof_fstop`, `ads_dof_near_blur` | ADS depth of field |

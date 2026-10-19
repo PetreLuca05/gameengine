@@ -1549,6 +1549,7 @@ static void warn_live_session(const char *what) {
 static void cmd_anim_reload(int argc, const char **argv) {
     if (!g_engine.anim) return;
     anim_lib_reload_meta(g_engine.anim);
+    game_camera_eye_check();   // the nominal eye follows the animation (and stays in the manifest)
     log_info("anim_reload: manifest %08x", anim_manifest_combined(&g_engine.anim->manifest));
     warn_live_session("anim_reload");
 }
@@ -1556,6 +1557,7 @@ static void cmd_anim_reload(int argc, const char **argv) {
 static void cmd_anim_rebake(int argc, const char **argv) {
     if (!g_engine.anim) return;
     anim_lib_rebake(g_engine.anim);
+    game_camera_eye_check();
     log_info("anim_rebake: %d clips, manifest %08x", g_engine.anim->clip_count, anim_manifest_combined(&g_engine.anim->manifest));
     warn_live_session("anim_rebake");
 }
@@ -1796,16 +1798,11 @@ static void cmd_status(int argc, const char **argv) {
 }
 
 // Settings migrations after the config file is loaded (archived values of renamed / repurposed
-// cvars). 1: cam_bob_scale now offsets the camera from the head eye (default 0).
+// cvars). 1: (cam_bob_scale, removed with the gliding camera).
 void game_config_loaded(void) {
     Cvar *ver = cvar_find("cfg_migration");
     if (!ver) return;
     CvarSource src = cvar_source_push(CVAR_SRC_HOST);   // resets of locked tuning cvars
-    if (ver->i < 1) {
-        Cvar *bob = cvar_find("cam_bob_scale");
-        if (bob) cvar_reset(bob);
-        log_info("config: migrated cam_bob_scale to its new default (first-person camera on the head)");
-    }
     if (ver->i < 2) {
         // 2: gun sway / recoil kick back on (they were saved as 0 by the camera-fix build).
         const char *names[] = { "wpn_kick_scale", "cam_kick_scale" };
@@ -1898,6 +1895,7 @@ void game_init(void) {
     bal_world_register();
     weapons_add_shot_hook(on_shot, NULL);
     game_fire_init();
+    game_arms_init();
     crosshair_init();
     recoil_debug_init();
     camera_register_cvars();
@@ -1914,9 +1912,8 @@ void game_init(void) {
     characters_register_cvars();
     cvar_reg_bool("cl_thirdperson", false, CVAR_LOCKED, "debug: camera behind the local player (full body visible)");
     cvar_reg_float("cl_thirdperson_dist", 3.0f, 0.5f, 10.0f, CVAR_LOCKED, "debug third-person camera distance");
-    cvar_reg_bool("cl_camera_socket", true, CVAR_LOCKED, "first-person camera on the player model's head socket (assets/characters/player.json \"sockets\")");
-    cvar_reg_float("cl_camera_socket_follow", 0.35f, 0.0f, 1.0f, CVAR_LOCKED, "how much of the head socket's vertical bob the first-person camera takes (0 = none, rock steady)");
-    cvar_reg_float("cl_camera_socket_roll", 0.0f, 0.0f, 1.0f, CVAR_LOCKED, "how much of the head socket's roll the camera takes (0 = none)");
+    cvar_reg_bool("cl_camera_socket", true, CVAR_LOCKED,
+                  "first-person camera of the player model: the gliding nominal eye validated by the head socket (docs/CAMERA_HOLDPOINT.md; 0 = the capsule eye)");
     cvar_reg_bool("cl_healthbars", false, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "health bars and names above characters / dummies (HUD code kept, hidden by default)");
     G->anim_rate = cvar_reg_int("anim_sample_rate", SIM_HZ, 30, 120, CVAR_LOCKED, "FBX bake sample rate (Hz); defaults to the simulation rate");
     g_engine.anim = (AnimLibrary *)calloc(1, sizeof(AnimLibrary));
@@ -1929,6 +1926,7 @@ void game_init(void) {
     if (g_engine.anim) movement_set_eye_offset(chars_eye_offset);
     if (g_engine.anim) attach_set_hold_params(&g_engine.anim->proc);   // scope rail positions use the styles' eye relief
     if (!items_load(&G->items, "data/items.json", "data/weapons")) log_error("game: item data failed to load");
+    game_camera_eye_check();
     bal_world_load();
     g_engine.items = &G->items;
     basic_meshes_create(&G->meshes);

@@ -21,7 +21,7 @@ typedef struct SwayProfile {
     // look lag (deg / m per rad/s, clamp, spring)
     float lag_rot, lag_pos, lag_max, lag_k, lag_d;
     // movement bob
-    float bob_pos, bob_rot, bob_freq, sprint_bob;
+    float bob_pos, bob_rot, bob_freq;
     // landing dip
     float land_k, land_d, land_gain, land_max, land_pitch;
     // component multipliers at the hip and in ADS (blended with the ADS progress by the hold point)

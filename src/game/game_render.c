@@ -23,6 +23,8 @@
 #include "gameplay/effects.h"
 #include "player/hands.h"
 #include "player/camera_fp.h"
+#include "anim/eye_nominal.h"
+#include "anim/anim_library.h"
 #include "physics/physics.h"
 #include "ui/ui.h"
 #include "ui/hud.h"
@@ -49,12 +51,26 @@ typedef struct GameRender {
     CapsuleMesh capsules[MAX_CAPSULE_MESHES];
     int capsule_count;
     int cam_mode;              // 0 fallback, 1 head camera, 2 death camera, 3 third person
-    vec3 head_eye, ideal_eye;  // cam_debug
+    vec3 head_eye, ideal_eye;  // cam_debug: the animated head eye, the nominal eye
+    float cam_step;            // cam_debug: the glide's step offset (m)
+    int cam_posture;
+    bool cam_eligible;         // this frame counts for the anchor check
+    CamAnchorStats anchor;     // cam_anchor_report
+    u64 anchor_logged;
+    u64 glide_frame;           // the last frame the glide ran (a gap restarts it)
+    vec3 glide_pos;            // the capsule then (a jump of metres is a teleport: restart)
+    u32 land_seen;             // the last landing seen, and the frame it was seen (the anchor's eligibility)
+    u64 land_frame;
     char cam_text[256];
     // camera penetration stats (cam_debug / cam_stats): frames where the eye is behind geometry
     // as seen from the capsule, or geometry is closer than the near plane margin
     u32 pen_frames, pen_behind, pen_near;
     float pen_min_dist;
+    // The arms layer's aim correction this frame (deg right / up of the shot against the view: sway,
+    // ADS bob, the ADS counter of the visual camera kick), the view pitch it is measured at, and the
+    // first-person screen kick (m towards the eye).
+    vec2 arms_aim;
+    float arms_aim_pitch, arms_screen_kick;
 } GameRender;
 #define GR (g_engine.game_render)
 
@@ -63,10 +79,13 @@ int game_cam_mode(void) { return GR ? GR->cam_mode : 0; }
 static void cmd_cam_stats(int argc, const char **argv);
 static void cmd_cam_track(int argc, const char **argv);
 static void cam_track_frame(const RenderCamera *cam);
+static void cmd_cam_anchor_report(int argc, const char **argv);
+static void cmd_cam_calibrate(int argc, const char **argv);
 
 // fp_cam_test start | report: per-frame first-person invariants while a script drives the player
-//   |camera - head bone| < 0.15 m, camera forward . (camera - pelvis) >= 0 (never behind the body),
-//   hands on their sockets (< 2 mm / 1 deg while the hold IK owns them).
+//   the nominal eye within cam_anchor_radius of the animated head eye (the camera glides, the head
+//   only validates it), camera forward . (camera - pelvis) >= 0 (never behind the body), hands on
+//   their sockets (< 2 mm / 1 deg while the hold IK owns them), the presented ADS sight on the axis.
 static struct {
     bool active, loose;   // loose: sway / kick on, item steadiness + ADS sight checks off
     int frames, bad_head, bad_behind, hand_frames, bad_hands;
@@ -95,16 +114,17 @@ static void cmd_fp_cam_test(int argc, const char **argv) {
     log_info("fp_cam_test: ADS %d settled frames, sight off the view axis max %.3f mm, barrel %.3f deg (limit 0.5 mm / 0.2 deg)", FT.ads_frames, FT.max_ads_mm, FT.max_ads_deg);
     log_info("fp_cam_test: item on its hold point %d frames (not sprint / ADS / vault): max offset %.2f mm %.2f deg, %d frames over 0.5 mm, %d over 10 mm / 0.5 deg",
              FT.item_frames, FT.max_item_mm, FT.max_item_deg, FT.over_half_mm, FT.bad_item);
-    log_info("fp_cam_test: %d frames | camera-head max %.1f mm (%d > 150 mm) | min forward.(cam - head / pelvis) %.1f mm (%d < 0) | hands %d frames, max %.2f mm %.2f deg (%d over 2 mm / 1 deg) -> %s",
-             FT.frames, FT.max_head * 1000, FT.bad_head, FT.min_front * 1000, FT.bad_behind, FT.hand_frames, FT.max_hand_mm, FT.max_hand_deg, FT.bad_hands,
+    float rad = camera_fp_cvars()->anchor_radius ? camera_fp_cvars()->anchor_radius->f : 0.08f;
+    log_info("fp_cam_test: %d frames | nominal eye - head eye max %.1f mm (%d > anchor %.0f mm) | min forward.(cam - head / pelvis) %.1f mm (%d < 0) | hands %d frames, max %.2f mm %.2f deg (%d over 2 mm / 1 deg) -> %s",
+             FT.frames, FT.max_head * 1000, FT.bad_head, rad * 1000, FT.min_front * 1000, FT.bad_behind, FT.hand_frames, FT.max_hand_mm, FT.max_hand_deg, FT.bad_hands,
              ok ? "PASS" : "FAIL");
 }
-static void fp_cam_test_frame(vec3 cam_pos, vec3 fwd) {
+static void fp_cam_test_frame(vec3 cam_pos, vec3 fwd, vec3 nominal, vec3 head_eye, bool eligible) {
     if (!FT.active) return;
     Xform head, pelvis;
     if (!chars_fp_bone_world(BR_HEAD, &head) || !chars_fp_bone_world(BR_HIPS, &pelvis)) return;
     FT.frames++;
-    float dh = v3_len(v3_sub(cam_pos, head.t));
+    float dh = v3_len(v3_sub(nominal, head_eye)), rad = camera_fp_cvars()->anchor_radius ? camera_fp_cvars()->anchor_radius->f : 0.08f;
     // "Behind the body" (horizontal, along the view yaw): the camera must never be behind the
     // head (that exposes the neck / back), nor behind the pelvis while looking level or down
     // (looking up, the eyes rotate back over the neck: anatomical, the view points away from the body).
@@ -112,13 +132,17 @@ static void fp_cam_test_frame(vec3 cam_pos, vec3 fwd) {
     float dhead = v3_dot(fh, v3_sub(cam_pos, head.t));
     float dpel = v3_dot(fh, v3_sub(cam_pos, pelvis.t));
     float df = fwd.y > 0.0f ? dhead : fminf(dhead, dpel);   // the pelvis rule applies looking level or down
-    FT.max_head = fmaxf(FT.max_head, dh);
-    FT.min_front = fminf(FT.min_front, df);
-    if (dh > 0.15f) FT.bad_head++;
-    if (df < 0.0f) FT.bad_behind++;
-    if ((dh > 0.15f || df < 0.0f) && FT.bad_head + FT.bad_behind < 40) {
+    // The anchor holds on eligible frames (settled on-foot motion); "behind" only matters there too:
+    // a jump or a traversal pose moves the head ahead of the gliding eye by design.
+    if (eligible) {
+        FT.max_head = fmaxf(FT.max_head, dh);
+        FT.min_front = fminf(FT.min_front, df);
+        if (dh > rad) FT.bad_head++;
+        if (df < 0.0f) FT.bad_behind++;
+    }
+    if (eligible && (dh > rad || df < 0.0f) && FT.bad_head + FT.bad_behind < 40) {
         Player *p = game_local_player();
-        log_info("fp_cam_test: frame %d cam-head %.0f mm fwd.(cam-pelvis) %.0f mm mode %d crouch %.2f pitch %.0f cam (%.2f %.2f %.2f) head (%.2f %.2f %.2f) pelvis (%.2f %.2f %.2f)",
+        log_info("fp_cam_test: frame %d nominal-head eye %.0f mm fwd.(cam-pelvis) %.0f mm mode %d crouch %.2f pitch %.0f cam (%.2f %.2f %.2f) head (%.2f %.2f %.2f) pelvis (%.2f %.2f %.2f)",
                  FT.frames, dh * 1000, df * 1000, p ? p->sim.move.mode : -1, p ? p->sim.move.crouch_amount : 0, asinf(clampf(fwd.y, -1, 1)) * DG_RAD2DEG,
                  cam_pos.x, cam_pos.y, cam_pos.z, head.t.x, head.t.y, head.t.z, pelvis.t.x, pelvis.t.y, pelvis.t.z);
     }
@@ -238,8 +262,10 @@ void game_render_init(void) {
     cmd_register("fp_cam_test", cmd_fp_cam_test, "fp_cam_test start | report: first-person camera / body / hands invariants");
     GR = ARENA_PUSH(&g_engine.perm_arena, GameRender);
     GR->pen_min_dist = 1e9f;
-    cmd_register("cam_stats", cmd_cam_stats, "print + reset camera penetration / stabilizer stats (sampled while cam_debug is on)");
+    cmd_register("cam_stats", cmd_cam_stats, "print + reset camera penetration stats (sampled while cam_debug is on)");
     cmd_register("cam_track", cmd_cam_track, "cam_track <frames> [label]: log the rendered camera's largest drift (position, rotation, FOV) over the next frames, and whether the inventory is open (tests)");
+    cmd_register("cam_anchor_report", cmd_cam_anchor_report, "first-person camera: the nominal eye against the animated head eye (mean / max / past cam_anchor_radius, per posture); 'reset' clears");
+    cmd_register("cam_calibrate", cmd_cam_calibrate, "measure the nominal first-person eye per posture / hold style / speed / pitch from the animation and write assets/player/eye_nominal.json");
 }
 const char *game_cam_debug_text(void) { return GR ? GR->cam_text : ""; }
 
@@ -286,11 +312,89 @@ static void cam_track_frame(const RenderCamera *cam) {
 static void cmd_cam_stats(int argc, const char **argv) {
     (void)argc;
     (void)argv;
-    log_info("cam_stats: %u frames, eye behind geometry %u, geometry within 6 cm of the eye %u, closest %.1f mm, stabilizer max %.1f mm",
-             GR->pen_frames, GR->pen_behind, GR->pen_near, GR->pen_min_dist * 1000.0f, G->cam_stab.max_seen * 1000.0f);
+    log_info("cam_stats: %u frames, eye behind geometry %u, geometry within 6 cm of the eye %u, closest %.1f mm",
+             GR->pen_frames, GR->pen_behind, GR->pen_near, GR->pen_min_dist * 1000.0f);
     GR->pen_frames = GR->pen_behind = GR->pen_near = 0;
     GR->pen_min_dist = 1e9f;
-    G->cam_stab.max_seen = 0;
+}
+
+// cam_anchor_report [reset]: the nominal eye against the animated head eye since the last reset
+// (docs/CAMERA_HOLDPOINT.md "Rule 2"): mean / max distance, frames past cam_anchor_radius, per posture.
+static void cmd_cam_anchor_report(int argc, const char **argv) {
+    const CamAnchorStats *a = &GR->anchor;
+    float rad = camera_fp_cvars()->anchor_radius ? camera_fp_cvars()->anchor_radius->f : 0.08f;
+    char per[256];
+    int len = 0;
+    per[0] = 0;
+    for (int p = 0; p < EYE_POSTURES; p++)
+        if (a->max_posture[p] > 0.0f) len += snprintf(per + len, sizeof(per) - (size_t)len, " %s %.0f", eye_posture_name(p), a->max_posture[p] * 1000.0f);
+    log_info("cam_anchor_report: %u frames (%u eligible), mean %.1f mm, max %.1f mm (eligible %.1f mm), past the anchor (%.0f mm): %u eligible, %u in all | max per posture (mm):%s -> %s",
+             a->frames, a->elig, a->frames ? a->sum_d / (float)a->frames * 1000.0f : 0.0f, a->max_d * 1000.0f, a->elig_max * 1000.0f, rad * 1000.0f, a->elig_over, a->over, per,
+             a->elig_over == 0 ? "PASS" : "FAIL");
+    if (argc > 1 && !strcmp(argv[1], "reset")) memset(&GR->anchor, 0, sizeof(GR->anchor));
+}
+
+// The nominal eye table must be the loaded animation's (docs/CAMERA_HOLDPOINT.md "Rule 2"): measured
+// again at startup when the animation library changed (a few seconds), into the build's copy.
+// The join manifest's characters entry with and without the eye table folded in: the table's own
+// anim_hash is always measured against the manifest without it.
+static u32 g_chars_plain, g_chars_folded;
+static void eye_manifest_unfold(AnimLibrary *lib) {
+    if (g_chars_folded && lib->manifest.hash[AC_CHARACTERS] == g_chars_folded) lib->manifest.hash[AC_CHARACTERS] = g_chars_plain;
+    g_chars_folded = 0;
+}
+
+void game_camera_eye_check(void) {
+    AnimLibrary *lib = g_engine.anim;
+    const CharacterDef *def = lib ? anim_lib_char_by_id(lib, "player") : NULL;
+    EyeNominalTable *t = camera_fp_eye_table_mut();
+    if (!def) return;
+    eye_manifest_unfold(lib);
+    u32 h = anim_manifest_combined(&lib->manifest);
+    if (t->valid && t->anim_hash == h) {
+        game_camera_eye_manifest();
+        return;
+    }
+    double t0 = platform_time();
+    log_warn("camera: the nominal eye table is %s (animation %08x, table %08x): measuring it again (cam_calibrate writes the source copy)",
+             t->valid ? "stale" : "missing", h, t->anim_hash);
+    if (eye_nominal_calibrate(lib, def, &G->items, t, 0, 0)) camera_fp_eye_table_save_runtime();
+    log_info("camera: nominal eye table measured in %.1f s", platform_time() - t0);
+    game_camera_eye_manifest();
+}
+
+// The table decides where every player's eye is: part of the join manifest (docs/CAMERA_HOLDPOINT.md).
+void game_camera_eye_manifest(void) {
+    AnimLibrary *lib = g_engine.anim;
+    const EyeNominalTable *t = camera_fp_eye_table();
+    if (!lib || !t->valid) return;
+    eye_manifest_unfold(lib);
+    u32 h = eye_table_hash(t);
+    g_chars_plain = lib->manifest.hash[AC_CHARACTERS];
+    g_chars_folded = lib->manifest.hash[AC_CHARACTERS] = anim_hash(&h, sizeof(h), g_chars_plain);
+}
+
+// cam_calibrate [warm sample]: measures the nominal eye table from the shared animation and writes
+// assets/player/eye_nominal.json (the source tree and the runtime copy).
+static void cmd_cam_calibrate(int argc, const char **argv) {
+    AnimLibrary *lib = g_engine.anim;
+    const CharacterDef *def = lib ? anim_lib_char_by_id(lib, "player") : NULL;
+    if (!def) { log_info("cam_calibrate: no player character"); return; }
+    double t0 = platform_time();
+    EyeNominalTable *t = camera_fp_eye_table_mut();
+    eye_manifest_unfold(lib);   // the table records the animation's own manifest
+    bool ok = eye_nominal_calibrate(lib, def, &G->items, t, argc > 1 ? atoi(argv[1]) : 0, argc > 2 ? atoi(argv[2]) : 0);
+    game_camera_eye_manifest();
+    if (!ok) { log_info("cam_calibrate: failed"); return; }
+    char res[256];
+    int len = 0;
+    res[0] = 0;
+    for (int p = 0; p < EYE_POSTURES; p++) len += snprintf(res + len, sizeof(res) - (size_t)len, " %s %.0f", eye_posture_name(p), t->residual[p] * 1000.0f);
+    vec3 st = eye_table_sample(t, EYE_STAND, 0, 0, 0);
+    log_info("cam_calibrate: %.1f s; stand idle eye (%.3f %.3f %.3f) m; residual (head motion around the mean, mm):%s", platform_time() - t0, st.x, st.y, st.z, res);
+    camera_fp_eye_table_save(NULL);
+    cam_glide_reset(&G->cam_glide);
+    log_info("cam_calibrate: the join manifest now includes this table: restart (or anim_reload) before joining others");
 }
 
 static bool cam_sphere_cast(void *ctx, vec3 from, vec3 delta, float radius, float *fraction) {
@@ -808,6 +912,9 @@ void game_render(void) {
     sights_camera(p, wd, &cads);
     RenderCamera cam = camera_update(&G->view, &interp, (float)g_engine.frame_dt, &cads, dead);
     // Weapon feel: camera kick spring (visual only, aim unaffected) + aim sway (bullets use it too).
+    GR->arms_aim = v2(0, 0);
+    GR->arms_aim_pitch = cam.pitch;
+    GR->arms_screen_kick = 0.0f;
     if (p && !dead) {
         // Fire animation layer 5 (docs/FIRE_ANIM.md): the camera follows the body's reaction 2-3 ticks
         // after the gun (its own overshoot), plus the roll twitch and the FOV punch.
@@ -823,41 +930,28 @@ void game_render(void) {
         float kb = fo->cam_back * ck;
         cam.fov_deg = fmaxf(5.0f, cam.fov_deg - fo->fov_punch * ck);
         // Sway and ADS bob move the weapon (about the eye), not the camera: the sight centre stays
-        // exactly on the bullets' line (weapon_aim_offset_deg is what the shots use).
+        // exactly on the bullets' line (weapon_aim_offset_deg is what the shots use). The visual camera
+        // kick turns the view but not the aim: while aimed the weapon counters it, so the reticle keeps
+        // marking exactly where the shots go (docs/RECOIL.md "Hip vs ADS"). Both only move the arms
+        // layer (render.c), never the body (docs/CAMERA_HOLDPOINT.md "Rule 1").
         vec2 sway = weapon_aim_offset_deg(wd, &p->sim.wpn, &p->sim.move, weapon_sway_time(vcmd->seq) + G->alpha * SIM_DT);
-        Cvar *rvm = cvar_find("r_viewmodel_fov");
-        float vmf = render_vm_fov_for(&cam, rvm ? rvm->f : 0.0f);
-        // The visual camera kick turns the view but not the aim: while aimed the weapon counters it,
-        // so the reticle keeps marking exactly where the shots go (docs/RECOIL.md "Hip vs ADS").
         float ads_a = wd ? game_ads_vis() : 0.0f;
-        chars_set_fp_aim_offset(sway.x - kr.y * ads_a, sway.y - kr.x * ads_a, cam.pitch + kr.x * DG_DEG2RAD, cam.fov_deg, vmf);
+        GR->arms_aim = v2(sway.x - kr.y * ads_a, sway.y - kr.x * ads_a);
+        GR->arms_aim_pitch = cam.pitch + kr.x * DG_DEG2RAD;
+        GR->arms_screen_kick = fo->screen_kick;
         cam.pitch += kr.x * DG_DEG2RAD;
         cam.yaw -= kr.y * DG_DEG2RAD;
         cam.roll += kr.z * DG_DEG2RAD;
         cam.pos = v3_madd(cam.pos, dir_from_angles(cam.yaw, cam.pitch), -kb);
     }
-    // cam_weapon_fov (arms + held item projection) <-> the renderer's r_viewmodel_fov (older configs).
-    {
-        static u32 seen_cam, seen_r;
-        Cvar *cw = camera_fp_cvars()->weapon_fov, *rv = cvar_find("r_viewmodel_fov");
-        if (cw && rv) {
-            CvarSource src = cvar_source_push(CVAR_SRC_HOST);   // both locked (dev builds may still set either)
-            if (cw->modified != seen_cam && cw->f != rv->f) cvar_set_float(rv, cw->f);
-            else if (rv->modified != seen_r && cw->f != rv->f) cvar_set_float(cw, rv->f);
-            seen_cam = cw->modified;
-            seen_r = rv->modified;
-            cvar_source_pop(src);
-        }
-    }
-    // True first-person camera. Order of operations (nothing after the arm IK moves the camera,
-    // the hold point or the item):
-    //   tick:  input -> movement -> animation (base, upper body, additive) -> spine / head look ->
-    //          head eye (model space) -> hold point (camera relative) -> item on the hold point ->
-    //          arm IK to grip_r / grip_l -> finger curl -> foot IK      (weapon_hold.c, procedural.c)
-    //   frame: view angles -> spine / head re-bent to this frame's view (chars_fp_camera) -> read
-    //          the head bone x eye socket -> camera (+ wall collision) -> hold point re-applied to
-    //          this camera -> item -> arm IK -> fingers (chars_render_local_fp) -> render.
-    // Rotation is always the view angles; position is the head eye.
+    // First-person camera (docs/CAMERA_HOLDPOINT.md). Order of operations, no feedback loop:
+    //   tick:  input -> movement -> animation (stage A) -> spine look -> pose eye (head bone x eye
+    //          socket, the view's rotation) -> hold point -> arm IK / fingers / anchors -> foot IK
+    //   frame: view angles -> the same spine look + IK on the interpolated stage A (chars_fp_camera,
+    //          chars_render_local_fp) -> the camera glides on the nominal eye (capsule + the stance's
+    //          mean head eye; the head eye only validates it) -> the arms layer re-projects the arms +
+    //          item from the pose eye (game_arms_frame) -> render.
+    // Rotation is always the view angles (+ the optional shake layers).
     {
         Xform sock;
         Player *lp = p;   // the viewed player
@@ -866,6 +960,11 @@ void game_render(void) {
         float fdt = (float)g_engine.frame_dt;
         chars_set_thirdperson(tp);
         GR->cam_mode = 0;
+        if (!dead) {
+            // Alive: the next death starts on its own head (not where the last one ended).
+            G->cam_stab.dead = false;
+            G->cam_stab.death_t = 0.0f;
+        }
         // Spectator free camera (noclip): no body, no hands.
         bool fcam = spectator_free_camera(&cam);
         bool pcam = !fcam && lp && peek_camera(w, &cam);   // door peek through the visor (game_peek.c)
@@ -892,37 +991,70 @@ void game_render(void) {
             GR->cam_mode = 3;
         } else if (dead && lp) {
             vec3 head;
+            cam_glide_reset(&G->cam_glide);   // a respawn starts the glide afresh
             if (chars_head_world(w, lp->ent, G->alpha, &head)) {
                 cam.pos = camera_fp_death(&G->cam_stab, head, fdt);
                 G->view.eye = cam.pos;
                 GR->cam_mode = 2;
             }
-        } else if (lp && cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, vs, cam.yaw, cam.pitch, &sock)) {
-            // Camera = the head eye: Head bone x the "camera" socket (assets/characters/player.json),
-            // read after this frame's spine / head look solve. The old capsule-based stabilizer (an
-            // "ideal" capsule eye followed by a clamped spring, which left the camera up to 45 cm
-            // behind the head) is kept as an optional offset scaled by cam_bob_scale (0 = none).
-            // No extra smoothing: the body and the camera move as one (step-ups move both).
-            float bob_k = camera_fp_cvars()->bob_scale ? camera_fp_cvars()->bob_scale->f : 0.0f;
-            vec3 head = v3_add(sock.t, v3(0, G->view.land_offset * bob_k, 0));
-            vec3 ideal = v3_add(v3(interp.pos.x, G->view.smooth_eye_y + G->view.land_offset, interp.pos.z), player_eye_offset(cam.yaw, cam.pitch));
-            vec3 stab = camera_fp_stabilize(&G->cam_stab, ideal, head, cam.yaw, fdt);
-            vec3 eye = v3_madd(head, v3_sub(stab, head), bob_k);
+        } else if (lp && cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, vs, G->view.yaw, G->view.pitch, &sock)) {
+            // Rule 2: the camera glides on the nominal eye - the capsule's feet + the stance's mean head
+            // eye (assets/player/eye_nominal.json) through the glide spring - never on the animated head:
+            // walk bob, landing dips, hit reactions, mantle motion, turn in place and idle sway don't move
+            // it. The head eye (sock: head bone x eye socket after this frame's spine look) only validates
+            // it (cam_anchor_radius); cam_anim_influence blends towards it for comparison (dev).
+            const EyeNominalTable *et = camera_fp_eye_table();
+            CamGlideParams gp = camera_fp_glide_params();
+            // A new view slot, a frame without the glide (vehicle, peek, lean, third person) or a teleport
+            // (respawn, setpos, story warp) restarts it: never glide in from a stale state.
+            if (G->cam_glide_slot != vs || GR->glide_frame + 1 != g_engine.frame_index || v3_dist(v3_flat(interp.pos), v3_flat(GR->glide_pos)) > 2.0f) {
+                cam_glide_reset(&G->cam_glide);
+                G->cam_glide_slot = vs;
+            }
+            GR->glide_frame = g_engine.frame_index;
+            GR->glide_pos = interp.pos;
+            CamNominalIn ni;
+            camera_fp_nominal_in(&ni, &interp, lp->sim.down.downed, chars_hold_style(w, lp->ent), G->view.pitch);
+            bool grounded = interp.on_ground && interp.mode == MOVE_WALK;
+            vec3 nominal = sock.t;
+            if (et->valid) {
+                vec3 off = cam_glide_offset(&G->cam_glide, et, &ni, fdt, &gp);
+                float step = cam_glide_step(&G->cam_glide, interp.pos.y, ni.speed, grounded, fdt, &gp);
+                vec3 fwd = v3(-sinf(G->view.yaw), 0, -cosf(G->view.yaw));
+                nominal = v3_add(v3(interp.pos.x, interp.pos.y + step, interp.pos.z), v3_add(v3_add(v3_scale(right_from_yaw(G->view.yaw), off.x), v3(0, off.y, 0)), v3_scale(fwd, off.z)));
+                GR->cam_step = step;
+            }
+            GR->cam_posture = ni.posture < 0 ? (ni.crouch > 0.5f ? EYE_CROUCH : EYE_STAND) : ni.posture;
+            vec3 eye = v3_lerp(nominal, sock.t, cc->anim_influence ? saturate(cc->anim_influence->f) : 0.0f);
+            // Anchor: the nominal eye within cam_anchor_radius of the real head eye (logged, never corrected).
+            // It holds for settled on-foot motion; sprints, hit reactions, landings, jumps and traversals
+            // move the head away by design (the camera ignores them) and are only reported.
+            {
+                float ad = v3_dist(nominal, sock.t), rad = cc->anchor_radius ? cc->anchor_radius->f : 0.08f;
+                if (interp.land_tick != GR->land_seen) {
+                    GR->land_seen = interp.land_tick;
+                    GR->land_frame = g_engine.frame_index;
+                }
+                bool eligible = ni.posture < 0 && grounded && !interp.sprinting && !chars_reacting(w, lp->ent) && cam_glide_settled(&G->cam_glide, &ni) &&
+                                (double)(g_engine.frame_index - GR->land_frame) * g_engine.frame_dt > 0.4;
+                GR->cam_eligible = eligible;
+                cam_anchor_add(&GR->anchor, ad, rad, GR->cam_posture, eligible);
+                if (ad > rad && eligible && et->valid && g_engine.frame_index - GR->anchor_logged > 300) {
+                    GR->anchor_logged = g_engine.frame_index;
+                    log_warn("camera: the nominal eye is %.0f mm from the head eye (%s, anchor %.0f mm; cam_anchor_report)", ad * 1000.0f, eye_posture_name(GR->cam_posture), rad * 1000.0f);
+                }
+            }
+            // The optional movement shake (cl_move_shake, Comfort): head bob + landing dip, never animation.
+            eye = v3_add(eye, G->view.shake);
             // Never inside walls / ledges (mantle, vault, crouch under geometry): cast from the capsule.
             vec3 safe = v3(interp.pos.x, interp.pos.y + fminf(player_eye_height(&interp) * 0.6f, 1.0f), interp.pos.z);
             eye = camera_fp_collide(&G->cam_stab, safe, eye, cam_sphere_cast, w->phys, fdt);
             if (cc->debug && cc->debug->i) cam_penetration_sample(w->phys, safe, eye);
             cam.pos = eye;
-            cam.roll = G->view.roll;
-            float hr = cvar_find("cl_camera_socket_roll")->f;
-            if (hr > 0) {
-                vec3 rgt = quat_rotate(sock.r, v3(1, 0, 0));
-                cam.roll += asinf(clampf(rgt.y, -1.0f, 1.0f)) * hr;   // a little of the head's own roll
-            }
             G->view.eye = cam.pos;
             GR->cam_mode = 1;
-            GR->head_eye = head;
-            GR->ideal_eye = ideal;
+            GR->head_eye = sock.t;
+            GR->ideal_eye = nominal;
         } else if (!dead) {
             cam.pos = v3_add(cam.pos, player_eye_offset(cam.yaw, cam.pitch));
         }
@@ -931,23 +1063,23 @@ void game_render(void) {
         spectator_blend_camera(&cam, fdt);
         if (GR->cam_mode != 0) G->view.eye = cam.pos;
         chars_set_fp_camera(cam.pos, quat_euler(cam.yaw, cam.pitch, cam.roll), GR->cam_mode == 1);
-        if (GR->cam_mode == 1) fp_cam_test_frame(cam.pos, dir_from_angles(cam.yaw, cam.pitch));
+        if (GR->cam_mode == 1) fp_cam_test_frame(cam.pos, dir_from_angles(cam.yaw, cam.pitch), GR->ideal_eye, GR->head_eye, GR->cam_eligible);
         // cam_debug: eye / head / ideal markers + the stats line (HUD).
         GR->cam_text[0] = 0;
         if (cc->debug && cc->debug->i && lp) {
             float gp[2], ga[2], ap, aa;
             chars_fp_diag(gp, ga, &ap, &aa);
-            const char *modes[] = { "fallback", "head", "death", "third" };
-            vec3 d = G->cam_stab.disp;
+            const char *modes[] = { "fallback", "glide", "death", "third" };
+            vec3 hd = v3_sub(GR->head_eye, GR->ideal_eye);
             snprintf(GR->cam_text, sizeof(GR->cam_text),
-                     "cam %s  head-ideal %.0f %.0f %.0f mm  cam-head %.0f mm  disp %.1f %.1f %.1f mm (max %.1f, clamp %.0f)  wall %.0f mm | hands R %.2f mm %.2f deg  L %.2f mm %.2f deg | sight %.2f mm %.2f deg | %s",
-                     modes[GR->cam_mode], G->cam_stab.last_raw.x * 1000, G->cam_stab.last_raw.y * 1000, G->cam_stab.last_raw.z * 1000,
-                     v3_len(v3_sub(cam.pos, GR->head_eye)) * 1000, d.x * 1000, d.y * 1000, d.z * 1000, G->cam_stab.max_seen * 1000, cc->clamp->f * 1000, G->cam_stab.col_push * 1000,
+                     "cam %s %s  head-nominal %.0f %.0f %.0f mm (|%.0f|, anchor %.0f, max %.0f)  step %.0f mm  wall %.0f mm | hands R %.2f mm %.2f deg  L %.2f mm %.2f deg | sight %.2f mm %.2f deg | %s",
+                     modes[GR->cam_mode], eye_posture_name(GR->cam_posture), hd.x * 1000, hd.y * 1000, hd.z * 1000, v3_len(hd) * 1000,
+                     (cc->anchor_radius ? cc->anchor_radius->f : 0.08f) * 1000, GR->anchor.max_d * 1000, GR->cam_step * 1000, G->cam_stab.col_push * 1000,
                      gp[1] * 1000, ga[1], gp[0] * 1000, ga[0], ap * 1000, aa, chars_holdpoint_text(w, vs));
             if (GR->cam_mode == 1) {
                 vec3 f = dir_from_angles(cam.yaw, cam.pitch);
-                dbg_cross(v3_madd(GR->head_eye, f, 0.3f), 0.01f, DBG_RED, 0);       // head eye (shown 30 cm ahead)
-                dbg_cross(v3_madd(GR->ideal_eye, f, 0.3f), 0.01f, DBG_GREEN, 0);    // ideal eye
+                dbg_cross(v3_madd(GR->head_eye, f, 0.3f), 0.01f, DBG_RED, 0);       // the animated head eye (shown 30 cm ahead)
+                dbg_cross(v3_madd(GR->ideal_eye, f, 0.3f), 0.01f, DBG_GREEN, 0);    // the nominal eye
                 dbg_cross(v3_madd(cam.pos, f, 0.3f), 0.006f, DBG_WHITE, 0);         // camera
             }
             if (cc->debug->i >= 2 && (g_engine.frame_index % 30) == 0) log_info("cam_debug: %s", GR->cam_text);
@@ -1054,11 +1186,13 @@ void game_render(void) {
         bool tpv = cvar_find("cl_thirdperson")->i || GR->cam_mode == 3;   // incl. the third-person vehicle camera
         if (!tpv) {
             chars_render_local_fp(w, G->alpha, vs);
+            game_arms_frame(&cam, GR->arms_aim, GR->arms_aim_pitch, GR->arms_screen_kick);   // the arms layer's camera (before the flash / sights map through it)
             game_fire_flush_flash();   // the muzzle flash on this frame's (kicked) gun
             fp_cam_test_hands();
             ads_sweep_frame();
         }
-        if (!tpv) hands_render();
+        Cvar *fl = cvar_find("cl_fp_layers");
+        if (!tpv && (!fl || (fl->i & 2))) hands_render();   // the held item: part of the arms layer
     }
     // Sights: lens / reticle / scope picture-in-picture from the item as it is drawn this frame.
     sights_frame(&cam, p && !dead && !cvar_find("cl_thirdperson")->i && GR->cam_mode != 3);

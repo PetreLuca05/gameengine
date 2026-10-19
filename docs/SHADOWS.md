@@ -364,10 +364,11 @@ The first-person rig (arms, held item, attachments: the `MAT_VIEWMODEL` draws) h
 - **Fit.** Every frame around the rig's drawn bounds, a fixed 0.9 m half extent (0.88 mm texels at
   2048), snapped in light space, along the same light view as the cascades, no jitter. It is
   cleared every frame and drawn with this frame's matrices and palettes (GPU and CPU skinning).
-- **Space.** The rig is drawn at its world transforms with its own FOV (`r_viewmodel_fov`); casters
-  and receivers in the tile use those same transforms, so self-shadowing lines up. The world
-  cascades are sampled where the rig appears in the world (`sh_vm_apparent`: view x / y scaled by
-  `tan(fov / 2) / tan(vm_fov / 2)`).
+- **Space.** The rig (the first-person arms layer, docs/CAMERA_HOLDPOINT.md "Rule 3") is drawn at its
+  world transforms through its own camera and FOV (`cl_hands_fov`); casters and receivers in the tile
+  use those same transforms, so self-shadowing lines up. The world cascades are sampled where the rig
+  appears in the world (`sh_vm_apparent` = `frame.vm_apparent`: the arms camera, view x / y scaled by
+  `tan(fov / 2) / tan(vm_fov / 2)`, back out of the world camera), with the normal turned the same way.
 - **The body copy.** The owner's third-person body (`MAT_SHADOW_ONLY`) casts the player's shadow on
   the world, but its arms are not where the first-person arms are. Viewmodel receivers sample the
   world cascades 0.6 m towards the light (`CSM_VM_SKIP`), past that copy; world casters further

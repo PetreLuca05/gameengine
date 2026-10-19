@@ -30,6 +30,7 @@
 #include "vfx_editor.h"
 #include "holdpoint_editor.h"
 #include "fire_tuner.h"
+#include "arms_tuner.h"
 #include "audio_editor.h"
 #include "game/scene.h"
 #include "mainmenu/mainmenu.h"
@@ -408,7 +409,7 @@ static void draw_modal(int id, bool top) {
 
 bool menus_wants_mouse(void) {
     Game *g = game();
-    return (M && M->depth > 0) || (g && (g->inventory_open || g->container_open || g->bench_open)) || vfx_editor_open() || holdpoint_editor_open() || fire_tuner_open() || audio_editor_open() ||
+    return (M && M->depth > 0) || (g && (g->inventory_open || g->container_open || g->bench_open)) || vfx_editor_open() || holdpoint_editor_open() || fire_tuner_open() || arms_tuner_open() || audio_editor_open() ||
            daynight_editor_open() || flesh_range_open() || wind_game_panel_open() || scene_wants_mouse() || phone_ui_wants_mouse();
 }
 
@@ -419,7 +420,7 @@ void menus_open_phone_portal(void) {
     phone_portal_show();
 }
 bool menus_dev_tools_open(void) {
-    return vfx_editor_open() || holdpoint_editor_open() || fire_tuner_open() || audio_editor_open() || daynight_editor_open() || flesh_range_open() || wind_game_panel_open() || scene_has_panels();   // the main menu scene draws no panels: the game UI keeps its input
+    return vfx_editor_open() || holdpoint_editor_open() || fire_tuner_open() || arms_tuner_open() || audio_editor_open() || daynight_editor_open() || flesh_range_open() || wind_game_panel_open() || scene_has_panels();   // the main menu scene draws no panels: the game UI keeps its input
 }
 void menus_frame_end(void) { if (M && M->inited) gui_frame_end(); }
 bool menus_paused(void) { return M && M->depth > 0 && M->stack[0] == SCR_PAUSE && menus_can_pause(); }
@@ -491,7 +492,7 @@ void menus_tick(float dt) {
 }
 
 void menus_draw(void) {
-    if (!M->depth) { mainmenu_chat_feed_draw(); vfx_editor_draw(); holdpoint_editor_draw(); fire_tuner_draw(); audio_editor_draw(); return; }
+    if (!M->depth) { mainmenu_chat_feed_draw(); vfx_editor_draw(); holdpoint_editor_draw(); fire_tuner_draw(); arms_tuner_draw(); audio_editor_draw(); return; }
     solve_layout();
     int top = screens_top();
     for (int i = 0; i < M->depth; i++) {
@@ -528,6 +529,7 @@ void menus_draw(void) {
     vfx_editor_draw();
     holdpoint_editor_draw();
     fire_tuner_draw();
+    arms_tuner_draw();
     audio_editor_draw();
 }
 

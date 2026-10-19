@@ -43,7 +43,9 @@ typedef struct Game {
 
     // local view + command building
     ViewState view;
-    CamHeadStab cam_stab;        // first-person head camera stabilizer (src/player/camera_fp.c)
+    CamHeadStab cam_stab;        // first-person camera: death camera + wall collision (src/player/camera_fp.c)
+    CamGlide cam_glide;          // first-person camera glide on the nominal eye (docs/CAMERA_HOLDPOINT.md "Rule 2")
+    int cam_glide_slot;          // the view slot the glide follows (a switch restarts it)
     u8 sel_slot;                 // selection (UserCmd.slot): INV_SEL_* (docs/INVENTORY.md "Selection")
     u8 sel_weapon;               // the last weapon slot selected (the hands fall back to it)
     bool attack_wait_release;    // fire masked until released (the hands fell back to a weapon mid-press)

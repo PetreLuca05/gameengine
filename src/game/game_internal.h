@@ -252,6 +252,15 @@ bool game_look_comparing(void);
 struct FireAnimOut;
 struct ShotEvent;
 void game_fire_init(void);
+// First-person arms layer (game_arms.c, docs/CAMERA_HOLDPOINT.md "Rule 3").
+void game_arms_init(void);
+void game_camera_eye_check(void);   // game_render.c: the nominal eye table is the loaded animation's (and in the join manifest)
+void game_camera_eye_manifest(void);
+void game_arms_frame(const RenderCamera *cam, vec2 aim_deg, float aim_pitch, float screen_kick);
+bool game_arms_load(void);
+bool game_arms_save(const char *path_override);
+struct ArmsLayerDef *game_arms_def(void);
+bool game_arms_last(struct ArmsLayerIn *in, struct ArmsLayerOut *out);
 void game_fire_on_shot(const struct ShotEvent *ev);
 void game_fire_tick(void);                               // per sim tick, before chars_present_tick
 const struct FireAnimOut *game_fire_sample(float alpha); // this frame's interpolated output (camera layer, hands)

@@ -164,7 +164,7 @@ static void test_consistency(void) {
     CHECK(!consistency_join_ok(consistency_hash() ^ 1u, why, sizeof(why)) && strstr(why, "consistency set mismatch"), "another set is rejected (%s)", why);
     // The required visibility values.
     static const struct { const char *n; float v; } want[] = { { "r_foliage_density", 1.0f }, { "r_shadow_max_distance", 150.0f }, { "r_fog_scale", 1.0f },
-                                                             { "r_lens_drops", 1.0f }, { "r_gamma", 1.0f }, { "cam_weapon_fov", 0.0f } };   // r_stretch: the player's (Graphics > Display)
+                                                             { "r_lens_drops", 1.0f }, { "r_gamma", 1.0f } };   // r_stretch: the player's (Graphics > Display)
     for (int i = 0; i < ARRAY_COUNT(want); i++) {
         int k = consistency_find(want[i].n);
         CHECK(k >= 0 && fabsf((float)atof(consistency_value(k)) - want[i].v) < 1e-4f, "%s = %g in the set", want[i].n, want[i].v);

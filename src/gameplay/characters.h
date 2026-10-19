@@ -246,9 +246,26 @@ bool chars_ragdoll_probe(World *w, EntityId e, vec3 pos[2], float speed[2], floa
 bool chars_palm_world(World *w, EntityId e, int hand, vec3 *out);   // latest pose, world space
 // First person: this frame's final camera (the held item is placed relative to it).
 void chars_set_fp_camera(vec3 pos, quat rot, bool valid);
-// Aim offset of the held item (degrees right / up of the view, the view pitch in radians): the
-// first-person item turns about the eye so its sight points where the shots go.
-void chars_set_fp_aim_offset(float right_deg, float up_deg, float view_pitch, float world_fov_deg, float vm_fov_deg);
+// The arms layer's inputs (docs/CAMERA_HOLDPOINT.md "Rule 3", src/render/arms_layer.c) from this
+// frame's first-person pose. False: no first-person pose this frame.
+typedef struct CharsFpArms {
+    Xform pose_eye;             // world: head bone x eye socket, the view's rotation
+    Xform present;              // pose-eye space: the drawn item -> the presented one (identity: no hold, or a clip owns the hands)
+    Xform present_hold;         // (the same: the move is already blended by ads_w, proc_presented_move)
+    float ads_w;                // the presentation hold point's ADS weight (interpolated)
+    bool has_item;
+    Xform item_cam;             // the drawn item, pose-eye space
+    vec3 pivot, sight;          // item space
+    float length;
+    const char *item_id;
+    int hp_state;               // the presentation hold point's state
+    vec3 kick_pos, kick_rot;    // the pose's gun kick, interpolated (camera space m / deg)
+    vec3 sway_hip_rot, sway_hip_pos, sway_ads_rot;   // the hold points' sway, interpolated
+    vec3 shoulder[2];           // the upper-arm joints (world): the seam
+} CharsFpArms;
+bool chars_fp_arms(CharsFpArms *o);
+int chars_hold_style(World *w, EntityId e);
+bool chars_reacting(World *w, EntityId e);   // a hit reaction is playing (the camera anchor check skips it)   // the held item's hold style (the weapon type; 0 = none): the camera's nominal eye
 // Fire animation of the first-person weapon (docs/FIRE_ANIM.md): tick = this tick's output (the
 // gun kick on the hold point, evaluated per tick), frame = this frame's interpolated output (hand
 // lag, trigger, slide, attachment wobble at render). NULL keeps the previous one; both NULL clears.

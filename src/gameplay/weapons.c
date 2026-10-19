@@ -89,7 +89,7 @@ void weapons_register_cvars(void) {
     WC.sway_ads_scale = cvar_reg_float("wpn_sway_ads_scale", 1.0f, 0.0f, 3.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "ADS weapon sway: x the weapons' ADS sway multipliers (quick tuning)");
     WC.sway_cosmetic = cvar_reg_float("cl_weapon_sway", 1.0f, 0.0f, 1.0f, CVAR_LOCKED, "weapon sway (cosmetic: breathing, look lag, bob, landing of the held weapon)");
     WC.ads_bob = cvar_reg_float("wpn_ads_bob", 0.0f, 0.0f, 3.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "aim bob that moves the reticle while walking aimed (bullets follow it; 0 = the gun bobs about the reticle instead)");
-    WC.bob_scale = cvar_reg_float("wpn_bob_scale", 1.0f, 0.0f, 3.0f, CVAR_LOCKED, "item bob while walking / running (x the weapon sway bob; sprinting always bobs)");
+    WC.bob_scale = cvar_reg_float("wpn_bob_scale", 1.0f, 0.0f, 3.0f, CVAR_LOCKED, "item bob while walking / running (x the weapon sway bob; none while sprinting: the sprint clip carries the arms)");
     WC.recoil_debug = cvar_reg_int("wpn_recoil_debug", 0, 0, 2, CVAR_LOCKED, "recoil overlay: 1 = panel + cone, 2 = also log every shot");
     // Replicated so clients' predicted magazines agree with the host.
     WC.infinite_ammo = cvar_reg_bool("sv_infinite_ammo", false, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "shots don't use ammo (host, replicated)");

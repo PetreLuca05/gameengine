@@ -66,6 +66,7 @@ void render_register_cvars(void) {
     Renderer *r = R;
     r->r_vsync = cvar_reg_bool("r_vsync", true, CVAR_ARCHIVE | CVAR_EDITABLE, "vertical sync");
     r->r_wireframe = cvar_reg_bool("r_wireframe", false, CVAR_LOCKED, "wireframe rendering");
+    r->r_arms_wireframe = cvar_reg_bool("r_arms_wireframe", false, CVAR_LOCKED, "wireframe of the first-person arms layer only (arms + held item; arms_tuner)");
     r->r_render_scale = cvar_reg_float("r_render_scale", 1.0f, 0.25f, 2.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "3D resolution scale");
     r->r_aniso = cvar_reg_int("r_aniso", 8, 1, 16, CVAR_TIER, "anisotropic filtering level");
     r->r_texture_quality = cvar_reg_int("r_texture_quality", 2, 0, 2, CVAR_TIER, "0 low, 1 medium, 2 high");
@@ -76,7 +77,6 @@ void render_register_cvars(void) {
     r->r_vignette = cvar_reg_float("r_vignette", 0.25f, 0.0f, 1.0f, CVAR_TIER, "vignette strength");
     r->r_shader_hotreload = cvar_reg_bool("r_shader_hotreload", true, CVAR_LOCKED, "watch shader sources and reload on change");
     r->r_culling = cvar_reg_bool("r_culling", true, CVAR_LOCKED, "frustum culling");
-    r->r_vm_fov = cvar_reg_float("r_viewmodel_fov", 0.0f, 0.0f, 120.0f, CVAR_LOCKED, "viewmodel FOV (0 = same as world, keeps IK hands aligned)");
     r->r_cpu_skinning = cvar_reg_bool("r_cpu_skinning", false, CVAR_LOCKED, "skin characters on the CPU (fallback / debugging)");
     r->r_bloom = cvar_reg_bool("r_bloom", true, CVAR_TIER, "bloom (HDR mip chain)");
     r->r_hdr_output = cvar_reg_bool("r_hdr_output", false, CVAR_ARCHIVE | CVAR_EDITABLE, "HDR10 output (PQ) when the display supports it");
@@ -539,12 +539,16 @@ void render_camera_info(vec3 *pos, float *fov_deg) {
     *pos = g_cpv_capture ? g_cpv_cam : R->cam.pos;
     *fov_deg = g_cpv_capture ? g_cpv_fov : R->cam.fov_deg;
 }
+static bool g_cam_overridden;
+bool render_camera_overridden(void) { return g_cam_overridden; }
 
 void render_set_camera(const RenderCamera *cam) {
     R->cam = *cam;
+    R->arms.valid = false;   // render_set_arms_layer follows (first person)
+    g_cam_overridden = false;
     vkg_frame_update();          // grass fades / shadows follow the fidelity level (outside the frame's recording)
     for (int k = 0; k < 4 && g_cam_override[k]; k++)
-        if (g_cam_override[k](&R->cam)) break;   // bench_fidelity / perf_audit flythroughs
+        if (g_cam_override[k](&R->cam)) { g_cam_overridden = true; break; }   // bench_fidelity / perf_audit flythroughs
     cam = &R->cam;
     float aspect = view_aspect();
     R->view = mat4_fps_view(cam->pos, cam->yaw, cam->pitch, cam->roll);
@@ -1083,7 +1087,7 @@ static bool skin_in_pass(const SkinnedDraw *d, int pass) {
     bool vm = (d->flags & MAT_VIEWMODEL) != 0;
     if (pass == 1) return d->cast_shadow && !vm;
     if (pass == 2) return vm;
-    if (pass == 3) return !vm && (!(d->flags & MAT_SHADOW_ONLY) || (d->flags & MAT_SELF));
+    if (pass == 3) return !vm && !d->view_only && (!(d->flags & MAT_SHADOW_ONLY) || (d->flags & MAT_SELF));
     return !vm && (d->flags & MAT_SHADOW_ONLY) == 0;
 }
 
@@ -1503,7 +1507,9 @@ static void compute_matrices(FrameData *fd) {
     R->proj = mat4_perspective(c->fov_deg * DG_DEG2RAD, aspect, c->znear, c->zfar);
     R->view_proj = mat4_mul(R->proj, R->view);
     float vm_fov = render_vm_fov();
-    R->vm_proj = mat4_perspective(vm_fov * DG_DEG2RAD, aspect, RENDER_VM_ZNEAR, 100.0f);
+    R->vm_proj = mat4_perspective(vm_fov * DG_DEG2RAD, aspect, R->arms.valid ? R->arms.znear : RENDER_VM_ZNEAR, 100.0f);
+    // The arms layer's own camera (docs/CAMERA_HOLDPOINT.md "Rule 3"); without one the arms see the world's.
+    R->arms_view = R->arms.valid ? R->arms.view : R->view;
     extract_frustum(R->view_proj, R->frustum);
 
     // Sub-pixel jitter (Halton 2,3) for TAA / TAA-U: an NDC translation after the projection.
@@ -1520,9 +1526,9 @@ static void compute_matrices(FrameData *fd) {
     // Camera cut: teleports / respawns reset the temporal history (and the velocities).
     if (!R->have_prev || v3_len(v3_sub(c->pos, R->prev_cam_pos)) > 4.0f) R->camera_cut = true;
     R->prev_view_proj_nj = R->have_prev && !R->camera_cut ? R->view_proj_nj : R->view_proj;
-    R->prev_vm_view_proj_nj = R->have_prev && !R->camera_cut ? R->vm_view_proj_nj : mat4_mul(R->vm_proj, R->view);
+    R->prev_vm_view_proj_nj = R->have_prev && !R->camera_cut ? R->vm_view_proj_nj : mat4_mul(R->vm_proj, R->arms_view);
     R->view_proj_nj = R->view_proj;
-    R->vm_view_proj_nj = mat4_mul(R->vm_proj, R->view);
+    R->vm_view_proj_nj = mat4_mul(R->vm_proj, R->arms_view);
     R->prev_cam_pos = c->pos;
 
     // Directional shadow (docs/SHADOWS.md "Cascades", docs/SHADOWS_UNITY_MODEL.md): Unity's quality
@@ -1794,7 +1800,27 @@ static void compute_matrices(FrameData *fd) {
     fd->view_proj = mat4_mul(R->proj_j, R->view);
     fd->view = R->view;
     fd->proj = R->proj_j;
-    fd->vm_proj = R->vm_proj_j;
+    // The viewmodel draws compute vm_proj * view * world: the arms camera replaces the view in it.
+    fd->vm_proj = mat4_mul(R->vm_proj_j, mat4_mul(R->arms_view, mat4_inverse_rigid(R->view)));
+    {
+        float k = tanf(R->cam.fov_deg * 0.5f * DG_DEG2RAD) / tanf(fmaxf(render_vm_fov(), 1.0f) * 0.5f * DG_DEG2RAD);
+        fd->vm_apparent = mat4_mul(mat4_inverse_rigid(R->view), mat4_mul(mat4_scale(v3(k, k, 1.0f)), R->arms_view));
+        const RenderArmsLayer *a = &R->arms;
+        for (int i = 0; i < 2; i++) {
+            vec3 sh = a->valid ? a->shoulder[i] : v3(0, 0, 0);
+            vec3 pv = a->valid && R->arms_had_prev ? R->arms_shoulder_prev[i] : sh;
+            fd->arms_shoulder[i] = v4(sh.x, sh.y, sh.z, 0);
+            fd->arms_shoulder_prev[i] = v4(pv.x, pv.y, pv.z, 0);
+            R->arms_shoulder_prev[i] = sh;
+        }
+        R->arms_had_prev = a->valid;
+        // The arms camera's eye (pose space): view vectors of the arms layer's lighting start there. The
+        // seam blends towards the world camera only while the two eyes are close (a few cm apart).
+        vec3 ae = a->valid ? mat4_mul_point(mat4_inverse(R->arms_view), v3(0, 0, 0)) : R->cam.pos;
+        fd->arms_eye = v4(ae.x, ae.y, ae.z, 0);
+        bool seam = a->valid && a->seam_r1 > 0.0f && v3_dist(ae, R->cam.pos) < 0.3f;
+        fd->arms_seam = v4(a->seam_r0, fmaxf(a->seam_r1, a->seam_r0 + 0.01f), seam ? 1.0f : 0.0f, 0);
+    }
     fd->shadow_vp = R->shadow_vp;
     memcpy(fd->shadow_vps, R->shadow_vps, sizeof(fd->shadow_vps));
     fd->shadow_splits = R->shadow_splits;
@@ -2150,10 +2176,11 @@ static void exec_viewmodel(VkCommandBuffer cmd, void *u) {
     bind_frame(cmd);
     post_push_lit_inputs(cmd, NULL, false);
     if (R->vm_draw_count || F.any_skin_vm) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
-        draw_items(cmd, R->vm_draws, R->vm_draw_count, false, false, 2, R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT);
-        // First-person arms (body model), same depth as the viewmodel weapon.
-        draw_skinned(cmd, 2, R->r_wireframe->i ? PIPE_SKIN_WIRE : PIPE_SKIN, R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT, F.skin_vm);
+        bool wire = (R->r_wireframe->i || R->r_arms_wireframe->i) && R->has_wireframe;
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[wire ? PIPE_LIT_WIRE : PIPE_LIT]);
+        draw_items(cmd, R->vm_draws, R->vm_draw_count, false, false, 2, wire ? PIPE_LIT_WIRE : PIPE_LIT);
+        // The first-person arms layer's arms (body model), the same camera / depth as the held item.
+        draw_skinned(cmd, 2, wire ? PIPE_SKIN_WIRE : PIPE_SKIN, wire ? PIPE_LIT_WIRE : PIPE_LIT, F.skin_vm);
     }
     if (R->line_count[1] && F.line_off[1] != (VkDeviceSize)-1) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LINES_OVERLAY]);
@@ -2477,6 +2504,7 @@ bool render_scope_view(vec3 *eye, vec3 *fwd, float *tan_half, float *size_px) {
 static bool setup_scope_pip(FrameData *fd) {
     const RenderSight *s = &R->sight;
     R->pip_fov = 0;
+    R->pip_size = 0;
     g_scope_lod.valid = false;
     if (s->kind != RSIGHT_SCOPE_PIP || s->ads_t < 0.02f) return false;
     vec3 fwd = v3_norm(s->fwd), up = v3_norm(s->up);
@@ -2493,8 +2521,15 @@ static bool setup_scope_pip(FrameData *fd) {
     float k = fmaxf(s->zoom, 1.0f) * tan_main / fmaxf(tan_base, 1e-4f);
     float tan_half = clampf(1.15f * t_lens / fmaxf(k, 1.0f), tanf(0.25f * DG_DEG2RAD), tanf(30.0f * DG_DEG2RAD));
     R->pip_fov = 2.0f * atanf(tan_half) * DG_RAD2DEG;
-    u32 n = (u32)DG_CLAMP((int)lrintf((float)R->hdr.h * clampf(s->pip_scale, 0.2f, 2.0f)), 128, 2048);
+    // The resolution is per sight (game_sights.c: r_scope_pip_scale x the optic's pip_resolution,
+    // bounded by the fidelity level). The picture spans 2 tan_half x k main-view tangents on screen.
+    u32 n = render_scope_pip_px(s->pip_scale);
+    static u32 logged;
+    if (n != logged) log_debug("scope: PiP %ux%u (pip_scale %.3f x render height %u)", n, n, (double)s->pip_scale, R->hdr.h);
+    logged = n;
     F.pip_size = n;
+    R->pip_size = n;
+    R->pip_screen_frac = tan_half * k / tan_main;
     mat4 view = mat4_look_at(s->objective_pos, v3_add(s->objective_pos, fwd), up);
     mat4 proj = mat4_perspective(2.0f * atanf(tan_half), 1.0f, 0.3f, R->cam.zfar);
     mat4 vp = mat4_mul(proj, view);
@@ -3274,6 +3309,11 @@ void render_camera_cut(void) { R->camera_cut = true; }
 void render_set_sight(const RenderSight *s) { R->sight = *s; }
 const RenderSight *render_sight(void) { return &R->sight; }
 float render_scope_pip_fov(void) { return R->pip_fov; }
+u32 render_scope_pip_px(float pip_scale) { return (u32)DG_CLAMP((int)lrintf((float)R->hdr.h * clampf(pip_scale, 0.2f, 2.0f)), 128, 2048); }
+u32 render_scope_pip_size(float *screen_frac) {
+    if (screen_frac) *screen_frac = R->pip_size ? R->pip_screen_frac : 0.0f;
+    return R->pip_size;
+}
 vec3 render_sky_irradiance(vec3 dir) { return sky_irradiance_cpu(dir); }
 float render_sky_luminance(float *latest) { return sky_sh_luminance(latest); }
 u32 render_sky_refilters(void) { return sky_refilter_count(); }
@@ -3354,13 +3394,20 @@ float render_vm_fov_for(const RenderCamera *c, float rvm) {
     return hip + (aimed - hip) * t;
 }
 
-float render_vm_fov(void) { return render_vm_fov_for(&R->cam, R->r_vm_fov->f); }
+float render_vm_fov(void) { return R->arms.valid ? R->arms.fov_deg : render_vm_fov_for(&R->cam, 0.0f); }
 
+void render_set_arms_layer(const RenderArmsLayer *a) {
+    if (a && !g_cam_overridden) R->arms = *a;
+    else R->arms.valid = false;
+}
+
+// Where an arms-layer point (its real world position) appears: through the arms camera and FOV,
+// then back out of the world camera at the same pixel and view depth.
 vec3 render_viewmodel_to_world(vec3 p) {
     float vm_fov = render_vm_fov();
-    if (fabsf(vm_fov - R->cam.fov_deg) < 0.01f) return p;
     mat4 view = mat4_fps_view(R->cam.pos, R->cam.yaw, R->cam.pitch, R->cam.roll);
-    vec3 v = mat4_mul_point(view, p);
+    if (!R->arms.valid && fabsf(vm_fov - R->cam.fov_deg) < 0.01f) return p;
+    vec3 v = mat4_mul_point(R->arms.valid ? R->arms.view : view, p);
     float k = tanf(R->cam.fov_deg * 0.5f * DG_DEG2RAD) / tanf(vm_fov * 0.5f * DG_DEG2RAD);
     v.x *= k;
     v.y *= k;

@@ -36,6 +36,7 @@ int spectator_mode(void);                  // SpecMode this machine is in
 int spectator_target(void);
 int spectator_view_slot(void);             // watched player in first / third person, -1 otherwise
 bool spectator_first_person(void);
+bool spectator_blending(void);   // the camera is still blending to a new target (spec_blend_time)
 bool spectator_view_interp(PlayerMove *out, float alpha);   // the watched player's render state
 bool spectator_view_angles(float alpha, float *yaw, float *pitch);
 const UserCmd *spectator_view_cmd(void);   // its latest command (ADS, use, sway time)

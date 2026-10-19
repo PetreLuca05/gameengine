@@ -771,10 +771,10 @@ static void draw_held_item(const ItemDef *it, vec3 pos, quat rot, bool viewmodel
 void hands_set_draw_scale(float s) { s_draw_scale = s > 0 ? s : 1.0f; }
 void hands_fp_set_item_scale(float s) { s_fp_scale = s > 0 ? s : 1.0f; }
 
-bool hands_muzzle(vec3 *pos, vec3 *fwd) {
+// A point of the drawn gun (item space) in the world: the viewmodel may use its own FOV.
+static bool fp_gun_point(vec3 local, vec3 *pos, vec3 *fwd) {
     if (!H || !H->initialized || !H->weapon || H->weapon->kind == WPN_MELEE) return false;
-    // The viewmodel may use its own FOV: return where the barrel tip appears in the world.
-    if (pos) *pos = render_viewmodel_to_world(v3_add(H->weapon_pos, quat_rotate(H->weapon_rot, H->weapon->muzzle_offset)));
+    if (pos) *pos = render_viewmodel_to_world(v3_add(H->weapon_pos, quat_rotate(H->weapon_rot, local)));
     if (fwd) *fwd = quat_rotate(H->weapon_rot, v3(0, 0, -1));
     return true;
 }
@@ -799,6 +799,10 @@ bool hands_emitter(int kind, vec3 *pos, vec3 *fwd) {
     if (fwd) *fwd = quat_rotate(H->weapon_rot, v3(0, 0, -1));
     return true;
 }
+// The muzzle socket of the effective def (a mounted device's front face): where the shots leave
+// (docs/AIM.md), so the flash sits on the bullet's origin, as remote players see it.
+bool hands_muzzle(vec3 *pos, vec3 *fwd) { return H && H->weapon ? fp_gun_point(H->weapon->sockets.muzzle, pos, fwd) : false; }
+bool hands_barrel_tip(vec3 *pos, vec3 *fwd) { return H && H->weapon ? fp_gun_point(H->weapon->muzzle_offset, pos, fwd) : false; }
 
 bool hands_fp_item(vec3 *pos, quat *rot, const WeaponDef **wd) {
     if (!H || !H->initialized || !H->weapon) return false;

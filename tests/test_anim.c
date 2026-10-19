@@ -4,6 +4,8 @@
 // rewind and LOD hysteresis.
 #include "gameplay/phone/phone_orient.h"
 #include "player/camera_fp.h"
+#include "anim/eye_nominal.h"
+#include "cJSON.h"
 #include "anim/anim.h"
 #include "anim/anim_library.h"
 #include "anim/character_rt.h"
@@ -16,6 +18,7 @@
 #include "net/bitbuf.h"
 #include "core/engine.h"
 #include "core/log.h"
+#include "core/platform.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -623,8 +626,8 @@ static void test_phone_hold(const ItemDB *db) {
 
 // ------------------------------------------------------------------ hold point / first person camera
 
-// aim_d > 0: the hold aim on, P on the view axis at that distance (the game's limits: 12 deg, ADS 3).
-static void hp_step_aim(CharRuntime *rt, const ItemSockets *k, CharInputs *in, float dt, bool static_pose, bool first_person, vec3 kick_p, vec3 kick_r, float aim_d) {
+// One tick with a held item. `view`: the presentation hold point too (players).
+static void hp_step(CharRuntime *rt, const ItemSockets *k, CharInputs *in, float dt, bool static_pose, bool view, vec3 kick_p, vec3 kick_r) {
     charrt_set_inputs(rt, in);
     charrt_tick(rt, dt);
     charrt_eval_base(rt);
@@ -633,225 +636,11 @@ static void hp_step_aim(CharRuntime *rt, const ItemSockets *k, CharInputs *in, f
     pi.item = k;
     pi.hand_ik_weight = 1.0f;
     pi.hp_static = static_pose;
-    pi.first_person = first_person;
+    pi.hp_view = view;
     pi.item_kick_pos = kick_p;
     pi.item_kick_rot = kick_r;
-    if (aim_d > 0.0f) {
-        pi.hp_aim_valid = true;
-        pi.hp_aim_p = v3(0, 0, -aim_d);
-        pi.hp_aim_max_hip = 12.0f * DG_DEG2RAD;
-        pi.hp_aim_max_ads = AIM_HOLD_ADS_MAX_DEG * DG_DEG2RAD;
-    }
     charrt_post(rt, &pi);
 }
-static void hp_step(CharRuntime *rt, const ItemSockets *k, CharInputs *in, float dt, bool static_pose, bool first_person, vec3 kick_p, vec3 kick_r) {
-    hp_step_aim(rt, k, in, dt, static_pose, first_person, kick_p, kick_r, 0.0f);
-}
-
-// Hold aim (docs/AIM.md "Hold aim") inside the hold point evaluation, from its inputs directly.
-static bool g_wall;   // the collision ray hits at fraction 0 (pressed against a wall)
-static bool wall_ray(void *ctx, vec3 o, vec3 d, float *f, vec3 *pt, vec3 *n) {
-    (void)ctx;
-    (void)d;
-    if (!g_wall) return false;
-    *f = 0.0f;
-    *pt = o;
-    *n = v3(0, 0, 1);
-    return true;
-}
-static void hp_aim_input(HoldPointInput *in, const HoldPointStyle *st, const ItemSockets *k, int t, bool ads, bool sprint, float aim_d, bool static_pose) {
-    memset(in, 0, sizeof(*in));
-    in->style = st;
-    in->ovr = &k->hp;
-    in->anchor = xf_make(k->anchor.t, quat_identity());
-    in->sight = k->sight;
-    in->pivot = k->pivot;
-    in->muzzle = k->muzzle;
-    in->barrel = v3(0, 0, -1);
-    in->length = k->length;
-    in->has_item = true;
-    in->ads = ads;
-    in->sprint = sprint;
-    in->dt = 1.0f / 60.0f;
-    in->phase_valid = true;
-    in->clock = t / 60.0;
-    in->stride = (float)t * 0.04f;
-    in->aim_yaw = sinf((float)t * 0.05f) * 0.4f;
-    in->aim_pitch = cosf((float)t * 0.031f) * 0.2f;
-    in->vel_cam = v3(0.0f, 0.0f, -2.0f);
-    in->grounded = true;
-    in->cam_world = xf_identity();
-    in->raycast = wall_ray;
-    in->static_pose = static_pose;
-    in->sway_scale = 1.0f;
-    in->bob_scale = 1.0f;
-    in->kick_pos = static_pose ? v3(0, 0, 0) : v3(0.0f, 0.004f, 0.03f * fabsf(sinf((float)t * 0.7f)));
-    in->kick_rot = static_pose ? v3(0, 0, 0) : v3(4.0f * fabsf(sinf((float)t * 0.7f)), 0.8f, 1.2f);
-    in->aim_valid = aim_d > 0.0f;
-    in->aim_p = v3(0, 0, -aim_d);
-    in->aim_max_hip = 12.0f * DG_DEG2RAD;
-    in->aim_max_ads = AIM_HOLD_ADS_MAX_DEG * DG_DEG2RAD;
-}
-static bool xf_same(Xform a, Xform b) { return !memcmp(&a.t, &b.t, sizeof(vec3)) && !memcmp(&a.r, &b.r, sizeof(quat)); }
-
-static void test_hold_aim(const ItemDB *db) {
-    const float dt = 1.0f / 60.0f;
-    // 1) The evaluation's hold aim is aim_hold_solve on its own raw (bit-identical), and the
-    //    presentation (full sway, look lag, bob, the fire kick) moves the drawn item but never the
-    //    gameplay pose: static_pose on vs off gives the same aim_item / raw bits.
-    for (int wi = 0; wi < db->weapon_count; wi++) {
-        const WeaponDef *wd = &db->weapons[wi];
-        if (wd->kind == WPN_MELEE) continue;
-        HoldPointStyle style;
-        holdpoint_style_defaults(&style, wd->hold_style);
-        HoldPointState a, b;
-        holdpoint_reset(&a);
-        holdpoint_reset(&b);
-        bool same = true, solve_same = true, drawn_moved = false;
-        float worst_miss = 0.0f;
-        for (int t = 0; t < 240; t++) {
-            bool ads = (t / 60) % 2 == 1;
-            float d = t < 120 ? 25.0f : 2.0f + (float)(t % 7);
-            HoldPointInput ia, ib;
-            HoldPointOutput oa, ob;
-            hp_aim_input(&ia, &style, &wd->sockets, t, ads, false, d, false);
-            hp_aim_input(&ib, &style, &wd->sockets, t, ads, false, d, true);
-            holdpoint_eval(&a, &ia, &oa);
-            holdpoint_eval(&b, &ib, &ob);
-            if (!xf_same(oa.aim_item, ob.aim_item) || !xf_same(oa.gp_item, ob.gp_item) || memcmp(&oa.aim_raw, &ob.aim_raw, sizeof(AimHoldRaw))) same = false;
-            AimHold h = aim_hold_solve(&oa.aim_raw, ia.aim_p);
-            if (memcmp(&h.rot, &oa.aim_hold, sizeof(quat)) || h.angle_deg != oa.aim_angle_deg || h.miss != oa.aim_miss) solve_same = false;
-            if (!xf_same(oa.item, oa.aim_item)) drawn_moved = true;
-            // The aimed gameplay pose's bore line ends at P (reachable: 25 m, 2 .. 8 m hip, ADS 25 m).
-            vec3 mz = xf_point(oa.aim_item, wd->sockets.muzzle), bz = quat_rotate(oa.aim_item.r, v3(0, 0, -1));
-            if (oa.blend >= 0.999f && !oa.aim_clamped) worst_miss = fmaxf(worst_miss, aim_line_miss(mz, bz, ia.aim_p));
-        }
-        CHECK(same, "%s: presentation (sway / kick) changed the gameplay pose", wd->id);
-        CHECK(solve_same, "%s: the evaluation's hold aim differs from aim_hold_solve on its raw", wd->id);
-        CHECK(drawn_moved, "%s: sway / kick never moved the drawn item (test inert)", wd->id);
-        CHECK(worst_miss < 2e-4f, "%s: the aimed bore line passes %.3f mm from P", wd->id, worst_miss * 1000.0f);
-    }
-    // 2) Pressed against a wall (pull 1): no turn, the gun points where the pull pitched it.
-    {
-        const WeaponDef *wd = &db->weapons[1];
-        HoldPointStyle style;
-        holdpoint_style_defaults(&style, wd->hold_style);
-        HoldPointState st;
-        holdpoint_reset(&st);
-        HoldPointOutput o;
-        g_wall = true;
-        for (int t = 0; t < 120; t++) {
-            HoldPointInput in;
-            hp_aim_input(&in, &style, &wd->sockets, t, false, false, 2.0f, true);
-            holdpoint_eval(&st, &in, &o);
-        }
-        g_wall = false;
-        float pitch = asinf(clampf(quat_rotate(o.aim_item.r, v3(0, 0, -1)).y, -1, 1)) * DG_RAD2DEG;
-        CHECK(o.pull > 0.99f && o.aim_w < 0.01f && o.aim_angle_deg < 0.1f, "pull %.3f: aim weight %.3f, turn %.3f deg (none)", o.pull, o.aim_w, o.aim_angle_deg);
-        printf("  hold aim at the wall: pull %.3f, aim weight %.4f, turn %.4f deg, barrel pitched %.1f deg\n", o.pull, o.aim_w, o.aim_angle_deg, pitch);
-    }
-    CharRuntime *a = (CharRuntime *)malloc(sizeof(CharRuntime)), *b = (CharRuntime *)malloc(sizeof(CharRuntime));
-    const CharacterDef *def = anim_lib_char_by_id(L, "player");
-    // 3) ADS with the aim on: the sight stays on the view axis (the gun turns about it), the barrel
-    //    turned only by the hold aim, every gun, five pitches, P at 2 / 25 / 300 m.
-    for (int wi = 0; wi < db->weapon_count && def; wi++) {
-        const WeaponDef *wd = &db->weapons[wi];
-        if (wd->kind == WPN_MELEE) continue;
-        int style = proc_hold_style_index(&L->proc, wd->hold_style);
-        float worst_p = 0, worst_a = 0, worst_miss = 0;
-        const float ds[3] = { 2.0f, 25.0f, 300.0f };
-        for (int pt = 0; pt < 5; pt++)
-            for (int di = 0; di < 3; di++) {
-                charrt_init(a, L, def);
-                CharInputs in;
-                memset(&in, 0, sizeof(in));
-                in.grounded = true;
-                in.weapon_type = style;
-                in.weapon_id = (u16)(wi + 1);
-                in.ads = true;
-                in.aim_pitch = (-0.6f + 0.3f * (float)pt);
-                for (int t = 0; t < 40; t++) hp_step_aim(a, &wd->sockets, &in, dt, true, false, v3(0, 0, 0), v3(0, 0, 0), ds[di]);
-                Xform ic = xf_mul(xf_inverse(a->proc.cam_model), a->proc.item_model);
-                vec3 sc = xf_point(ic, wd->sockets.sight);
-                quat want = quat_mul(a->proc.hp_out.aim_hold, a->proc.hp_out.ads_item.r);
-                worst_p = fmaxf(worst_p, sqrtf(sc.x * sc.x + sc.y * sc.y));
-                worst_a = fmaxf(worst_a, quat_angle_between(ic.r, want) * DG_RAD2DEG);
-                if (!a->proc.hp_out.aim_clamped) worst_miss = fmaxf(worst_miss, a->proc.hp_out.aim_miss);
-            }
-        CHECK(worst_p < 0.00002f && worst_a < 0.01f, "%s: ADS with the hold aim: sight %.4f mm / %.4f deg off", wd->id, worst_p * 1000, worst_a);
-        CHECK(worst_miss < 2e-4f, "%s: ADS bore line %.3f mm from P", wd->id, worst_miss * 1000);
-        printf("  ads + hold aim %-9s sight on axis within %.4f mm / %.4f deg, bore line %.4f mm from P\n", wd->id, worst_p * 1000, worst_a, worst_miss * 1000);
-    }
-    // 4) Owner and remote copy: bit-identical with the aim on (P changing every tick, states, recoil).
-    for (int wi = 0; wi < db->weapon_count && def; wi++) {
-        const WeaponDef *wd = &db->weapons[wi];
-        int style = proc_hold_style_index(&L->proc, wd->hold_style);
-        charrt_init(a, L, def);
-        charrt_init(b, L, def);
-        CharInputs in;
-        memset(&in, 0, sizeof(in));
-        in.grounded = true;
-        in.weapon_type = style;
-        in.weapon_id = (u16)(wi + 1);
-        bool same = true;
-        for (int t = 0; t < 300; t++) {
-            int ph = t / 50;
-            in.ads = ph == 1 || ph == 4;
-            in.sprint = ph == 2;
-            in.crouch = ph == 3;
-            in.speed = ph == 2 ? 6.0f : (ph == 3 ? 1.2f : 0.0f);
-            in.aim_yaw = 0.6f * sinf((float)t * 0.05f);
-            in.aim_pitch = 0.4f * sinf((float)t * 0.031f);
-            vec3 kp = ph == 4 ? v3(0, 0.004f, 0.02f * fabsf(sinf((float)t))) : v3(0, 0, 0);
-            vec3 kr = ph == 4 ? v3(3.0f * fabsf(sinf((float)t)), 0.5f, 0.8f) : v3(0, 0, 0);
-            float d = 2.0f + 40.0f * fabsf(sinf((float)t * 0.09f));
-            u8 turning = 0;
-            in.body_yaw = anim_body_yaw_step(in.body_yaw, in.aim_yaw, in.speed > 0.3f, &L->proc, dt, &turning);
-            hp_step_aim(a, &wd->sockets, &in, dt, false, false, kp, kr, wd->kind == WPN_MELEE ? 0.0f : d);
-            hp_step_aim(b, &wd->sockets, &in, dt, false, true, kp, kr, wd->kind == WPN_MELEE ? 0.0f : d);
-            if (memcmp(a->final_model, b->final_model, sizeof(Xform) * (size_t)L->skel.count) != 0 || memcmp(&a->proc.item_model, &b->proc.item_model, sizeof(Xform)) != 0 ||
-                memcmp(&a->proc.aim_item_model, &b->proc.aim_item_model, sizeof(Xform)) != 0) {
-                same = false;
-                break;
-            }
-        }
-        CHECK(same, "%s: owner and remote poses differ with the hold aim", wd->id);
-    }
-    // 5) Sprint -> hip: the aim blends in with the state, no pop (P at 2 m: a ~6 deg turn).
-    if (def) {
-        const WeaponDef *wd = &db->weapons[1];
-        int style = proc_hold_style_index(&L->proc, wd->hold_style);
-        charrt_init(a, L, def);
-        CharInputs in;
-        memset(&in, 0, sizeof(in));
-        in.grounded = true;
-        in.weapon_type = style;
-        in.weapon_id = 2;
-        float worst_rot = 0.0f, worst_pos = 0.0f, worst_rot_noaim = 0.0f;
-        Xform prev = xf_identity();
-        for (int run = 0; run < 2; run++) {
-            charrt_init(a, L, def);
-            for (int t = 0; t < 180; t++) {
-                in.sprint = (t / 45) % 2 == 0;
-                in.speed = in.sprint ? 6.0f : 0.0f;
-                hp_step_aim(a, &wd->sockets, &in, dt, true, false, v3(0, 0, 0), v3(0, 0, 0), run ? 2.0f : 0.0f);
-                Xform h = a->proc.hp_out.aim_item;
-                if (t > 0) {
-                    float r = quat_angle_between(h.r, prev.r) * DG_RAD2DEG;
-                    if (run) { worst_rot = fmaxf(worst_rot, r); worst_pos = fmaxf(worst_pos, v3_dist(h.t, prev.t)); }
-                    else worst_rot_noaim = fmaxf(worst_rot_noaim, r);
-                }
-                prev = h;
-            }
-        }
-        CHECK(worst_rot < worst_rot_noaim + 1.5f && worst_pos < 0.05f, "sprint <-> hip with the hold aim: %.2f deg / %.1f mm per tick (without %.2f deg)", worst_rot, worst_pos * 1000,
-              worst_rot_noaim);
-        printf("  hold aim sprint <-> hip: max %.2f deg / %.1f mm per tick (%.2f deg without the aim)\n", worst_rot, worst_pos * 1000, worst_rot_noaim);
-    }
-    free(a);
-    free(b);
-}
-
 // The clavicles (LeftShoulder / RightShoulder) keep the animation clip's local rotation after
 // every procedural layer: the relaxed held-arm pose, damage reactions, spine, the hold point and
 // the hand IK (anim_ik_shoulders off). Rifle and pistol, hip and ADS, standing and running, with
@@ -923,39 +712,149 @@ static void test_clavicles_keep_clip(const ItemDB *db) {
     free(rt);
 }
 
+// Rule 1 (docs/CAMERA_HOLDPOINT.md): the first-person frame re-solve - only spine look and IK on stage
+// A - given the tick's own inputs reproduces the tick's pose bit for bit, through locomotion, ADS,
+// crouch, recoil kick with the hands trailing and the trigger pull, hits and a full turn; and a sprint
+// hands the arms to its clip (hand IK weight 0), a run keeps the hold (1).
+static void test_frame_solve(const ItemDB *db) {
+    const float dt = 1.0f / 60.0f;
+    const CharacterDef *def = anim_lib_char_by_id(L, "player");
+    if (!def) return;
+    const Skeleton *s = &L->skel;
+    CharRuntime *a = (CharRuntime *)malloc(sizeof(CharRuntime));
+    static ProcStageA cap;
+    static ProcState st;
+    static Pose pose;
+    static Xform model[ANIM_MAX_BONES];
+    for (int wi = 0; wi < db->weapon_count; wi++) {
+        const WeaponDef *wd = &db->weapons[wi];
+        int style = proc_hold_style_index(&L->proc, wd->hold_style);
+        charrt_init(a, L, def);
+        CharInputs in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.weapon_type = style;
+        in.weapon_id = (u16)(wi + 1);
+        int checks = 0, fails = 0;
+        u32 passes_all = 0;
+        for (int t = 0; t < 360; t++) {
+            int ph = t / 60;
+            in.ads = ph == 1 || ph == 4;
+            in.crouch = ph == 3;
+            in.speed = ph == 2 ? 3.5f : (ph == 3 ? 1.2f : 0.0f);
+            in.move_local = v2(0, 1);
+            in.aim_yaw = ph == 5 ? (float)t * 0.11f : 0.6f * sinf((float)t * 0.05f);
+            in.aim_pitch = 0.5f * sinf((float)t * 0.031f);
+            u8 turning = 0;
+            in.body_yaw = anim_body_yaw_step(in.body_yaw, in.aim_yaw, in.speed > 0.3f, &L->proc, dt, &turning);
+            if (t == 100) proc_damage_hit(&a->proc, &L->proc, s, 0, s->role[BR_SPINE1], v3(0.3f, 0, -1), 2.0f);
+            ProcInput pi;
+            charrt_set_inputs(a, &in);
+            charrt_tick(a, dt);
+            charrt_eval_base(a);
+            charrt_proc_input(a, &pi, root_at(v3(0, 0, 0), in.body_yaw), dt);
+            pi.item = &wd->sockets;
+            pi.hand_ik_weight = 1.0f;
+            pi.hp_view = true;
+            pi.capture = &cap;
+            if (ph == 4) {   // a recoil string: kick, the hands trailing it, the trigger
+                float k = fabsf(sinf((float)t * 0.7f));
+                pi.item_kick_pos = v3(0, 0.004f * k, 0.03f * k);
+                pi.item_kick_rot = v3(4.0f * k, 0.6f, 1.0f * k);
+                pi.hand_lag_pos = v3(0, -0.003f * k, 0.008f * k);
+                pi.hand_lag_rot = v3(-1.5f * k, 0.2f, 0);
+                pi.trigger = k;
+            }
+            cap.valid = false;
+            charrt_post(a, &pi);
+            CHECK(cap.valid, "%s: stage A not captured", wd->id);
+            st = a->proc;
+            pose_copy(&pose, &cap.pose);
+            memcpy(model, cap.model, sizeof(Xform) * (size_t)s->count);
+            ProcInput fi = pi;
+            fi.hp_given = true;
+            u32 passes = proc_frame_solve(&st, &fi, cap.clav_clip, &a->final, a->final_model, &pose, model);
+            passes_all |= passes;
+            checks++;
+            if (memcmp(pose.local, a->final.local, sizeof(Xform) * (size_t)s->count) || memcmp(model, a->final_model, sizeof(Xform) * (size_t)s->count) ||
+                memcmp(&st.item_model, &a->proc.item_model, sizeof(Xform)))
+                fails++;
+        }
+        CHECK(fails == 0, "%s: the frame re-solve differs from the tick pose in %d of %d ticks", wd->id, fails, checks);
+        CHECK((passes_all & ~(PROC_PASS_SPINE | PROC_PASS_IK)) == 0, "%s: a pass outside the whitelist wrote bones (0x%x)", wd->id, passes_all);
+        if (wi < 3) printf("  frame re-solve %-9s %d ticks bit-identical to the tick pose (passes 0x%x)\n", wd->id, checks - fails, passes_all);
+    }
+    // Sprint: the clip owns the arms; run: the hold.
+    {
+        charrt_init(a, L, def);
+        CharInputs in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.weapon_type = proc_hold_style_index(&L->proc, db->weapons[1].hold_style);
+        in.weapon_id = 2;
+        in.move_local = v2(0, 1);
+        float w_run = 0, w_sprint = 1;
+        for (int t = 0; t < 240; t++) {
+            in.sprint = t >= 120;
+            in.speed = in.sprint ? 7.0f : 4.2f;
+            charrt_set_inputs(a, &in);
+            charrt_tick(a, dt);
+            float w = 1;
+            ctrl_hand_ik_weight(&a->ctrl, &w);
+            if (t == 110) w_run = w;
+            if (t == 230) w_sprint = w;
+        }
+        CHECK(w_run > 0.99f, "running: hand IK weight %.2f (the hold should own the hands)", w_run);
+        CHECK(w_sprint < 0.01f, "sprinting: hand IK weight %.2f (the sprint clip should own the arms)", w_sprint);
+        printf("  hand IK: run %.2f, sprint %.2f (the sprint clip carries the arms)\n", w_run, w_sprint);
+    }
+    free(a);
+}
+
 static void test_holdpoint(const ItemDB *db) {
     const float dt = 1.0f / 60.0f;
     const CharacterDef *def = anim_lib_char_by_id(L, "player");
     if (!def) return;
     CharRuntime *a = (CharRuntime *)malloc(sizeof(CharRuntime)), *b = (CharRuntime *)malloc(sizeof(CharRuntime));
-    // 1) ADS: the sight socket on the view axis within 0.5 mm / 0.1 deg after the full solve
-    //    (right-arm IK + reach pull), for every gun, at several view pitches.
+    // 1) ADS (docs/CAMERA_HOLDPOINT.md): the presentation hold point puts the sight socket on the view
+    //    axis within 0.5 mm / 0.1 deg for every gun at several view pitches, and the body ignores ADS:
+    //    the pose's item (camera space) is the hip one to 0.01 mm.
     for (int wi = 0; wi < db->weapon_count; wi++) {
         const WeaponDef *wd = &db->weapons[wi];
         if (wd->kind == WPN_MELEE) continue;
         int style = proc_hold_style_index(&L->proc, wd->hold_style);
-        float worst_p = 0, worst_a = 0;
+        float worst_p = 0, worst_a = 0, worst_body = 0;
         for (int pt = 0; pt < 5; pt++) {
             charrt_init(a, L, def);
+            charrt_init(b, L, def);
             CharInputs in;
             memset(&in, 0, sizeof(in));
             in.grounded = true;
             in.weapon_type = style;
             in.weapon_id = (u16)(wi + 1);
-            in.ads = true;
             in.aim_pitch = (-0.6f + 0.3f * (float)pt);
-            for (int t = 0; t < 40; t++) hp_step(a, &wd->sockets, &in, dt, true, false, v3(0, 0, 0), v3(0, 0, 0));
-            Xform ic = xf_mul(xf_inverse(a->proc.cam_model), a->proc.item_model);
+            CharInputs hip = in;
+            in.ads = true;
+            for (int t = 0; t < 40; t++) {
+                hp_step(a, &wd->sockets, &in, dt, true, true, v3(0, 0, 0), v3(0, 0, 0));
+                hp_step(b, &wd->sockets, &hip, dt, true, true, v3(0, 0, 0), v3(0, 0, 0));
+            }
+            CHECK(a->proc.hp_view_valid, "%s: no presentation hold point", wd->id);
+            Xform ic = a->proc.view_item_cam;
             vec3 sc = xf_point(ic, wd->sockets.sight);
             float pe = sqrtf(sc.x * sc.x + sc.y * sc.y), ae = quat_angle_between(ic.r, quat_identity()) * DG_RAD2DEG;
             worst_p = fmaxf(worst_p, pe);
             worst_a = fmaxf(worst_a, ae);
+            Xform pa = xf_mul(xf_inverse(a->proc.cam_model), a->proc.item_model), pb = xf_mul(xf_inverse(b->proc.cam_model), b->proc.item_model);
+            worst_body = fmaxf(worst_body, v3_dist(pa.t, pb.t));
         }
         CHECK(worst_p < 0.0005f && worst_a < 0.1f, "%s: ADS sight %.3f mm / %.3f deg off the view axis", wd->id, worst_p * 1000, worst_a);
-        printf("  ads %-9s sight on axis within %.4f mm / %.4f deg\n", wd->id, worst_p * 1000, worst_a);
+        CHECK(worst_body < 0.00001f, "%s: ADS moved the item of the body %.3f mm (the model must stay unchanged)", wd->id, worst_body * 1000);
+        printf("  ads %-9s presented sight on axis within %.4f mm / %.4f deg, body item %.4f mm from hip\n", wd->id, worst_p * 1000, worst_a, worst_body * 1000);
     }
     // 2) The owner and a remote copy solve bit-identical poses from the same inputs (no
-    //    first-person-only pose code): 300 ticks through states, look, recoil.
+    //    first-person-only pose code - the owner also evaluates the presentation hold point, which
+    //    nothing in the pose follows): 300 ticks through states, look, recoil.
     for (int wi = 0; wi < db->weapon_count; wi++) {
         const WeaponDef *wd = &db->weapons[wi];
         int style = proc_hold_style_index(&L->proc, wd->hold_style);
@@ -980,7 +879,7 @@ static void test_holdpoint(const ItemDB *db) {
             u8 turning = 0;
             in.body_yaw = anim_body_yaw_step(in.body_yaw, in.aim_yaw, in.speed > 0.3f, &L->proc, dt, &turning);
             hp_step(a, &wd->sockets, &in, dt, false, false, kp, kr);
-            hp_step(b, &wd->sockets, &in, dt, false, true, kp, kr);
+            hp_step(b, &wd->sockets, &in, dt, false, true, kp, kr);   // the owner: + presentation hold point
             if (memcmp(a->final_model, b->final_model, sizeof(Xform) * (size_t)L->skel.count) != 0 ||
                 memcmp(&a->proc.item_model, &b->proc.item_model, sizeof(Xform)) != 0) {
                 same = false;
@@ -1031,30 +930,179 @@ static void test_holdpoint(const ItemDB *db) {
     }
     free(a);
     free(b);
-    // 4) Head stabilizer: landing dip, hit jerk, mantle push and stagger never move the camera
-    //    more than the clamp away from the ideal eye, and never jump between frames.
-    {
-        CamHeadStab st;
-        memset(&st, 0, sizeof(st));
-        CamStabParams prm = cam_stab_params_default();
-        float worst = 0, worst_step = 0;
-        vec3 prev_eye = v3(0, 1.6f, 0);
-        for (int f = 0; f < 600; f++) {
-            float t = (float)f / 144.0f;
-            vec3 ideal = v3(0, 1.6f, 0);
-            vec3 off = v3(0, 0, 0);
-            if (t > 0.5f && t < 0.8f) off.y = -0.25f * sinf((t - 0.5f) / 0.3f * DG_PI);           // landing
-            if (t > 1.2f && t < 1.35f) off.x = 0.15f;                                              // hit jerk
-            if (t > 2.0f && t < 2.8f) off = v3(0, 0.2f * sinf((t - 2.0f) / 0.8f * DG_PI), -0.4f);  // mantle
-            if (t > 3.2f) off = v3(0.06f * sinf(t * 21.0f), 0.04f * sinf(t * 13.0f), 0);          // stagger
-            vec3 eye = camera_fp_stabilize_ex(&st, ideal, v3_add(ideal, off), 0.0f, 1.0f / 144.0f, &prm);
-            worst = fmaxf(worst, v3_dist(eye, ideal));
-            if (f > 0) worst_step = fmaxf(worst_step, v3_dist(eye, prev_eye));
-            prev_eye = eye;
+}
+
+// Rule 2 (docs/CAMERA_HOLDPOINT.md): the gliding camera.
+//  1) The shipped nominal eye table (assets/player/eye_nominal.json) is the animation's: a fresh
+//     calibration moves no entry by more than 5 mm (else: cam_calibrate in the game).
+//  2) Animation-only motion never moves the camera (idle, walk / run in place, crouch, hits: the
+//     camera delta is exactly 0 while the head eye moves), and the head eye stays within the anchor
+//     radius of it (hits reported).
+//  3) Stance changes glide (critically damped: no overshoot, no jump); a step-up snap glides out; a
+//     slope or a jump follows the capsule at once.
+static void test_camera_glide(const ItemDB *db) {
+    const CharacterDef *def = anim_lib_char_by_id(L, "player");
+    if (!def) return;
+    static EyeNominalTable fresh, shipped;
+    // The game bakes the clips at its simulation rate (anim_sample_rate = SIM_HZ): measure that library.
+    AnimLibrary *gl = (AnimLibrary *)calloc(1, sizeof(AnimLibrary));
+    CHECK(anim_lib_load(gl, (float)SIM_HZ), "60 Hz library load failed");
+    const CharacterDef *gdef = anim_lib_char_by_id(gl, "player");
+    CHECK(gdef && eye_nominal_calibrate(gl, gdef, db, &fresh, 0, 0), "nominal eye calibration failed");
+    anim_lib_free(gl);
+    free(gl);
+    size_t size = 0;
+    char *txt = platform_read_file("assets/player/eye_nominal.json", &size);
+    cJSON *root = txt ? cJSON_Parse(txt) : NULL;
+    eye_table_parse(&shipped, root);
+    cJSON_Delete(root);
+    free(txt);
+    CHECK(shipped.valid, "assets/player/eye_nominal.json missing (run cam_calibrate)");
+    CHECK(shipped.anim_hash == fresh.anim_hash, "eye table measured from another animation library (%08x, now %08x): run cam_calibrate", shipped.anim_hash, fresh.anim_hash);
+    float worst = 0;
+    int wp = 0, ws = 0;
+    for (int pp = 0; pp < EYE_POSTURES; pp++)
+        for (int st = 0; st < EYE_STYLES; st++) {
+            if (!fresh.style_valid[st]) continue;
+            CHECK(shipped.style_valid[st], "eye table: hold style %d missing (run cam_calibrate)", st);
+            for (int i = 0; i < fresh.speed_n[pp]; i++)
+                for (int k = 0; k < EYE_PITCH_N; k++) {
+                    float d = v3_dist(fresh.off[pp][st][i][k], shipped.off[pp][st][i][k]);
+                    if (d > worst) { worst = d; wp = pp; ws = st; }
+                }
         }
-        CHECK(worst <= prm.clamp + 1e-4f, "stabilizer displacement %.1f mm exceeds the clamp %.1f mm", worst * 1000, prm.clamp * 1000);
-        CHECK(worst_step < 0.01f, "stabilizer jumped %.1f mm in one 144 Hz frame", worst_step * 1000);
-        printf("  head stabilizer: max %.1f mm from the ideal eye (clamp %.0f), max step %.2f mm / frame\n", worst * 1000, prm.clamp * 1000, worst_step * 1000);
+    CHECK(worst < 0.005f, "eye table is stale: %s / style %d moved %.1f mm (run cam_calibrate)", eye_posture_name(wp), ws, worst * 1000);
+    printf("  eye table: fresh calibration within %.2f mm of the shipped one; residuals (mm):", worst * 1000);
+    for (int pp = 0; pp < EYE_POSTURES; pp++) printf(" %s %.0f", eye_posture_name(pp), fresh.residual[pp] * 1000);
+    printf("\n");
+
+    // 2) A character animating while its camera inputs stay the same.
+    {
+        const float dt = 1.0f / 60.0f;
+        CharRuntime *rt = (CharRuntime *)malloc(sizeof(CharRuntime));
+        const WeaponDef *rifle = NULL;
+        for (int i = 0; i < db->weapon_count; i++) if (!strcmp(db->weapons[i].id, "rifle")) rifle = &db->weapons[i];
+        static const char *names[5] = { "idle", "walk in place", "run in place", "crouch", "hits" };
+        for (int mode = 0; mode < 5; mode++) {
+            charrt_init(rt, L, def);
+            CharInputs in;
+            memset(&in, 0, sizeof(in));
+            in.grounded = true;
+            in.weapon_type = rifle ? proc_hold_style_index(&L->proc, rifle->hold_style) : 0;
+            in.weapon_id = rifle ? (int)(rifle - db->weapons) + 1 : 0;
+            in.move_local = v2(0, 1);
+            in.health = 100;
+            in.speed = mode == 1 ? 1.6f : mode == 2 ? 4.2f : 0.0f;
+            in.crouch = mode == 3;
+            CamGlide g;
+            cam_glide_reset(&g);
+            CamGlideParams gp = cam_glide_params_default();
+            CamNominalIn ni;
+            memset(&ni, 0, sizeof(ni));
+            ni.posture = -1;
+            ni.crouch = in.crouch ? 1.0f : 0.0f;
+            ni.speed = in.speed;   // "in place": the clip plays, the capsule doesn't move
+            ni.style = in.weapon_type;
+            vec3 cam0 = v3(0, 0, 0), head_min = v3(1e9f, 1e9f, 1e9f), head_max = v3(-1e9f, -1e9f, -1e9f);
+            float cam_moved = 0, anchor = 0;
+            for (int t = 0; t < 240; t++) {
+                if (mode == 4 && t % 40 == 20) proc_damage_hit(&rt->proc, &L->proc, &L->skel, t / 40 % 3, L->skel.role[t / 40 % 2 ? BR_SPINE1 : BR_HEAD], v3(0.4f, 0, -1), 2.5f);
+                charrt_set_inputs(rt, &in);
+                charrt_tick(rt, dt);
+                charrt_eval_base(rt);
+                ProcInput pi;
+                charrt_proc_input(rt, &pi, root_at(v3(0, 0, 0), 0.0f), dt);
+                pi.item = rifle ? &rifle->sockets : NULL;
+                if (in.crouch) pi.crouch_drop = 0.38f;
+                charrt_post(rt, &pi);
+                vec3 off = cam_glide_offset(&g, &shipped, &ni, dt, &gp);
+                float step = cam_glide_step(&g, 0.0f, 0.0f, true, dt, &gp);
+                vec3 cam = v3(off.x, off.y + step, -off.z);   // model space: forward is -Z
+                Xform eye;
+                if (!character_socket_world(def, "camera", rt->final_model, &eye)) continue;
+                if (t < 60) { cam0 = cam; continue; }
+                cam_moved = fmaxf(cam_moved, v3_dist(cam, cam0));
+                anchor = fmaxf(anchor, v3_dist(cam, eye.t));
+                head_min = v3_min(head_min, eye.t);
+                head_max = v3_max(head_max, eye.t);
+            }
+            vec3 range = v3_sub(head_max, head_min);
+            printf("  camera %-14s: camera moved %.3f mm while the head eye moved %.0f x %.0f x %.0f mm; head eye within %.0f mm of it\n", names[mode], cam_moved * 1000,
+                   range.x * 1000, range.y * 1000, range.z * 1000, anchor * 1000);
+            CHECK(cam_moved == 0.0f, "%s: the camera moved %.3f mm with animation-only motion", names[mode], cam_moved * 1000);
+            if (mode < 4) CHECK(anchor < 0.08f, "%s: the head eye strays %.0f mm from the nominal eye (anchor 80 mm)", names[mode], anchor * 1000);
+        }
+        free(rt);
+    }
+    // 3) The glide: stand -> crouch and back, a 30 cm step-up, a slope, a jump.
+    {
+        CamGlide g;
+        cam_glide_reset(&g);
+        CamGlideParams gp = cam_glide_params_default();
+        CamNominalIn ni;
+        memset(&ni, 0, sizeof(ni));
+        ni.posture = -1;
+        const float dt = 1.0f / 144.0f;
+        vec3 a = eye_table_sample(&shipped, EYE_STAND, 0, 0, 0), b = eye_table_sample(&shipped, EYE_CROUCH, 0, 0, 0);
+        float overshoot = 0, jump = 0, settle_t = -1;
+        vec3 prev = cam_glide_offset(&g, &shipped, &ni, dt, &gp);
+        for (int f = 1; f < 288; f++) {
+            ni.crouch = 1.0f;
+            vec3 o = cam_glide_offset(&g, &shipped, &ni, dt, &gp);
+            jump = fmaxf(jump, v3_dist(o, prev));
+            overshoot = fmaxf(overshoot, b.y - o.y);   // below the crouch target
+            if (settle_t < 0 && v3_dist(o, b) < 0.001f) settle_t = (float)f * dt;
+            prev = o;
+        }
+        printf("  glide stand -> crouch (%.0f mm): settles within 1 mm at %.2f s, overshoot %.2f mm, largest 144 Hz step %.1f mm\n", (a.y - b.y) * 1000, settle_t,
+               overshoot * 1000, jump * 1000);
+        CHECK(overshoot < 0.001f, "glide overshoots the crouch eye by %.1f mm", overshoot * 1000);
+        CHECK(settle_t > 0 && settle_t < 0.8f, "glide settles in %.2f s", settle_t);
+        CHECK(jump < 0.02f, "glide jumps %.1f mm in one 144 Hz frame", jump * 1000);
+        // Step: the capsule snaps up 25 cm while grounded; the camera glides up instead.
+        cam_glide_reset(&g);
+        float y = 0, worst_step = 0, cam_prev = 0, s_end = 0;
+        for (int f = 0; f < 288; f++) {
+            if (f == 20) y += 0.25f;
+            float s = cam_glide_step(&g, y, 1.5f, true, dt, &gp);
+            float cy = y + s;
+            if (f > 0) worst_step = fmaxf(worst_step, fabsf(cy - cam_prev));
+            cam_prev = cy;
+            s_end = s;
+        }
+        printf("  glide step-up 25 cm: largest 144 Hz camera step %.1f mm, left %.2f mm after 2 s\n", worst_step * 1000, fabsf(s_end) * 1000);
+        CHECK(worst_step < 0.02f && fabsf(s_end) < 0.001f, "step-up: camera step %.1f mm, left %.1f mm", worst_step * 1000, fabsf(s_end) * 1000);
+        // Stairs (18 cm risers, 28 cm treads) at walk / run / sprint, each snap spread over a 60 Hz
+        // tick's frames like the interpolated position: the eye never sinks more than 30 cm behind the
+        // capsule, and the absorber works at 60 and 240 Hz alike.
+        for (int fr = 0; fr < 2; fr++) {
+            const float fdt = fr ? 1.0f / 240.0f : 1.0f / 60.0f;
+            for (int sp = 0; sp < 3; sp++) {
+                const float speed = sp == 0 ? 1.6f : (sp == 1 ? 4.2f : 6.8f);
+                cam_glide_reset(&g);
+                float x = 0, worst = 0;
+                for (int f = 0; f < (int)(3.0f / fdt); f++) {
+                    x += speed * fdt;
+                    float n = floorf(x / 0.28f);   // treads passed: the capsule steps up at each edge ...
+                    float frac = saturate((x - n * 0.28f) / (speed / 60.0f));   // ... spread over one tick
+                    float s = cam_glide_step(&g, 0.18f * (n - 1.0f + frac), speed, true, fdt, &gp);
+                    worst = fmaxf(worst, fabsf(s));
+                }
+                CHECK(worst <= 0.3f + 1e-4f, "stairs at %.1f m/s, %.0f Hz: the eye sinks %.0f mm", speed, 1.0f / fdt, worst * 1000);
+                CHECK(worst > 0.02f, "stairs at %.1f m/s, %.0f Hz: no step absorbed", speed, 1.0f / fdt);
+                if (fr) printf("  stairs %.1f m/s: the eye at most %.0f mm behind the capsule\n", speed, worst * 1000);
+            }
+        }
+        // Slope: 0.5 m/s up at 4 m/s, and a jump: the camera follows the capsule exactly.
+        cam_glide_reset(&g);
+        float lag = 0;
+        y = 0;
+        for (int f = 0; f < 288; f++) {
+            y += (f < 144 ? 0.5f : 3.0f) * dt;
+            float s = cam_glide_step(&g, y, 4.0f, f < 144, dt, &gp);
+            lag = fmaxf(lag, fabsf(s));
+        }
+        CHECK(lag < 1e-6f, "slope / jump: the camera lags the capsule by %.1f mm", lag * 1000);
     }
 }
 
@@ -1336,7 +1384,8 @@ int main(int argc, char **argv) {
     test_hold_and_glue(db);
     test_phone_hold(db);
     test_holdpoint(db);
-    test_hold_aim(db);
+    test_frame_solve(db);
+    test_camera_glide(db);
     test_clavicles_keep_clip(db);
     test_body_parts(db);
     test_damage_reaction();

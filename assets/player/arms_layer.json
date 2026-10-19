@@ -1,0 +1,166 @@
+{
+  "_comment": "First-person arms layer (docs/CAMERA_HOLDPOINT.md \"Rule 3\"): the arms + held item drawn with their own camera. Per hold point state (and per item under \"items\"): offset (right, up, forward m), rotation (pitch, yaw, roll deg) and scale (0.9 .. 1.1) about the hold point, fov_add (deg on the Hands FOV); in ADS only offset[2] (push), rotation[2] (roll) and scale (about the sight) apply. equip: the raise from below the view. seam: arm vertices near the shoulder blend from the world camera (r0) to the arms camera (r1). Edit live with arms_tuner.",
+  "states": {
+    "hip": {
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": 1,
+      "fov_add": 0,
+      "blend": 0.2
+    },
+    "ads": {
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": 1,
+      "fov_add": 0,
+      "blend": 0.2
+    },
+    "sprint": {
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": 1,
+      "fov_add": 0,
+      "blend": 0.2
+    },
+    "crouch": {
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": 1,
+      "fov_add": 0,
+      "blend": 0.2
+    },
+    "prone": {
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": 1,
+      "fov_add": 0,
+      "blend": 0.2
+    },
+    "empty": {
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": 1,
+      "fov_add": 0,
+      "blend": 0.2
+    },
+    "inspect": {
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": 1,
+      "fov_add": 0,
+      "blend": 0.2
+    },
+    "vehicle_onehand": {
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": 1,
+      "fov_add": 0,
+      "blend": 0.2
+    },
+    "phone_portrait": {
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": 1,
+      "fov_add": 0,
+      "blend": 0.2
+    },
+    "phone_landscape": {
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": 1,
+      "fov_add": 0,
+      "blend": 0.2
+    }
+  },
+  "items": {},
+  "equip": {
+    "time": 0.3,
+    "pitch": 35,
+    "margin": 0.05
+  },
+  "seam": {
+    "r0": 0.06,
+    "r1": 0.16
+  },
+  "znear": 0.01
+}

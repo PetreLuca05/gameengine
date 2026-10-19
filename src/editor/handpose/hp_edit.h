@@ -62,24 +62,39 @@ void hp_edit_remove_contact(HandPoseDB *db, HpTarget t, int hand, int index);
 // After any edit: rehash (net identity + revision bump, the runtime picks the change up at once).
 void hp_edit_commit(HandPoseDB *db);
 
-// Undo / redo of whole-target snapshots (a grip entry: layers, root, reviewed; a case: everything),
-// keyed by hash so a reload that reorders the DB keeps working. hp_undo_push is called before an
-// edit; consecutive pushes with the same non-zero key (one control being dragged) coalesce into
-// one step until hp_undo_break.
+// Item sockets a grip step carries (the weapon's muzzle, docs/HANDPOSE.md "Muzzle"): they live in
+// the item definitions, not in the DB, so the editor lends the undo stack accessors by grip hash;
+// a grip step then restores them with the grip. No accessors: the grip alone.
+typedef struct HpItemSockets { bool valid; vec3 muzzle; } HpItemSockets;
+typedef struct HpSocketIO {
+    bool (*get)(void *ctx, u32 grip_hash, HpItemSockets *out);   // false: the grip has none
+    void (*set)(void *ctx, u32 grip_hash, const HpItemSockets *in);
+    void *ctx;
+} HpSocketIO;
+
+// Undo / redo of whole-target snapshots (a grip entry: layers, root, reviewed + its item sockets; a
+// case: everything), keyed by hash so a reload that reorders the DB keeps working. hp_undo_push is
+// called before an edit; consecutive pushes with the same non-zero key (one control being dragged)
+// coalesce into one step until hp_undo_break.
 typedef struct HpUndoSnap {
     bool is_case;
     u32 hash;
     HandPoseEntry e;
     HandPoseCase c;
+    HpItemSockets sock;        // grips: the item sockets at the time (valid: the accessors had them)
 } HpUndoSnap;
 
 typedef struct HpUndo {
     HpUndoSnap *undo, *redo;   // HP_UNDO_MAX each (allocated on the first push)
     int undo_count, redo_count;
     u32 last_key, last_hash;
+    HpSocketIO io;             // optional (the editor's muzzle accessors)
 } HpUndo;
 
-void hp_undo_free(HpUndo *u);
+void hp_undo_free(HpUndo *u);   // also forgets io
+// A snapshot of one target as a step stores it (grip: + its item sockets through io); restoring
+// one puts the grip / case / sockets back (the caller commits).
+void hp_undo_snap(const HpUndo *u, const HandPoseDB *db, HpTarget t, HpUndoSnap *out);
 void hp_undo_clear(HpUndo *u);
 void hp_undo_push(HpUndo *u, const HandPoseDB *db, HpTarget t, u32 key);
 void hp_undo_break(HpUndo *u);

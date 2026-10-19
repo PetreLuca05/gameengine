@@ -68,8 +68,6 @@ bool proc_params_load(ProcParams *p, const cJSON *root) {
     memcpy(p->spine_weights, sw, sizeof(sw));
     float swu[5] = { 0.0f, 0.02f, 0.05f, 0.38f, 0.55f };
     memcpy(p->spine_weights_up, swu, sizeof(swu));
-    float swa[5] = { 0.40f, 0.35f, 0.25f, 0.0f, 0.0f };
-    memcpy(p->spine_weights_ads_up, swa, sizeof(swa));
     p->yaw_limit = 100;
     p->pitch_limit = 80;
     p->pitch_limit_up = 89;
@@ -84,7 +82,6 @@ bool proc_params_load(ProcParams *p, const cJSON *root) {
     p->foot_smooth = 18.0f;
     p->foot_height = 0.08f;
     p->slope_lean = 0.35f;
-    p->accel_lean = 0.012f;
     p->style_blend_time = 0.2f;
     for (int i = 0; i < HOLD_COUNT; i++) p->styles[i] = default_style(i);
     p->style_count = HOLD_COUNT;
@@ -100,7 +97,7 @@ bool proc_params_load(ProcParams *p, const cJSON *root) {
         const cJSON *pr = cJSON_GetObjectItemCaseSensitive(root, "procedural");
         if (pr) {
             const cJSON *sp = cJSON_GetObjectItemCaseSensitive(pr, "spine");
-            if (sp) { jarr(sp, "weights", p->spine_weights, 5); jarr(sp, "weights_up", p->spine_weights_up, 5); jarr(sp, "weights_ads_up", p->spine_weights_ads_up, 5); p->yaw_limit = jf(sp, "yaw_limit", p->yaw_limit); p->pitch_limit = jf(sp, "pitch_limit", p->pitch_limit); p->pitch_limit_up = jf(sp, "pitch_limit_up", p->pitch_limit_up); }
+            if (sp) { jarr(sp, "weights", p->spine_weights, 5); jarr(sp, "weights_up", p->spine_weights_up, 5); p->yaw_limit = jf(sp, "yaw_limit", p->yaw_limit); p->pitch_limit = jf(sp, "pitch_limit", p->pitch_limit); p->pitch_limit_up = jf(sp, "pitch_limit_up", p->pitch_limit_up); }
             const cJSON *tu = cJSON_GetObjectItemCaseSensitive(pr, "turn");
             if (tu) {
                 p->turn_threshold = jf(tu, "threshold", p->turn_threshold);
@@ -119,7 +116,7 @@ bool proc_params_load(ProcParams *p, const cJSON *root) {
                 p->foot_height = jf(fo, "foot_height", p->foot_height);
             }
             const cJSON *le = cJSON_GetObjectItemCaseSensitive(pr, "lean");
-            if (le) { p->slope_lean = jf(le, "slope", p->slope_lean); p->accel_lean = jf(le, "accel", p->accel_lean); }
+            if (le) p->slope_lean = jf(le, "slope", p->slope_lean);
         }
         const cJSON *hs = cJSON_GetObjectItemCaseSensitive(root, "hold_styles");
         const cJSON *e;
@@ -472,12 +469,65 @@ void proc_run(ProcState *st, const ProcInput *in0, Pose *pose, Xform *model) {
             if (flat > 1e-3f) st->clip_chest_yaw = atan2f(-f.x, -f.z) * DG_RAD2DEG * smoothstepf(0.3f, 0.7f, flat);
         }
     }
+    // Stage A ends here: from now on only spine look and IK write bones (proc_frame_solve re-runs them).
+    if (in.capture) {
+        pose_copy(&in.capture->pose, pose);
+        memcpy(in.capture->model, model, sizeof(Xform) * (size_t)in.skel->count);
+        in.capture->clav_clip[0] = clav_clip[0];
+        in.capture->clav_clip[1] = clav_clip[1];
+        in.capture->valid = true;
+    }
     if (in.spine) proc_spine(st, &in, pose, model);
     // Before the hand solve: whatever moved above, the arm chains start from the clip's shoulders.
     keep_clavicles(in.skel, pose, model, clav, clav_clip);
     if (in.hold && in.item) proc_hold(st, &in, pose, model);
-    else { st->has_item = false; st->aim_valid = false; }
+    else { st->has_item = false; st->aim_valid = false; st->hp_view_valid = false; }   // no hold: no presentation (the aim claims don't use a stale one)
     if (in.hand_anchor_w > 0) proc_hand_anchors(st, &in, pose, model);
     if (in.foot_ik) proc_foot_legs(st, &in, pose, model, foot_off, anim_foot);
     st->prev_vel = in.velocity;
+}
+
+Xform proc_presented_move(const ProcState *st, Xform drawn_cam, float ads_w, float ikw) {
+    if (!st->hp_view_valid || !st->has_item) return xf_identity();
+    Xform v = st->view_item_cam, h = st->hold_item_cam;
+    v.s = h.s = drawn_cam.s = v3(1, 1, 1);
+    Xform at_hip = xf_mul(v, xf_inverse(h)), aimed = xf_mul(v, xf_inverse(drawn_cam));
+    Xform m = xf_lerp(at_hip, aimed, saturate(ads_w));
+    if (ikw < 1.0f) m = xf_lerp(xf_identity(), m, saturate(ikw));
+    m.s = v3(1, 1, 1);
+    return m;
+}
+
+static bool leg_bone(const Skeleton *s, int b) {
+    int l = s->role[BR_L_UPLEG], r = s->role[BR_R_UPLEG];
+    return (l >= 0 && (b == l || skel_is_descendant(s, b, l))) || (r >= 0 && (b == r || skel_is_descendant(s, b, r)));
+}
+
+u32 proc_frame_solve(ProcState *st, const ProcInput *in0, const Xform clav_clip[2], const Pose *legs_pose, const Xform *legs_model, Pose *pose, Xform *model) {
+    ProcInput in = *in0;
+    in.dt = 0.0f;
+    in.capture = NULL;
+    in.hp_view = false;
+    in.root.r = quat_yaw(st->render_body_yaw);
+    const Skeleton *s = in.skel;
+    const int clav[2] = { s->role[BR_L_SHOULDER], s->role[BR_R_SHOULDER] };
+    u32 passes = 0;
+    if (in.spine) {
+        proc_spine(st, &in, pose, model);
+        passes |= PROC_PASS_SPINE;
+    }
+    // The IK pass: the arm chains start from the clip's shoulders, the hands go onto the item and
+    // the anchors, the legs keep the tick's foot IK.
+    keep_clavicles(s, pose, model, clav, clav_clip);
+    if (in.hold && in.item) proc_hold(st, &in, pose, model);
+    else st->has_item = st->hp_view_valid = false;
+    if (in.hand_anchor_w > 0) proc_hand_anchors(st, &in, pose, model);
+    if (in.foot_ik && legs_pose && legs_model)
+        for (int b = 0; b < s->count; b++)
+            if (leg_bone(s, b)) {
+                pose->local[b] = legs_pose->local[b];
+                model[b] = legs_model[b];
+            }
+    passes |= PROC_PASS_IK;
+    return passes;
 }

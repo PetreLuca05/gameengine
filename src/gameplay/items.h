@@ -172,6 +172,7 @@ typedef struct AttachmentDef {
     float dust, fresnel;
     float chromatic;          // scopes: edge chromatic aberration (pixels at the rim)
     float dof_near_blur;      // ADS: near-field (weapon) blur, CoC pixels
+    float pip_resolution;     // scopes: PiP resolution x r_scope_pip_scale, bounded by the fidelity level (docs/ATTACHMENTS.md)
     // Modifiers (applied by the host and by the predicting client from the same inventory).
     float ads_time;           // multiplier
     float sway_scale;         // multiplier on idle / scope sway
