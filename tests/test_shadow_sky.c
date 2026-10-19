@@ -520,9 +520,23 @@ static void test_clouds_tiers(const ShadowSkyConfig *c) {
     ssky_update(&s, c, &in, &o);
     vec2 o0 = o.cloud_offset;
     in.dt = DT;
+    in.drift_dt = DT;
     for (int f = 0; f < 600; f++) ssky_update(&s, c, &in, &o);
     float moved = o.cloud_offset.x - o0.x, expect = 10.0f * 4.0f * c->cloud_wind_aloft;
     CHECK(fabsf(moved - expect) < 0.01f * expect && fabsf(o.cloud_offset.y - o0.y) < 0.01f, "drift %.2f m in 10 s (expected %.2f)", moved, expect);
+    // The drift follows the world clock: paused, the clouds stand still.
+    double held = o.cloud_offset_d[0];
+    in.drift_dt = 0.0;
+    for (int f = 0; f < 60; f++) ssky_update(&s, c, &in, &o);
+    CHECK(o.cloud_offset_d[0] == held, "clock paused: the drift stands (%.6f -> %.6f m)", held, o.cloud_offset_d[0]);
+    // 100 game days of drift (~1.2e6 m at the default day): a frame's step is still exact (double).
+    s.cloud_offset[0] = 1.2e6;
+    in.drift_dt = DT;
+    ssky_update(&s, c, &in, &o);
+    double a0 = o.cloud_offset_d[0];
+    ssky_update(&s, c, &in, &o);
+    double step = o.cloud_offset_d[0] - a0, want = (double)DT * 4.0 * c->cloud_wind_aloft;
+    CHECK(fabs(step - want) < 1e-6 * want, "drift step at 1.2e6 m: %.9f m (expected %.9f)", step, want);
     CHECK(fabsf(sqrtf(o.cloud_vel.x * o.cloud_vel.x + o.cloud_vel.y * o.cloud_vel.y) - 4.0f * c->cloud_wind_aloft) < 1e-3f, "cloud speed");
     // Wide mode on the full tier: light cloud (> wide_deg) fades cascade 0 out smoothly.
     ssky_state_reset(&s);

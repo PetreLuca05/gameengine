@@ -27,7 +27,7 @@ VIEWS = [("pine", -135, -125, 0, 65), ("broad", 135, -125, 90, 60), ("dead", -16
 
 def cfg_text(heights):
     lines = ["set r_maxfps 60", "set r_foliage_wind 0", "set r_volumetrics 0", "set r_aa 0", "set r_auto_exposure 0", "set r_upscaler 0", "set hud_opacity 0", "set cl_camera_socket 0", "set cl_fp_body 0", "map vegetation", "wait 20",
-             "time_set 11:30", "time_pause", "weather_set clear 0", "weather_lock 1"]
+             "time_set 11:30 instant", "time_pause", "weather_set clear 0", "weather_lock 1"]
     for (name, x, z, yaw, pitch), h in zip(VIEWS, heights):
         lines += [f"setpos {x} {h + 1.7:.2f} {z} {yaw} {pitch}", "wait 1", "noclip", "wait 40", f"screenshot tree_{name}.png", "wait 2"]
     lines.append("quit")

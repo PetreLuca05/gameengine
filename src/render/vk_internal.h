@@ -447,6 +447,8 @@ typedef struct Renderer {
     bool shadow_redraw[4];
     struct ShadowHold { bool valid; mat4 vps, vp_ndc; vec3 center, L; float radius, texel_m, bias, span, nbias, mpt; } shadow_hold[4];
     u32 shadow_hold_key;                        // cascades / tile / fit / shadow image generation the holds belong to
+    vec3 shadow_pivot;                          // the light views' pivot near the camera (csm_pivot)
+    bool shadow_pivot_valid;
     bool moon_active;
     // Unity-style controls (docs/SHADOWS_UNITY_MODEL.md): this frame's quality knobs, the
     // directional light's settings, its effective type / filter.

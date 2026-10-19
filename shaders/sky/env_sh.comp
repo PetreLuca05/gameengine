@@ -1,12 +1,14 @@
 #version 450
-// Irradiance SH9 of the environment. pc.u0.x = 0: project the next environment's 32 x 32 level
-// (solid angle weighted for the octahedral map) into sh[9..17]; 1: ease sh[0..8] towards it by
-// SK.env.x (pc.u0.y = 1: snap). sh[18].x = luminance of the DC term (readback / tests).
+// Irradiance SH9 of the environment. pc.u0.x = 0: the latest projection sh[9..17] becomes the
+// previous sh[20..28], then the completed environment's 32 x 32 level (solid angle weighted for the
+// octahedral map) is projected into sh[9..17]; 1: sh[0..8] = the previous blended into the latest
+// by the cycle phase SK.env.x (pc.u0.y = 1: snap, previous = latest). sh[18].x = luminance of the
+// DC term in use, .y of the latest (readback / tests).
 #extension GL_GOOGLE_include_directive : require
 #include "sky_common.glsl"
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 0, binding = 4) uniform sampler2D env;
-layout(std430, set = 0, binding = 14) buffer SH { vec4 sh[20]; } O;
+layout(std430, set = 0, binding = 14) buffer SH { vec4 sh[30]; } O;
 shared vec3 s_sh[64][9];
 shared float s_w[64];
 
@@ -21,14 +23,19 @@ void main() {
     uint li = gl_LocalInvocationIndex;
     if (pc.u0.x == 1u) {
         if (li < 9u) {
-            float k = pc.u0.y == 1u ? 1.0 : clamp(SK.env.x, 0.0, 1.0);
-            O.sh[li] = vec4(mix(O.sh[li].rgb, O.sh[9u + li].rgb, k), 0.0);
+            bool snap = pc.u0.y == 1u;
+            float k = snap ? 1.0 : clamp(SK.env.x, 0.0, 1.0);
+            if (snap) O.sh[20u + li] = O.sh[9u + li];
+            O.sh[li] = vec4(mix(O.sh[20u + li].rgb, O.sh[9u + li].rgb, k), 0.0);
         }
         barrier();
         memoryBarrierBuffer();
         if (li == 0u) O.sh[18] = vec4(dot(O.sh[0].rgb, vec3(0.2126, 0.7152, 0.0722)), dot(O.sh[9].rgb, vec3(0.2126, 0.7152, 0.0722)), O.sh[18].zw);
         return;
     }
+    if (li < 9u) O.sh[20u + li] = O.sh[9u + li];   // the latest becomes the previous
+    memoryBarrierBuffer();
+    barrier();
     vec3 acc[9];
     for (int i = 0; i < 9; i++) acc[i] = vec3(0.0);
     float wsum = 0.0;

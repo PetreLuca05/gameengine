@@ -316,7 +316,7 @@ def cutoff():
 
 def moon():
     lines = ['shadow_preset night_moon', 'time_pause 1', 'wait 300'] + setpos_lines(FIN_E, FIN_Z - 2.0, 'moon_night')
-    lines += ['time_set 04:00', 'wait 300', 'shadow_info']
+    lines += ['time_set 04:00 instant', 'wait 300', 'shadow_info']
     text = run_game('moon', lines)
     info = infos(text)
     if len(info) < 2:

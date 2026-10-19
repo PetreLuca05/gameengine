@@ -1452,6 +1452,15 @@ static void shadow_check_sampled(const FrameData *fd) {
     }
 }
 
+// The time-of-day probe's view of the cascades (render_shadow_cascade_lag): the last frame's.
+static struct { int n; float lag_deg[4], allow_deg[4], texel_m[4]; bool held[4]; } s_casc_probe;
+
+int render_shadow_cascade_lag(float lag_deg[4], float allow_deg[4], float texel_m[4], bool held[4]) {
+    for (int k = 0; k < 4; k++)
+        lag_deg[k] = s_casc_probe.lag_deg[k], allow_deg[k] = s_casc_probe.allow_deg[k], texel_m[k] = s_casc_probe.texel_m[k], held[k] = s_casc_probe.held[k];
+    return s_casc_probe.n;
+}
+
 static void compute_matrices(FrameData *fd) {
     float aspect = view_aspect();
     RenderCamera *c = &R->cam;
@@ -1504,7 +1513,12 @@ static void compute_matrices(FrameData *fd) {
         Lfit = hz > 1e-4f ? v3(Lfit.x / hz * 0.99985f, 0.0175f, Lfit.z / hz * 0.99985f) : v3(0, 1, 0);
         sun_elev = fmaxf(sun_elev, 1.0f * DG_DEG2RAD);
     }
-    mat4 lview = csm_light_view(Lfit);
+    // The light views pivot about a point near the camera (csm_light_view_at): the direction is exact
+    // every frame (it turns with the sun, docs/DAYNIGHT.md "Continuity"), the snap below moves the
+    // tiles by whole texels only.
+    R->shadow_pivot = csm_pivot(R->shadow_pivot, R->shadow_pivot_valid && !R->camera_cut, c->pos, CSM_PIVOT_CELL);
+    R->shadow_pivot_valid = true;
+    mat4 lview = csm_light_view_at(Lfit, R->shadow_pivot);
     float low_sun = csm_low_sun(sun_elev);
     // A Shadow Distance change glides over ~0.2 s instead of resizing every cascade at once.
     float fdt = (float)g_engine.frame_dt;
@@ -1556,8 +1570,10 @@ static void compute_matrices(FrameData *fd) {
     // are re-rendered every r_shadow_far_interval frames, out of phase (one far tile per frame at 2).
     // A cascade not due keeps the tile and everything it was drawn with; it is drawn anyway after a cut,
     // a change of cascades / tile size / fit / atlas, once its fit moved a tenth of its radius (so its
-    // box still covers what the splits send to it) or the fit light direction turned 0.25 deg. Kept
-    // cascades are drawn without the receiver-volume cull (PF-0006: later views sample them).
+    // box still covers what the splits send to it) or the fit light direction turned enough to move a
+    // 10 m caster's shadow tip by half a texel of the tile, or 0.02 deg (csm_hold_max_turn: the sun of
+    // the default day keeps it, a time-lapse or a low sun redraws it, a jump always). Kept cascades are
+    // drawn without the receiver-volume cull (PF-0006: later views sample them).
     int far_interval = prof_fix_enabled(PFX_SHADOW_FAR_STAGGER) && R->r_shadow_far_interval && ncasc == 4 ? R->r_shadow_far_interval->i : 1;
     {
         int interval = far_interval;
@@ -1569,9 +1585,13 @@ static void compute_matrices(FrameData *fd) {
         for (int k = 0; k < 4; k++) {
             struct ShadowHold *h = &R->shadow_hold[k];
             bool due = interval < 2 || ncasc < 4 || k < 2 || (R->frame_index + (u32)((k - 2) * (interval / 2))) % (u32)interval == 0;
+            float turn = h->valid ? 2.0f * asinf(fminf(0.5f * v3_len(v3_sub(h->L, Lfit)), 1.0f)) : 0.0f, allow = csm_hold_max_turn(h->texel_m, sun_elev);
             bool moved = !h->valid || v3_dist(h->center, R->shadow_center[k]) > 0.1f * h->radius || fabsf(h->radius - R->shadow_radius[k]) > 0.02f * h->radius ||
-                         v3_dot(h->L, Lfit) < 0.99999048f;   // cos 0.25 deg: a jump of the light, not the sun's drift
+                         turn > allow;
+            s_casc_probe.allow_deg[k] = allow * DG_RAD2DEG;
             R->shadow_redraw[k] = due || moved;
+            s_casc_probe.held[k] = !R->shadow_redraw[k];
+            s_casc_probe.lag_deg[k] = R->shadow_redraw[k] ? 0.0f : turn * DG_RAD2DEG;
             if (R->shadow_redraw[k]) {
                 *h = (struct ShadowHold){ true, R->shadow_vps[k], R->shadow_vp_ndc[k], R->shadow_center[k], Lfit, R->shadow_radius[k], R->csm.texel_m[k], bias[k], span[k], nbias[k], mpt[k] };
                 continue;
@@ -1584,6 +1604,8 @@ static void compute_matrices(FrameData *fd) {
             bias[k] = h->bias, span[k] = h->span, nbias[k] = h->nbias, mpt[k] = h->mpt;
         }
     }
+    s_casc_probe.n = ncasc;
+    for (int k = 0; k < 4; k++) s_casc_probe.texel_m[k] = k < ncasc ? mpt[k] : 0.0f;
     // Unused cascade slots repeat the last one (shadow_vp / bias.w users: decals, froxels, particles).
     for (int k = ncasc; k < 4; k++) {
         R->shadow_vps[k] = R->shadow_vps[ncasc - 1];
@@ -1624,7 +1646,7 @@ static void compute_matrices(FrameData *fd) {
             float hz = sqrtf(L2.x * L2.x + L2.z * L2.z);
             L2 = hz > 1e-4f ? v3(L2.x / hz * 0.99985f, 0.0175f, L2.z / hz * 0.99985f) : v3(0, 1, 0);
         }
-        mat4 mview = csm_light_view(L2);
+        mat4 mview = csm_light_view_at(L2, R->shadow_pivot);
         CsmTile t;
         csm_fit_reach(&mview, v3_madd(c->pos, fwd, R->csm.ahead[mk]), moon_r, R->moon_shadow_size, moon_r + 2.0f, reach, &t);
         float cm, nm;
@@ -3126,6 +3148,7 @@ float render_scope_pip_fov(void) { return R->pip_fov; }
 vec3 render_sky_irradiance(vec3 dir) { return sky_irradiance_cpu(dir); }
 float render_sky_luminance(float *latest) { return sky_sh_luminance(latest); }
 u32 render_sky_refilters(void) { return sky_refilter_count(); }
+u32 render_sky_lut_builds(void) { return sky_lut_builds(); }
 bool render_load_lut(const char *cube_path) {
     vkDeviceWaitIdle(R->device);   // the LUT image may be in flight
     return post_lut_load_cube(cube_path && cube_path[0] ? cube_path : NULL, 0);

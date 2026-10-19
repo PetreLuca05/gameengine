@@ -203,7 +203,9 @@ typedef struct RenderEnvironment {
     float star_brightness, milky_way, night_floor;
     float cloud_cover, cloud_altitude, cloud_scale;
     float cloud_shadow_tau;             // optical depth of a full cloud shadow texel (0 = no cloud shadows)
-    vec2 cloud_offset;                  // wind drift (m)
+    vec2 cloud_offset;                  // wind drift (m; float copy)
+    double cloud_offset_d[2];           // wind drift (m): the sky splits it per noise octave (exact at any distance)
+    float clock_speed;                  // the world clock's speed / the default day's (time_scale; 0 paused)
     float cloud_density;                // weather: layer opacity 0..1 (0 = default 0.92)
     float cloud_softness;               // weather: edge softness 0..1 (fog-like stratus vs crisp cumulus)
     float cloud_darkness;               // weather: storm clouds darken 0..1
@@ -617,6 +619,11 @@ float render_scope_pip_fov(void);              // last PiP camera FOV (deg), 0 =
 vec3 render_sky_irradiance(vec3 dir);
 float render_sky_luminance(float *latest);
 u32 render_sky_refilters(void);
+u32 render_sky_lut_builds(void);                              // transmittance / multiple-scattering rebuilds
+// Per sun cascade (last compute_matrices): the angle between the light direction its tile was drawn
+// with and that frame's (deg; > 0 only for a kept tile, PF-0028), the turn a kept tile may lag
+// (csm_hold_max_turn, deg), its texel (m), kept. Returns the cascade count.
+int render_shadow_cascade_lag(float lag_deg[4], float allow_deg[4], float texel_m[4], bool held[4]);
 void render_camera_cut(void);                                 // teleport / respawn: reset temporal history
 bool render_capture_hdr(const char *exr_path);                // next frame: linear HDR EXR
 bool render_load_lut(const char *cube_path);                  // grading LUT (.cube); NULL / "" = neutral

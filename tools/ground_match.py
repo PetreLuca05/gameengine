@@ -209,7 +209,7 @@ def cmd_cfg():
         if v["map"] != cur:
             lines += [f"map {v['map']}", "wait 20"]
             cur = v["map"]
-        lines += [f"set cl_fov {fov_v:.1f}", f"time_set {v['time']}", "time_pause", f"weather_set {v['weather']} 0", "weather_lock 1",
+        lines += [f"set cl_fov {fov_v:.1f}", f"time_set {v['time']} instant", "time_pause", f"weather_set {v['weather']} 0", "weather_lock 1",
                   "setpos %g %g %g %g %g" % (*v["pos"], v["yaw"], v["pitch"]), "wait 40", f"screenshot ground_match_{k}.png", "wait 2"]
     lines.append("quit")
     p = os.path.join(ROOT, "tools", "tests", "ground_match.cfg")

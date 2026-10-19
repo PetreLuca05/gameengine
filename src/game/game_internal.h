@@ -175,9 +175,28 @@ void daynight_host_tick(World *w);
 void daynight_handle_event(const GameEvent *ev);
 bool daynight_active(World *w);
 void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *env);
+void daynight_client_frame(World *w);   // client, after net_client_interpolate: the slewed time-of-day clock
 void daynight_post(struct PostSettings *s);
 bool daynight_preset_time(World *w, float elev_deg, bool moon_full);   // shadow presets: evening sun elevation / full moon midnight
 bool daynight_preset_morning(World *w, float elev_deg);                 // shadow presets: the morning sun first above elev_deg
+// game_tod_probe.c: time-of-day continuity probe (tod_test continuity / trace / shots, docs/DAYNIGHT.md)
+struct TodConfig;
+struct TodSky;
+typedef struct TodProbeIn {
+    double tick, sec;            // this frame's clock: fractional server tick, world seconds since the epoch
+    double rate;                 // game seconds per real second at this tick (0 = paused; no blend)
+    float day_length;            // real seconds per day (0 = paused)
+    u16 version;                 // TimeState version
+    bool blending;               // a time_set blend runs: its offset (game s) and duration (real s)
+    double blend_sec, blend_s;
+    bool authority;
+    double clock_corr;           // client clock: this frame's correction / its advance (0 on the host)
+    double clock_target;         // client clock: the interpolated server tick it follows
+    double clock_slew;           // its limit
+    int clock_snaps;             // client clock snaps so far
+} TodProbeIn;
+void tod_probe_frame(World *w, const struct TodConfig *cfg, const struct TodSky *s, const RenderEnvironment *env, const TodProbeIn *in);
+bool tod_probe_command(int argc, const char **argv);
 // game_terrain.c: terrain shading level / debug / reload / paint tool (docs/TERRAIN_SHADING.md)
 void terrain_game_register(void);
 // game_items.c: item meshes in game: item_reload, item_inspect, the dev room showcase (docs/ITEM_PIPELINE.md)

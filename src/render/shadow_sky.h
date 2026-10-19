@@ -76,6 +76,10 @@ typedef struct ShadowSkyConfig {
 
 typedef struct ShadowSkyInput {
     float dt;                                // s (0: snap, no smoothing)
+    float clock_speed;                       // the world clock's speed / the default day's (time_scale; <= 1 = 1): the
+                                             // smoothing of what the sky drives runs this much faster (a time-lapse keeps up)
+    double drift_dt;                         // s of cloud drift this frame: the world clock's advance in real seconds of the
+                                             // default day (0 = the clock paused), so the drift follows the clock
     float sun_elev, moon_elev;               // rad
     vec3 sun_light, moon_light;              // ground irradiance through the atmosphere (rgb, engine units; no clouds)
     vec3 sky_up;                             // sky horizontal irradiance (SH, ambient scale applied)
@@ -102,7 +106,7 @@ typedef struct ShadowSkyState {
     bool cast[2], wide;
     float fade[2], radius[2], near_w;
     float pcss_w, max_tex;                   // tier crossfade (filter_model / pcss_max_texels targets)
-    vec2 cloud_offset;
+    double cloud_offset[2];                  // m, integrated in double (no wrap: the sky splits it per noise octave)
 } ShadowSkyState;
 
 typedef struct ShadowSkyOut {
@@ -119,7 +123,8 @@ typedef struct ShadowSkyOut {
     float fixed_texels;                      // era 2010: fixed half width (cascade 0 texels), 0 = from the sky
     float pcss_max_texels, pcss_search_m;    // max half width (texels, smoothed over mode_s), search (m)
     float contact_px;                        // contact shadow ray: until the penumbra spans this many px
-    vec2 cloud_offset, cloud_vel;            // m, m/s
+    vec2 cloud_offset, cloud_vel;            // m (float copy: readouts), m/s
+    double cloud_offset_d[2];                // m: the drift the sky uses
     float exposure_comp;                     // EV
     vec3 ground_albedo;
 } ShadowSkyOut;

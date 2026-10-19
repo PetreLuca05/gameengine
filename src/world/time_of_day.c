@@ -230,67 +230,169 @@ float tod_curve(const TodConfig *c, TodCurve curve, float hours) {
 
 // ------------------------------------------------------------------ state
 
-void tod_state_init(TimeState *s, const TodConfig *c, u32 tick) {
+// Game seconds per server tick at a day length (real seconds per day; 0 = frozen).
+static double sec_per_tick(float day_length) { return day_length > 0.0f ? TOD_SEC_PER_DAY / ((double)day_length * SIM_TICK_HZ) : 0.0; }
+
+static double smooth01(double x) {
+    x = x < 0.0 ? 0.0 : (x > 1.0 ? 1.0 : x);
+    return x * x * (3.0 - 2.0 * x);
+}
+
+static void bump(TimeState *s) {
+    s->version = (u16)(s->version + 1u);
+    if (!s->version) s->version = 1;   // 0 means "no state yet"
+}
+
+void tod_state_init(TimeState *s, const TodConfig *c, double tick) {
     memset(s, 0, sizeof(*s));
-    s->ref_tick = tick;
-    float h = fmodf(fmaxf(c->start_hours, 0.0f), 24.0f);
-    s->ref_ms = (u32)lrint((double)h / 24.0 * TOD_MS_PER_DAY) % TOD_MS_PER_DAY;
-    s->ref_day = 0;
+    s->ref_tick = tick < 0.0 ? 0.0 : tick;
+    s->ref_sec = fmod(fmax((double)c->start_hours, 0.0), 24.0) * 3600.0;
     s->day_of_year = (u16)DG_CLAMP(c->day_of_year, 1, 365);
     s->day_length = fmaxf(0.0f, c->day_length_minutes * 60.0f);
+    s->prev_length = s->day_length;
     s->version = 1;
 }
 
-double tod_days(const TimeState *s, double tick) {
-    double d = (double)s->ref_day + (double)s->ref_ms / (double)TOD_MS_PER_DAY;
-    if (s->day_length > 0.0f) d += (tick - (double)s->ref_tick) / SIM_TICK_HZ / (double)s->day_length;
-    return d < 0 ? 0 : d;
+double tod_target_seconds(const TimeState *s, double tick) {
+    double dt = tick - s->ref_tick;
+    if (dt < 0.0) return s->ref_sec + s->blend_sec + dt * sec_per_tick(s->prev_length);
+    return s->ref_sec + dt * sec_per_tick(s->day_length);
 }
+
+double tod_seconds(const TimeState *s, double tick) {
+    double dt = tick - s->ref_tick;
+    double sec = tod_target_seconds(s, tick);
+    // The blend: the old time eased into the new one; without one the anchor is a step (instant).
+    if (dt >= 0.0 && s->blend_ticks > 0) sec += s->blend_sec * (1.0 - smooth01(dt / (double)s->blend_ticks));
+    return sec < 0.0 ? 0.0 : sec;
+}
+
+double tod_days(const TimeState *s, double tick) { return tod_seconds(s, tick) / TOD_SEC_PER_DAY; }
 
 float tod_hours(const TimeState *s, double tick) {
-    double d = tod_days(s, tick);
-    return (float)((d - floor(d)) * 24.0);
+    double sec = tod_seconds(s, tick);
+    return (float)(fmod(sec, TOD_SEC_PER_DAY) / 3600.0);
 }
 
-static void anchor(TimeState *s, double tick, double days) {
-    if (days < 0) days = 0;
-    double whole = floor(days);
-    s->ref_tick = (u32)(tick < 0 ? 0 : tick);
-    s->ref_day = (u16)DG_MIN(whole, 65535.0);
-    s->ref_ms = (u32)lrint((days - whole) * TOD_MS_PER_DAY) % TOD_MS_PER_DAY;
-    s->version++;
+double tod_rate(const TimeState *s, double tick) { return sec_per_tick(tick < s->ref_tick ? s->prev_length : s->day_length) * SIM_TICK_HZ; }
+
+bool tod_blending(const TimeState *s, double tick) { return s->blend_ticks > 0 && tick >= s->ref_tick && tick < s->ref_tick + (double)s->blend_ticks; }
+
+// A new anchor at `tick`: the clock until now becomes the segment before it (its value and rate),
+// the new one starts at target_sec (a step unless blend_ticks eases it). A blend still running is
+// carried over: its remaining offset keeps easing to the old target, so a time_scale during a
+// time_set blend neither jumps nor misses the time that was set.
+static void reanchor(TimeState *s, double tick, double target_sec, double blend_ticks, float day_length, bool carry_blend) {
+    double cur = tod_seconds(s, tick);
+    float len_now = tick < s->ref_tick ? s->prev_length : s->day_length;
+    double rest = 0.0, rest_ticks = 0.0;
+    if (carry_blend && tod_blending(s, tick)) {
+        rest = cur - tod_target_seconds(s, tick);
+        rest_ticks = s->ref_tick + (double)s->blend_ticks - tick;
+        target_sec = cur - rest;
+    }
+    s->ref_tick = tick < 0.0 ? 0.0 : tick;
+    s->ref_sec = target_sec < 0.0 ? 0.0 : target_sec;
+    s->blend_sec = cur - s->ref_sec;
+    if (carry_blend && rest_ticks > 0.0) blend_ticks = rest_ticks;
+    s->blend_ticks = (u16)DG_CLAMP((int)ceil(blend_ticks), 0, 65535);
+    s->prev_length = len_now;
+    s->day_length = fmaxf(day_length, 0.0f);
+    bump(s);
 }
 
-void tod_set_time(TimeState *s, double tick, float hours) {
-    double d = floor(tod_days(s, tick));
-    anchor(s, tick, d + fmod(fmax(hours, 0.0), 24.0) / 24.0);
+static double set_target(const TimeState *s, double tick, float hours) {
+    double day = floor(tod_target_seconds(s, tick) / TOD_SEC_PER_DAY);
+    return day * TOD_SEC_PER_DAY + fmod(fmax((double)hours, 0.0), 24.0) * 3600.0;
 }
 
-void tod_set_day_length(TimeState *s, double tick, float seconds) {
-    anchor(s, tick, tod_days(s, tick));
-    s->day_length = fmaxf(seconds, 0.0f);
+void tod_set_time(TimeState *s, double tick, float hours) { reanchor(s, tick, set_target(s, tick, hours), 0.0, s->day_length, false); }
+
+void tod_blend_time(TimeState *s, double tick, float hours, float blend_s) {
+    reanchor(s, tick, set_target(s, tick, hours), fmax((double)blend_s, 0.0) * SIM_TICK_HZ, s->day_length, false);
 }
 
-void tod_add_days(TimeState *s, double tick, int days) { anchor(s, tick, tod_days(s, tick) + days); }
+void tod_set_day_length(TimeState *s, double tick, float seconds) { reanchor(s, tick, tod_seconds(s, tick), 0.0, seconds, true); }
 
-void tod_pack(const TimeState *s, u8 out[20]) {
-    memcpy(out + 0, &s->ref_tick, 4);
-    memcpy(out + 4, &s->ref_ms, 4);
-    memcpy(out + 8, &s->ref_day, 2);
-    memcpy(out + 10, &s->day_of_year, 2);
-    memcpy(out + 12, &s->day_length, 4);
-    memcpy(out + 16, &s->version, 2);
-    memset(out + 18, 0, 2);
+void tod_add_days(TimeState *s, double tick, int days) { reanchor(s, tick, tod_target_seconds(s, tick) + days * TOD_SEC_PER_DAY, 0.0, s->day_length, false); }
+
+void tod_pack(const TimeState *s, u8 out[TOD_WIRE_BYTES]) {
+    memcpy(out + 0, &s->ref_tick, 8);
+    memcpy(out + 8, &s->ref_sec, 8);
+    memcpy(out + 16, &s->blend_sec, 8);
+    memcpy(out + 24, &s->day_length, 4);
+    memcpy(out + 28, &s->prev_length, 4);
+    memcpy(out + 32, &s->blend_ticks, 2);
+    memcpy(out + 34, &s->day_of_year, 2);
+    memcpy(out + 36, &s->version, 2);
+    memset(out + 38, 0, 2);
 }
 
-void tod_unpack(TimeState *s, const u8 in[20]) {
+void tod_unpack(TimeState *s, const u8 in[TOD_WIRE_BYTES]) {
     memset(s, 0, sizeof(*s));
-    memcpy(&s->ref_tick, in + 0, 4);
-    memcpy(&s->ref_ms, in + 4, 4);
-    memcpy(&s->ref_day, in + 8, 2);
-    memcpy(&s->day_of_year, in + 10, 2);
-    memcpy(&s->day_length, in + 12, 4);
-    memcpy(&s->version, in + 16, 2);
+    memcpy(&s->ref_tick, in + 0, 8);
+    memcpy(&s->ref_sec, in + 8, 8);
+    memcpy(&s->blend_sec, in + 16, 8);
+    memcpy(&s->day_length, in + 24, 4);
+    memcpy(&s->prev_length, in + 28, 4);
+    memcpy(&s->blend_ticks, in + 32, 2);
+    memcpy(&s->day_of_year, in + 34, 2);
+    memcpy(&s->version, in + 36, 2);
+    // A malformed packet must not poison the clock.
+    if (!isfinite(s->ref_tick) || !isfinite(s->ref_sec) || !isfinite(s->blend_sec) || !isfinite(s->day_length) || !isfinite(s->prev_length)) memset(s, 0, sizeof(*s));
+}
+
+// ------------------------------------------------------------------ client timeline / clock
+
+void tod_timeline_reset(TodTimeline *q) { memset(q, 0, sizeof(*q)); }
+
+void tod_timeline_push(TodTimeline *q, const TimeState *s) {
+    if (!s->version) return;
+    if (q->n > 0 && q->s[q->n - 1].version == s->version) return;
+    // A state anchored before the newest one held (a host reset: a new map, a reconnect): start over.
+    if (q->n > 0 && s->ref_tick < q->s[q->n - 1].ref_tick) q->n = 0;
+    if (q->n == TOD_TIMELINE_MAX) {
+        memmove(&q->s[0], &q->s[1], sizeof(TimeState) * (TOD_TIMELINE_MAX - 1));
+        q->n--;
+    }
+    q->s[q->n++] = *s;
+}
+
+const TimeState *tod_timeline_at(TodTimeline *q, double tick) {
+    if (q->n <= 0) return NULL;
+    int i = 0;
+    while (i + 1 < q->n && q->s[i + 1].ref_tick <= tick) i++;
+    if (i > 0) {
+        memmove(&q->s[0], &q->s[i], sizeof(TimeState) * (size_t)(q->n - i));
+        q->n -= i;
+    }
+    return &q->s[0];
+}
+
+double tod_clock_step(TodClock *c, double target, double dt, double tick_hz, double slew, double tau_s, double snap_ticks) {
+    if (!c->init) {
+        c->tick = target;
+        c->corr = 0.0;
+        c->init = true;
+        return c->tick;
+    }
+    if (!(dt > 0.0)) return c->tick;
+    double adv = dt * tick_hz;
+    double pred = c->tick + adv;
+    double err = target - pred;
+    if (fabs(err) > snap_ticks) {
+        c->tick = target;
+        c->corr = 0.0;
+        c->snaps++;
+        return c->tick;
+    }
+    // A first-order loop (time constant tau_s) whose correction is clamped to the slew rate: the
+    // clock never runs more than `slew` faster or slower than real time.
+    double k = tau_s > 0.0 ? fmin(dt / tau_s, 1.0) : 1.0;
+    double corr = fmax(-slew * adv, fmin(slew * adv, err * k));
+    c->tick = pred + corr;
+    c->corr = corr / adv;
+    return c->tick;
 }
 
 // ------------------------------------------------------------------ astronomy
@@ -317,6 +419,20 @@ static vec3 enu_dir(double lat, double H, double dec) {
     return v3((float)e, (float)u, (float)-n);
 }
 
+// The same, normalised in double, with the elevation and the azimuth (from north, clockwise) in
+// double: the float direction is the only rounding.
+static vec3 enu_dir_d(double lat, double H, double dec, double *elev, double *azim) {
+    double e = -cos(dec) * sin(H);
+    double n = cos(lat) * sin(dec) - sin(lat) * cos(dec) * cos(H);
+    double u = sin(lat) * sin(dec) + cos(lat) * cos(dec) * cos(H);
+    double l = sqrt(e * e + n * n + u * u);
+    e /= l, n /= l, u /= l;
+    *elev = asin(fmax(-1.0, fmin(1.0, u)));
+    double a = atan2(e, n);
+    *azim = a < 0.0 ? a + TWO_PI : a;
+    return v3((float)e, (float)u, (float)-n);
+}
+
 void tod_sun_angles(float latitude_deg, float tilt_deg, double day_of_year, float hours, float *elev_deg, float *azim_deg) {
     double ra, dec;
     ecl_to_eq(sun_longitude(day_of_year + hours / 24.0), tilt_deg * D2R, &ra, &dec);
@@ -332,19 +448,20 @@ void tod_sky(const TodConfig *c, double days, TodSky *out) {
     memset(out, 0, sizeof(*out));
     out->days = days;
     double frac = days - floor(days);
-    out->hours = (float)(frac * 24.0);
+    out->hours = (float)(frac * 24.0);   // curves and the UI only: every angle below uses the double frac
     double lat = c->latitude_deg * D2R, eps = c->axial_tilt_deg * D2R;
     double doy = (double)DG_CLAMP(c->day_of_year, 1, 365) + days;
     doy = fmod(doy - 1.0, 365.2422) + 1.0;
     double ra_s, dec_s;
     double lam_s = sun_longitude(doy);
     ecl_to_eq(lam_s, eps, &ra_s, &dec_s);
-    double H_s = (out->hours - 12.0) * 15.0 * D2R;
-    out->sun_dir = v3_norm(enu_dir(lat, H_s, dec_s));
+    double H_s = (frac - 0.5) * TWO_PI;
+    out->hour_angle = H_s;
+    double se, sa;
+    out->sun_dir = enu_dir_d(lat, H_s, dec_s, &se, &sa);
     out->declination = (float)dec_s;
-    out->sun_elev = asinf(clampf(out->sun_dir.y, -1.0f, 1.0f));
-    out->sun_azim = atan2f(out->sun_dir.x, -out->sun_dir.z);
-    if (out->sun_azim < 0) out->sun_azim += 2.0f * DG_PI;
+    out->sun_elev = (float)se;
+    out->sun_azim = (float)sa;
     // Moon: elongation from the lunar age; on the ecliptic (the 5 deg inclination is ignored).
     double age = fmod(c->moon_age_days + days, TOD_SYNODIC_MONTH);
     if (age < 0) age += TOD_SYNODIC_MONTH;
@@ -352,8 +469,9 @@ void tod_sky(const TodConfig *c, double days, TodSky *out) {
     double ra_m, dec_m;
     ecl_to_eq(lam_s + E, eps, &ra_m, &dec_m);
     double H_m = H_s - (ra_m - ra_s);
-    out->moon_dir = v3_norm(enu_dir(lat, H_m, dec_m));
-    out->moon_elev = asinf(clampf(out->moon_dir.y, -1.0f, 1.0f));
+    double me, ma;
+    out->moon_dir = enu_dir_d(lat, H_m, dec_m, &me, &ma);
+    out->moon_elev = (float)me;
     out->moon_age = (float)age;
     out->moon_phase = (float)(age / TOD_SYNODIC_MONTH);
     out->moon_illum = (float)((1.0 - cos(E)) * 0.5);

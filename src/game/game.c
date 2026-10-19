@@ -783,8 +783,10 @@ void game_frame(float dt) {
         }
     }
 
-    G->accumulator += dt * wheels_timescale() * game_fire_timescale() * (G->host_timescale ? G->host_timescale->f : 1.0f);   // slowed while a radial wheel is open (single player), x the fire tuner's slow motion, x host_timescale
-    if (G->paused) G->accumulator = 0;   // the pause menu (single player / host alone) stops the simulation
+    // The pause menu (single player / host alone) stops the simulation: nothing accumulates, and alpha
+    // (the render frame's position between ticks) stays where it was, so nothing interpolated, the
+    // time of day included, steps back when the game pauses.
+    if (!G->paused) G->accumulator += dt * wheels_timescale() * game_fire_timescale() * (G->host_timescale ? G->host_timescale->f : 1.0f);   // slowed while a radial wheel is open (single player), x the fire tuner's slow motion, x host_timescale
     int steps = 0;
     while (G->accumulator >= SIM_DT && steps < 8) {
         PROF_BEGIN("sim_tick");
@@ -805,7 +807,10 @@ void game_frame(float dt) {
         float tsm = camera_fp_cvars()->recon_smooth ? camera_fp_cvars()->recon_smooth->f : 0.08f;
         G->error_offset = tsm > 1e-4f ? v3_scale(G->error_offset, 1.0f - exp_decay(3.0f / tsm, dt)) : v3(0, 0, 0);
     }
-    if (G->mode == GM_CLIENT) net_client_interpolate(G->world, dt);
+    if (G->mode == GM_CLIENT) {
+        net_client_interpolate(G->world, dt);
+        daynight_client_frame(G->world);   // the time-of-day clock follows the interpolated server tick, slewed
+    }
     PROF_BEGIN("focus_hud");
     update_focus();
     game_hud_tick(dt);

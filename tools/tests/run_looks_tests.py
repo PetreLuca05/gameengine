@@ -104,7 +104,7 @@ def matrix():
     for lvl in LEVELS:
         lines += ['r_fidelity %d' % lvl, 'wait 15', 'echo LM_CVARS_%d' % lvl, 'cvarlist r_', 'echo LM_CVARS_%d end' % lvl]
         for tod in TIMES:
-            lines += ['time_set ' + tod, 'wait 4']
+            lines += ['time_set ' + tod + ' instant', 'wait 4']
             for wx in WEATHERS:
                 lines += ['weather_set %s 0' % wx, 'wait 4']
                 for look in LOOKS:
@@ -148,7 +148,7 @@ def frames():
     except ImportError:
         log('skip  frames: PIL / numpy missing')
         return
-    lines = ['r_fidelity 4', 'wait 15', 'time_set 12:00', 'weather_set clear 0', 'photomode 1', 'wait 10']
+    lines = ['r_fidelity 4', 'wait 15', 'time_set 12:00 instant', 'weather_set clear 0', 'photomode 1', 'wait 10']
     shots = {}
     for look in LOOKS:
         shots[look] = os.path.join(OUT, 'look_%s.png' % look).replace('\\', '/')
@@ -172,7 +172,7 @@ def frames():
 
 
 def bench():
-    lines = ['r_fidelity 4', 'wait 15', 'time_set 12:00', 'weather_set clear 0', 'wait 10']
+    lines = ['r_fidelity 4', 'wait 15', 'time_set 12:00 instant', 'weather_set clear 0', 'wait 10']
     for look in LOOKS:
         lines += ['look ' + look, 'wait 10', 'post_bench 120 look_' + look, 'wait 140']
     text = run_game('bench', lines, res='1920x1080')

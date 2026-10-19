@@ -70,6 +70,24 @@ typedef struct CsmTile {
 } CsmTile;
 
 mat4 csm_light_view(vec3 to_light);
+// The light view about a world pivot near the camera (docs/SHADOWS.md "A turning light"): a light
+// that turns by d theta moves the texel grid under a point X by |X - pivot| x d theta, a sub-texel
+// drift near the camera, where pivoting about the world origin moves it by |X| x d theta (tens of
+// texels per frame a few hundred metres out: every edge re-rasterized at a new sub-texel phase).
+// The fit still snaps the light-space origin to whole texels, so the camera's motion stays stable.
+mat4 csm_light_view_at(vec3 to_light, vec3 pivot);
+// The pivot follows the camera in jumps: kept until the camera is more than `cell` m from it on an
+// axis, then moved onto the camera (rounded to 1 m). valid false: placed at once.
+vec3 csm_pivot(vec3 pivot, bool valid, vec3 cam, float cell);
+#define CSM_PIVOT_CELL 16.0f
+// PF-0028 kept far tiles (render.c): redrawn once the light turned enough to move the shadow tip of a
+// CSM_HOLD_REF_CASTER m caster (a tall tree) by half a texel of the tile (lag x h / sin^2(elevation) >
+// texel / 2, the elevation clamped at 3 deg), and whenever it turned CSM_HOLD_MAX_TURN_DEG: the
+// sun of the default day (0.004 deg per frame at 60 fps) keeps them above ~8 deg, a time-lapse
+// (time_scale >= 5) redraws them every frame, a jump (the sun / moon handover) always.
+#define CSM_HOLD_REF_CASTER 10.0f
+#define CSM_HOLD_MAX_TURN_DEG 0.02f
+float csm_hold_max_turn(float texel_m, float light_elev);
 // Square tile of `texels` around (center, radius) seen from the light; `back` m of depth behind the
 // sphere centre, CSM_REACH towards the light.
 void csm_fit(const mat4 *lview, vec3 center, float radius, u32 texels, float back, CsmTile *out);
