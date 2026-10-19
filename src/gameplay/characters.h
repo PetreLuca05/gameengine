@@ -364,6 +364,8 @@ typedef struct VehiclePoseHooks {
 extern VehiclePoseHooks g_vehicle_pose;
 extern bool g_chars_force_phys_step;   // client: step physics this tick (vehicle prediction)
 extern bool g_chars_frozen;            // host: the world is frozen (hand pose editor): zombies / NPCs don't simulate
+extern bool g_chars_player_frozen;     // host: the hand pose editor holds the players' animation clock too (the hold, IK
+                                       // and fingers keep solving, so edits show); off while a case timeline plays
 
 
 #endif

@@ -1,6 +1,6 @@
 // Frozen world (scene handpose, docs/HANDPOSE.md "Frozen world"): time of day, weather (and its
-// transitions), wind gusts, VFX time, zombie / NPC simulation, vehicle physics, props and ambience
-// stop; the editor runs on its own clock. Optional neutral lighting: 12:30, clear sky. Leaving
+// transitions), wind gusts, VFX time, zombie / NPC simulation, the players' animation clips, vehicle
+// physics, props and ambience stop; the editor runs on its own clock. Optional neutral lighting: 12:30, clear sky. Leaving
 // restores everything as it was (the time of day, the weather transition where it stopped).
 #include "game_internal.h"
 #include "audio/audio.h"
@@ -40,12 +40,14 @@ void game_world_freeze(World *w, bool on, bool neutral_light) {
         cvar_swap("vfx_timescale", &FZ.vfx_ts, 0.0f);
         audio_set_ambience_gain(0.0f);
         g_chars_frozen = true;
+        g_chars_player_frozen = true;   // the editor lets it run while a case timeline plays
         FZ.on = true;
         log_info("world frozen (time %.2f h%s)", FZ.hours, neutral_light ? ", neutral lighting" : "");
         return;
     }
     FZ.on = false;
     g_chars_frozen = false;
+    g_chars_player_frozen = false;
     if (w == FZ.w) {
         tod_set_time(&w->tod, (double)w->tick, FZ.hours);
         tod_set_day_length(&w->tod, (double)w->tick, FZ.day_length);

@@ -1068,7 +1068,7 @@ static void sim_core(World *w, CharacterInst *c, int i, float dt) {
     c->body_yaw = in.body_yaw;
     charrt_set_inputs(&c->rt, &in);
     host_triggers(w, c, i);
-    charrt_tick(&c->rt, dt);
+    charrt_tick(&c->rt, c->is_player && g_chars_player_frozen ? 0.0f : dt);   // the hand pose editor: the clips hold still
     note_steps(c);
     charrt_eval_base(&c->rt);
     // Root motion (host only) for clips flagged root_motion: NPCs move by it (the horde moves
@@ -1137,6 +1137,7 @@ static int g_host_evals;
 static float g_host_ms;
 void chars_host_stats(int *evaluated, float *ms) { if (evaluated) *evaluated = g_host_evals; if (ms) *ms = g_host_ms; }
 bool g_chars_frozen;
+bool g_chars_player_frozen;
 
 // Hand IK options (src/anim): read by every arm solve this frame.
 static void sync_anim_cvars(void) {

@@ -132,6 +132,8 @@ static struct {
     vec3 fz_pos[64];
     int fz_n;
     u32 fz_tick;
+    Pose fz_pose;                    // the local player's pose (its clips hold still too)
+    bool fz_pose_ok;
     double last_time;
 } E = { .active = HP_RIG_IK(1), .hover = -1, .cat = -1, .yaw = 2.4f, .pitch = -0.25f, .dist = 0.9f, .fov = 45.0f, .tool = TOOL_MOVE, .orient = HPX_LOCAL,
         .pivot = HPX_PIVOT_MEDIAN, .neutral_light = true, .onion = true, .mz_show = true };
@@ -1186,6 +1188,9 @@ static void freeze_world(bool on) {
 }
 
 static bool scene_cam(World *w, RenderCamera *cam) {
+    // The players' animation clips stay frozen with the world, except while a case timeline plays (a
+    // reload's real clip owns its time).
+    g_chars_player_frozen = game_world_frozen() && !(E.case_mode && hp_case_state()->playing);
     double now = platform_time();
     float dt = E.last_time > 0 ? (float)fminf(0.1f, (float)(now - E.last_time)) : 0.0f;
     E.last_time = now;
@@ -2151,7 +2156,10 @@ static void freeze_snapshot(bool check) {
         if (ty == ET_PLAYER) continue;
         if (ty == ET_ZOMBIE || ty == ET_VEHICLE || ty == ET_PROP || ty == ET_DUMMY) { idx[n] = i; pos[n++] = w->xf[i].pos; }
     }
+    CharacterInst *ch = local_char();
     if (!check) {
+        E.fz_pose_ok = ch != NULL;
+        if (ch) pose_copy(&E.fz_pose, &ch->rt.base);
         E.fz_valid = true;
         E.fz_days = days;
         E.fz_wx = wx;
@@ -2171,9 +2179,13 @@ static void freeze_snapshot(bool check) {
     if (worst >= 0 && moved > 1e-5f) log_info("hpe freeze: entity %d (type %d, '%s') moved %.4f m", worst, w->type[worst], w->names[worst], moved);
     float wd = 0;
     for (int p = 0; p < WP_COUNT; p++) wd = fmaxf(wd, fabsf(wx.v[p] - E.fz_wx.v[p]));
-    bool ok = days == E.fz_days && wd == 0.0f && moved < 1e-5f && n == E.fz_n;
-    log_info("hpe freeze: %s after %u ticks (time %+.6f h, weather %.6f, entities %d -> %d, moved %.5f m)", ok ? "PASS" : "FAIL", w->tick - E.fz_tick,
-             (days - E.fz_days) * 24.0, wd, E.fz_n, n, moved);
+    // The local player's animation (the clips' pose, before the hold / IK): every bone still.
+    float turned = 0;
+    if (ch && E.fz_pose_ok && g_engine.anim)
+        for (int b = 0; b < g_engine.anim->skel.count; b++) turned = fmaxf(turned, quat_angle_between(ch->rt.base.local[b].r, E.fz_pose.local[b].r) * DG_RAD2DEG);
+    bool ok = days == E.fz_days && wd == 0.0f && moved < 1e-5f && n == E.fz_n && turned < 1e-3f;
+    log_info("hpe freeze: %s after %u ticks (time %+.6f h, weather %.6f, entities %d -> %d, moved %.5f m, player animation turned %.4f deg)", ok ? "PASS" : "FAIL",
+             w->tick - E.fz_tick, (days - E.fz_days) * 24.0, wd, E.fz_n, n, moved, turned);
 }
 
 static int scancode_of(const char *s) {

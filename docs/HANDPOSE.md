@@ -302,8 +302,10 @@ While the editor is open (`game_world_freeze`): the time of day is paused (and o
 12:30), the weather holds its current values or a clear sky (its transition resumes on leave), the
 weather scheduler and surface integration stop, wind gusts (`wind_timescale` 0), VFX time
 (`vfx_timescale` 0), zombie / NPC simulation (`g_chars_frozen`, the horde, entity ticks), vehicle
-physics and props stop, and the ambient loops are silent. The local player and its animation keep
-running; nothing else advances unless the case timeline plays. Leaving restores everything.
+physics and props stop, and the ambient loops are silent. The players' animation clips hold still as
+well (`g_chars_player_frozen`): the hold, the hand IK and the fingers keep solving every tick, so an
+edit shows at once on a still body. Nothing advances unless the case timeline plays (then the
+player's clips run: a reload's real clip owns its time). Leaving restores everything.
 
 ### Scripted use (`hpe`)
 
