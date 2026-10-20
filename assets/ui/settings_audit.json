@@ -235,18 +235,6 @@
    "reason": "Visibility: changes what you can see relative to other players. Tracers / bullet trace / vapour trails / tracer ignition: muzzle and tracer visibility.",
    "category": "weapons"
   },
-  "bal_tracer_scale_dist": {
-   "class": "LOCKED",
-   "ui": "—",
-   "reason": "Visibility: changes what you can see relative to other players. Tracers / bullet trace / vapour trails / tracer ignition: muzzle and tracer visibility.",
-   "category": "weapons"
-  },
-  "bal_tracer_scale_min": {
-   "class": "LOCKED",
-   "ui": "—",
-   "reason": "Visibility: changes what you can see relative to other players. Tracers / bullet trace / vapour trails / tracer ignition: muzzle and tracer visibility.",
-   "category": "weapons"
-  },
   "bal_vapor_trails": {
    "class": "LOCKED",
    "ui": "—",

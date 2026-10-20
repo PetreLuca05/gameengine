@@ -253,10 +253,6 @@ camera, seen from the side, in slow motion.
   metres). `bal_tracer_ignition 1` adds the dim igniter up to the cartridge's `ignition_m`.
 - Full burn until `burn_s` or `burn_m`, whichever comes first.
 - 0.15 s burnout, then dark while the bullet flies on.
-- Width: 6 cm times a scale that grows with the distance from the camera, `distance / bal_tracer_scale_dist` (6 m),
-  never below `bal_tracer_scale_min` (1) and with no upper limit: 6 cm up to 6 m, 0.6 m at 60 m, 3 m at 300 m. So a
-  tracer keeps its size on screen at any range (about 10 px at 1080p, 90 deg). The tail is 0.7 of the head's
-  width. Locked, in the consistency set (the same for everyone).
 
 **Drawing**
 - Segment sprites with the `tracer_head` effect's emitters (`vfx_game_push_sprite`).
