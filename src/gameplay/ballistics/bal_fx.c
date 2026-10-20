@@ -251,18 +251,25 @@ static bool magnified_ads(World *w) {
     return o && o->zoom >= 3.0f;
 }
 
+// The drawn tracer starts at the visible muzzle and blends onto the bullet's path (which left the
+// camera along the view) over TRACER_BLEND_M: it converges on the crosshair over several frames, as
+// a round from a barrel below the eye does. Over 15 m (one frame's flight) it was a dot at the
+// crosshair from the second frame on.
+#define TRACER_BLEND_M 60.0f
+
+static vec3 tracer_vis(const BalLive *l, vec3 p, float dist) { return v3_madd(p, l->visual_offset, 1.0f - saturate(dist / TRACER_BLEND_M)); }
+
 // One tracer for this frame: the velocity-stretched head ending at l->b.pos and the curved tail. It
 // glows (emissive, bloom) and lights nothing. Returns its look (intensity 0: dark, nothing drawn).
 static BalTracerLook draw_tracer(const BalLive *l, vec3 cam, float shutter, bool arcade) {
     const BalCartridge *c = &bal_data()->cart[l->b.cart];
     BalTracerLook look = bal_tracer_look(&c->tracer, l->b.dist, l->b.time, arcade);
     if (look.intensity <= 0.0f) return look;
-    // Where it is drawn: the true path, starting at the visible muzzle and blending onto the bullet
-    // (which left the camera) over the first 15 m.
-    float blend = 1.0f - saturate(l->b.dist / 15.0f);
-    vec3 head = v3_madd(l->b.pos, l->visual_offset, blend);
+    // Where it is drawn (tracer_vis): both ends of the streak and the tail blend, the true path near
+    // the muzzle runs along the line of sight (seen end-on, a dot at the crosshair).
     float speed = bal_bullet_speed(&l->b);
     vec3 dir = speed > 1e-3f ? v3_scale(l->b.vel, 1.0f / speed) : v3(0, 0, -1);
+    vec3 head = tracer_vis(l, l->b.pos, l->b.dist);
     float cam_d = v3_dist(head, cam);
     float k = look.intensity;
     vec3 rgb = bal_tracer_rgb(c->tracer.color);
@@ -273,13 +280,15 @@ static BalTracerLook draw_tracer(const BalLive *l, vec3 cam, float shutter, bool
     float scale = fmaxf(cam_d / fmaxf(cv(&F.scale_dist, "bal_tracer_scale_dist", 6.0f), 0.01f), cv(&F.scale_min, "bal_tracer_scale_min", 1.0f));
     float width = 0.06f * scale;
     float streak = fminf(bal_tracer_streak(speed, shutter), l->b.dist);   // never behind the muzzle
-    if (F.em_head >= 0) vfx_game_push_sprite(F.em_head, v3_madd(head, dir, -streak), v3_scale(dir, streak), width, col);
+    vec3 back = tracer_vis(l, v3_madd(l->b.pos, dir, -streak), l->b.dist - streak);
+    if (F.em_head >= 0) vfx_game_push_sprite(F.em_head, back, v3_sub(head, back), width, col);
     // Tail: the last tick positions (curved by gravity / wind), fading.
     if (F.em_tail >= 0 && look.state != BAL_TRS_IGNITER) {
-        vec3 prev = v3_madd(head, dir, -streak);
+        vec3 prev = back;
         for (int t = 1; t < l->trail_count; t++) {
-            vec3 p = l->trail[t];
-            if (v3_dist(p, l->launch) < 15.0f) break;   // the first metres: the head's blend from the muzzle
+            float pd = v3_dist(l->trail[t], l->launch);
+            if (pd < 1.0f) break;   // the muzzle
+            vec3 p = tracer_vis(l, l->trail[t], pd);
             float f = 1.0f - (float)t / (float)BAL_TRAIL;
             vec4 tc = v4(col.x * 0.45f * f, col.y * 0.45f * f, col.z * 0.45f * f, 1.0f);
             vfx_game_push_sprite(F.em_tail, p, v3_sub(prev, p), width * 0.7f, tc);
@@ -298,7 +307,7 @@ void bal_fx_frame(World *w, vec3 cam, float dt) {
         F.em_head = vfx_game_emitter("tracer_head", 0);
         F.em_tail = vfx_game_emitter("tracer_head", 1);
     }
-    bool arcade = cv(&F.ignition, "bal_tracer_ignition", 1) == 0.0f;
+    bool arcade = cv(&F.ignition, "bal_tracer_ignition", 0) == 0.0f;
     // Shutter: the frame's time in the simulation's clock (slow motion shortens the streak).
     float shutter = cv(&F.shutter, "shutter_preview", 0);
     if (shutter <= 0.0f) shutter = clampf(dt, 1.0f / 240.0f, 1.0f / 20.0f) * cv(&F.timescale, "host_timescale", 1.0f);

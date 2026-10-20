@@ -65,7 +65,7 @@ The original planning notes, with the survey of the old code, are in `BALLISTICS
 - A few cm at 500 m. Off with `bal_spin_drift 0`.
 
 **Launch**
-- From the first-person camera along the view plus recoil (docs/AIM.md): the bullets land where the crosshair says. Plus the spread cone (`recoil_cone_dir`, unchanged). The tracer is drawn from the visible barrel and blends onto the bullet's path over the first 15 m (`BalLive.visual_offset`); remote replays take the shooter's held item's muzzle.
+- From the first-person camera along the view plus recoil (docs/AIM.md): the bullets land where the crosshair says. Plus the spread cone (`recoil_cone_dir`, unchanged). The tracer is drawn from the visible barrel and blends onto the bullet's path over 60 m (`BalLive.visual_offset`); remote replays take the shooter's held item's muzzle.
 - Pitched up by the zero elevation, solved by bisection on the same sim (standard atmosphere, no wind) for the
   distance under the crosshair (2026-10-20, `aimed_zero`: a static-world ray from the eye along the aim, 1 m
   steps, 5 m past 100 m; nothing within 1000 m: the weapon's `zero_distance`), so the bullets land on the
@@ -249,10 +249,10 @@ camera, seen from the side, in slow motion.
 - `fire_tracers_only 1` makes every round a tracer (range / debug).
 
 **Look over the flight**
-- Dim igniter up to `ignition_m`.
+- Bright from the muzzle by default (`bal_tracer_ignition 0`, 2026-10-20: the dim start hid the first tens of
+  metres). `bal_tracer_ignition 1` adds the dim igniter up to the cartridge's `ignition_m`.
 - Full burn until `burn_s` or `burn_m`, whichever comes first.
 - 0.15 s burnout, then dark while the bullet flies on.
-- `bal_tracer_ignition 0` is the arcade mode: bright from the muzzle.
 - Width: 6 cm times a scale that grows with the distance from the camera, `distance / bal_tracer_scale_dist` (6 m),
   never below `bal_tracer_scale_min` (1) and with no upper limit: 6 cm up to 6 m, 0.6 m at 60 m, 3 m at 300 m. So a
   tracer keeps its size on screen at any range (about 10 px at 1080p, 90 deg). The tail is 0.7 of the head's
@@ -261,6 +261,11 @@ camera, seen from the side, in slow motion.
 **Drawing**
 - Segment sprites with the `tracer_head` effect's emitters (`vfx_game_push_sprite`).
 - Head: velocity-stretched, length = speed × shutter (`shutter_preview`, default the frame time, about 15 m for 5.56 at 60 FPS), soft head.
+  Both ends of the streak and the tail blend from the visible muzzle onto the bullet's path over 60 m
+  (`TRACER_BLEND_M`, bal_fx.c). The path leaves the camera along the view, so near the muzzle it is seen
+  end-on (a dot at the crosshair). With only the head moved, and over 15 m (one frame's flight), a tracer
+  showed as a dot from the second frame on. Now it runs from the barrel and converges on the crosshair
+  over several frames (2026-10-20).
 - Tail: the last 8 tick positions, so it curves with drop and wind, fading.
 - Stopped tracers: a tracer that stops in something leaves a copy (`bal_world_ended_tracers`) whose head is at the impact. It is drawn until the next tick after a frame has shown it. Without it, a hit closer than one tick's flight (about 16 m for 5.56 at 60 Hz, more when several ticks run per frame) was never drawn, and every tracer vanished one tick short of its target.
 - Width at least about 1.5 px.

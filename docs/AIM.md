@@ -37,8 +37,8 @@ crosshair's aim point, the crosshair moving to an obstruction) was reverted on 2
 - **The flash, the tracer's start, the casing:** the drawn gun's barrel tip for the local view
   (`hands_muzzle`, through the arms layer's projection), the held item's muzzle for others
   (`chars_item_muzzle`), else a barrel in front of the right side of the eye.
-- **Tracers** start on the visible barrel and blend onto the bullet's real path over the first 15 m;
-  the tail is drawn only past those metres.
+- **Tracers** start on the visible barrel and blend onto the bullet's real path over 60 m;
+  the head streak and the tail blend the same way (bal_fx.c tracer_vis).
 - The gun's sway, the fire animation's kick and the wall pull move the drawn gun only.
 
 ## Crosshair

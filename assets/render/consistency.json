@@ -36,7 +36,7 @@
     "fx_tracers": { "value": 1, "why": "Bullet tracers: shooter positions show the same for everyone." },
     "bal_bullet_trace": { "value": 1, "why": "Supersonic bullet trace through optics." },
     "bal_vapor_trails": { "value": 1, "why": "Vapour trails behind bullets in humid / freezing air." },
-    "bal_tracer_ignition": { "value": 1, "why": "Tracer ignition delay (realistic dim start)." },
+    "bal_tracer_ignition": { "value": 0, "why": "Tracers bright from the muzzle for everyone (1 = the realistic dim igniter start)." },
     "bal_tracer_scale_dist": { "value": 6, "why": "Tracer width grows with the camera distance: the same for everyone." },
     "bal_tracer_scale_min": { "value": 1, "why": "Tracer width scale near the camera." },
     "world_chunk_radius": { "value": 4, "why": "Draw distance (chunks around the player). Lobby rule only." },

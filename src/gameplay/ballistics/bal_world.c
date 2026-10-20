@@ -946,7 +946,7 @@ void bal_world_register(void) {
     B.tracers_only = cvar_reg_bool("fire_tracers_only", false, CVAR_SERVER | CVAR_CHEAT | CVAR_LOCKED | CVAR_RULE, "every round is a tracer (ballistics range / debugging)");
     B.debug = cvar_reg_int("ballistics_debug", 0, 0, 2, CVAR_LOCKED, "draw bullet paths (red supersonic, orange transonic, blue subsonic), penetration points, crack timing; 2 = also log every hit");
     B.watch = cvar_reg_bool("bal_watch", true, CVAR_LOCKED, "reload assets/ballistics and the attachment muzzle devices when the files change");
-    B.ignition = cvar_reg_bool("bal_tracer_ignition", true, CVAR_LOCKED, "tracers: dim igniter for the first tens of metres (0 = arcade: bright from the muzzle)");
+    B.ignition = cvar_reg_bool("bal_tracer_ignition", false, CVAR_LOCKED, "tracers: 1 = dim igniter for the first tens of metres (the cartridge's ignition_m); 0 (default) = bright from the muzzle");
     cvar_reg_float("bal_tracer_scale_dist", 6.0f, 0.5f, 1000.0f, CVAR_LOCKED, "tracers: width scale 1 at this camera distance in m, growing linearly with distance, no upper limit (never below bal_tracer_scale_min)");
     cvar_reg_float("bal_tracer_scale_min", 1.0f, 0.1f, 100.0f, CVAR_LOCKED, "tracers: smallest width scale (near the camera; scale 1 = 6 cm wide)");
     B.crack_radius = cvar_reg_float("bal_crack_radius", 120.0f, 0.0f, 1000.0f, CVAR_LOCKED, "supersonic bullets passing within this many metres of you make a crack");
