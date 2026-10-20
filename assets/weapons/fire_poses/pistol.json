@@ -104,7 +104,7 @@
 		"delay_ticks":	1,
 		"omega":	30,
 		"zeta":	0.42,
-		"hip":	0.5,
+		"hip":	0,
 		"fov_punch":	2,
 		"fov_release":	0.08,
 		"roll_twitch":	0.6,
