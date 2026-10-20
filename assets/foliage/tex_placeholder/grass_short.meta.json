@@ -1,0 +1,64 @@
+{
+ "grid": [
+  2,
+  2
+ ],
+ "size": 2048,
+ "cells": [
+  {
+   "coverage": 0.044,
+   "bottom": 0.091,
+   "height": 0.609,
+   "root": "#7b6a49",
+   "mid": "#83704e",
+   "tip": "#877451",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  },
+  {
+   "coverage": 0.061,
+   "bottom": 0.139,
+   "height": 0.563,
+   "root": "#7a6948",
+   "mid": "#83704f",
+   "tip": "#8a725c",
+   "residue": 0.0119,
+   "source": "placeholder",
+   "fails": []
+  },
+  {
+   "coverage": 0.058,
+   "bottom": 0.118,
+   "height": 0.604,
+   "root": "#7a6a48",
+   "mid": "#82704e",
+   "tip": "#9b8451",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  },
+  {
+   "coverage": 0.045,
+   "bottom": 0.111,
+   "height": 0.559,
+   "root": "#7d6c4a",
+   "mid": "#84714f",
+   "tip": "#897552",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  }
+ ],
+ "name": "grass_short",
+ "kind": "blade_atlas",
+ "tool_version": 1,
+ "recipe": "assets/foliage/gen/grass_short.json",
+ "card": {
+  "height_m": [
+   0.15,
+   0.35
+  ],
+  "width_m": 0.35
+ }
+}

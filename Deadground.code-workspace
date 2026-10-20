@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"fbxViewer.lighting.preset": "studio",
+		"fbxViewer.showAxes": true,
+		"fbxViewer.showGrid": true
+	}
+}

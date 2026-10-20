@@ -1,0 +1,42 @@
+{
+ "grid": [
+  2,
+  1
+ ],
+ "size": 2048,
+ "cells": [
+  {
+   "coverage": 0.098,
+   "bottom": 0.154,
+   "height": 0.781,
+   "root": "#48572e",
+   "mid": "#516333",
+   "tip": "#5a6c39",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  },
+  {
+   "coverage": 0.1,
+   "bottom": 0.115,
+   "height": 0.713,
+   "root": "#5e623c",
+   "mid": "#6c6e45",
+   "tip": "#79784e",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  }
+ ],
+ "name": "fern",
+ "kind": "blade_atlas",
+ "tool_version": 1,
+ "recipe": "assets/foliage/gen/fern.json",
+ "card": {
+  "height_m": [
+   0.4,
+   0.8
+  ],
+  "width_m": 0.7
+ }
+}

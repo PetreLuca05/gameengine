@@ -1,0 +1,14 @@
+{
+ "size": 2048,
+ "source": "placeholder",
+ "mean": "#524c2c",
+ "target_mean": "#524c2c",
+ "mean_delta": 0.0,
+ "seam": 1.044,
+ "tile_m": 2.5,
+ "name": "ground_litter",
+ "kind": "terrain_layer",
+ "tool_version": 1,
+ "recipe": "assets/terrain/gen/ground_litter.json",
+ "replaces": 0
+}

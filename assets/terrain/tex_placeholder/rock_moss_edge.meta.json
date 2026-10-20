@@ -1,0 +1,17 @@
+{
+ "size": 2048,
+ "source": "placeholder",
+ "mean": "#6a6650",
+ "target_mean": "#6a6650",
+ "mean_delta": 0.0,
+ "seam": 0.1019,
+ "tile_m": 4.0,
+ "name": "rock_moss_edge",
+ "kind": "transition",
+ "tool_version": 1,
+ "recipe": "assets/terrain/gen/rock_moss_edge.json",
+ "pair": [
+  "ground_litter",
+  "rock"
+ ]
+}

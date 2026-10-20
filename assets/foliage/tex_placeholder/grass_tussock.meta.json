@@ -1,0 +1,64 @@
+{
+ "grid": [
+  2,
+  2
+ ],
+ "size": 2048,
+ "cells": [
+  {
+   "coverage": 0.132,
+   "bottom": 0.217,
+   "height": 0.806,
+   "root": "#867d55",
+   "mid": "#92885d",
+   "tip": "#9e9164",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  },
+  {
+   "coverage": 0.128,
+   "bottom": 0.199,
+   "height": 0.797,
+   "root": "#857d55",
+   "mid": "#93895e",
+   "tip": "#9e9064",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  },
+  {
+   "coverage": 0.145,
+   "bottom": 0.221,
+   "height": 0.842,
+   "root": "#73704a",
+   "mid": "#857e55",
+   "tip": "#978b60",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  },
+  {
+   "coverage": 0.111,
+   "bottom": 0.171,
+   "height": 0.788,
+   "root": "#676646",
+   "mid": "#757350",
+   "tip": "#7f7a56",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  }
+ ],
+ "name": "grass_tussock",
+ "kind": "blade_atlas",
+ "tool_version": 1,
+ "recipe": "assets/foliage/gen/grass_tussock.json",
+ "card": {
+  "height_m": [
+   0.3,
+   0.5
+  ],
+  "width_m": 0.6
+ }
+}
