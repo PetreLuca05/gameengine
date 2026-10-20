@@ -1,0 +1,4 @@
+#!/bin/sh
+# Short launcher for tools/blender/open_models.sh (docs/ITEM_PIPELINE.md "Open models in Blender"), Git Bash:
+#   ./bl smg          ./bl smg att_red_dot          ./bl all          ./bl list
+exec "$(dirname "$0")/tools/blender/open_models.sh" "$@"

@@ -6,6 +6,7 @@
 //
 //   blender_open <id ...|all|list> [--kind K] [--rebuild] [--no-open]   the script's arguments ("list" = --list)
 //   blender_open dry <args>                                               only log the command line (tests)
+//   bl <args>                                                             the same, shorter
 //
 // Needs the source tree (tools/ is not mirrored next to the exe: platform_data_path finds it through
 // DG_SOURCE_DIR) and Python 3: the py launcher, else python on PATH (python3 first off Windows).
@@ -136,4 +137,5 @@ void blender_open_poll(void) {
 void blender_open_register(void) {
     cmd_register("blender_open", cmd_blender_open,
                  "blender_open <id ...|all|list> [--kind K] [--rebuild] [--no-open] | dry <args>: open models in Blender (tools/blender/open_models.py)");
+    cmd_register("bl", cmd_blender_open, "bl <id ...|all|list> [--kind K] [--rebuild] [--no-open]: blender_open, shorter (bl smg)");
 }

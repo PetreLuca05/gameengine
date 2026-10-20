@@ -226,10 +226,10 @@ returns at once. From the repository root:
 
 | Where | Command |
 |---|---|
-| PowerShell / cmd | `tools\blender\open_models.bat rifle` |
-| Git Bash | `tools/blender/open_models.sh rifle` |
+| PowerShell / cmd | `.\bl rifle` (`bl.bat` at the root; or `tools\blender\open_models.bat rifle`) |
+| Git Bash | `./bl rifle` (or `tools/blender/open_models.sh rifle`) |
 | Any shell | `python tools/blender/open_models.py rifle` |
-| Game console | `blender_open rifle` |
+| Game console | `bl rifle` (or `blender_open rifle`) |
 
 Examples (the same arguments everywhere):
 
