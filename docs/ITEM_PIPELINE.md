@@ -247,6 +247,9 @@ Examples (the same arguments everywhere):
 - `open_models --list` (game: `blender_open list`): every id, by kind.
 - Options:
   - `--no-open`: build / assemble only.
+  - `--no-copy`: leave the clipboard alone. Otherwise, when the window opens, the folder of the opened
+    model (several models: the folder they share) is copied to the clipboard, e.g.
+    `E:\Deadground\assets\src\items` for `rifle`.
   - `--rebuild`: rebuild even when up to date.
   - `--blender <exe>`: this Blender. Otherwise `$BLENDER`, else the newest install under
     `Program Files\Blender Foundation` (Steam and `/Applications` too), else `blender` on PATH.

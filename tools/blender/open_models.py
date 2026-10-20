@@ -7,6 +7,7 @@ standard library only; Blender runs headless for the builds and detached for the
     open_models.py --list [--kind K]      the ids it knows, by kind
 
     --no-open        build / assemble only, no Blender window
+    --no-copy        leave the clipboard alone (else the opened model's folder is copied to it)
     --rebuild        rebuild the item .blend files and the combined scene even when up to date
     --blender <exe>  this Blender (else $BLENDER, else the newest installed, else PATH)
     --verbose        every line of Blender's output
@@ -299,6 +300,33 @@ def open_gui(blender, target):
         subprocess.Popen(cmd, start_new_session=True, **io)
 
 
+def model_dir(sel):
+    """The folder of what is opened: the model's own, or the one the models share."""
+    dirs = [os.path.dirname(os.path.abspath(m.path)) for m in sel]
+    try:
+        return os.path.commonpath(dirs)
+    except ValueError:   # on different drives
+        return dirs[0]
+
+
+def copy_to_clipboard(text):
+    """-> True when the text is on the clipboard (clip / pbcopy / wl-copy / xclip / xsel)."""
+    if os.name == "nt":
+        cmds, data = [["clip"]], text.encode("utf-16-le")   # clip takes UTF-16 LE (a BOM would be copied too)
+    else:
+        cmds = [["pbcopy"]] if sys.platform == "darwin" else [["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "-ib"]]
+        data = text.encode("utf-8")
+    for c in cmds:
+        if not shutil.which(c[0]):
+            continue
+        try:
+            if subprocess.run(c, input=data, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5).returncode == 0:
+                return True
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return False
+
+
 # ------------------------------------------------------------------ build / assemble
 
 def mtime(p):
@@ -483,7 +511,7 @@ def main(argv):
         sys.stdout.reconfigure(errors="replace")
     sys.stdout = SafeOut(sys.stdout)
     args, opts = [], {"kind": []}
-    flags = {"--no-open", "--rebuild", "--verbose", "--list"}
+    flags = {"--no-open", "--no-copy", "--rebuild", "--verbose", "--list"}
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -545,6 +573,9 @@ def main(argv):
     print("open_models: ready in %.1fs: %s" % (time.time() - t0, rel(target)), flush=True)
     if not opts.get("--no-open"):
         open_gui(blender, target)
+        if not opts.get("--no-copy"):
+            d = model_dir(sel)
+            print("open_models: %s %s" % ("copied to the clipboard:" if copy_to_clipboard(d) else "could not copy to the clipboard:", d), flush=True)
     return rc
 
 
