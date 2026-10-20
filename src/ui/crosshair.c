@@ -13,6 +13,7 @@
 #include "cJSON.h"
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define MAX_COLORS 8
 
@@ -24,8 +25,9 @@ typedef struct CrossStyle {
     float outline_w, min_gap, max_gap, ads_fade_time, ads_dot_size, enemy_range;
     bool ads_dot, shotgun_circle;
     int circle_segments;
-    float hm_time, hm_inner, hm_outer, hm_thickness, hm_kill_scale;
-    float hm_alpha, hm_ads_alpha;   // a hit's marker opacity at the hip / aimed (a kill's is opaque)
+    float hm_time, hm_kill_time, hm_inner, hm_outer, hm_thickness, hm_kill_scale;
+    float hm_alpha;                       // a hit's marker opacity, hip or aimed (a kill's is opaque)
+    float hm_fade_in, hm_pop, hm_kill_pop, hm_drift, hm_kill_spacing;
     u32 hm_color, hm_head, hm_kill;
 } CrossStyle;
 
@@ -72,13 +74,18 @@ static void style_defaults(CrossStyle *s) {
     s->shotgun_circle = true;
     s->circle_segments = 48;
     s->enemy_range = 150.0f;
-    s->hm_time = 0.25f;
+    s->hm_time = 0.32f;
+    s->hm_kill_time = 0.6f;
     s->hm_inner = 6;
     s->hm_outer = 14;
     s->hm_thickness = 2.5f;
     s->hm_kill_scale = 1.35f;
     s->hm_alpha = 0.5f;
-    s->hm_ads_alpha = 0.25f;
+    s->hm_fade_in = 0.04f;
+    s->hm_pop = 0.35f;
+    s->hm_kill_pop = 0.6f;
+    s->hm_drift = 0.18f;
+    s->hm_kill_spacing = 3.0f;
     s->hm_color = UI_RGBA(255, 255, 255, 255);
     s->hm_head = UI_RGBA(255, 200, 60, 255);
     s->hm_kill = UI_RGBA(255, 60, 40, 255);
@@ -119,12 +126,17 @@ bool crosshair_reload(void) {
     const cJSON *hm = cJSON_GetObjectItemCaseSensitive(root, "hitmarker");
     if (cJSON_IsObject(hm)) {
         s.hm_time = num(hm, "time", s.hm_time);
+        s.hm_kill_time = num(hm, "kill_time", s.hm_kill_time);
         s.hm_inner = num(hm, "inner", s.hm_inner);
         s.hm_outer = num(hm, "outer", s.hm_outer);
         s.hm_thickness = num(hm, "thickness", s.hm_thickness);
         s.hm_kill_scale = num(hm, "kill_scale", s.hm_kill_scale);
         s.hm_alpha = saturate(num(hm, "alpha", s.hm_alpha));
-        s.hm_ads_alpha = saturate(num(hm, "ads_alpha", s.hm_ads_alpha));
+        s.hm_fade_in = num(hm, "fade_in", s.hm_fade_in);
+        s.hm_pop = num(hm, "pop", s.hm_pop);
+        s.hm_kill_pop = num(hm, "kill_pop", s.hm_kill_pop);
+        s.hm_drift = num(hm, "drift", s.hm_drift);
+        s.hm_kill_spacing = num(hm, "kill_spacing", s.hm_kill_spacing);
         s.hm_color = rgba_arr(hm, "color", s.hm_color);
         s.hm_head = rgba_arr(hm, "head_color", s.hm_head);
         s.hm_kill = rgba_arr(hm, "kill_color", s.hm_kill);
@@ -145,6 +157,16 @@ static void cmd_pos(int argc, const char **argv) {
     log_info("crosshair_pos: %.2f %.2f (%s) ui %.0fx%.0f", CH.last_pos.x, CH.last_pos.y, CH.last_valid ? "drawn" : "hidden", ui_width(), ui_height());
 }
 
+// Shows a hit marker as if a hit were confirmed (preview / screenshot tests).
+static void cmd_hitmarker_test(int argc, const char **argv) {
+    Game *g = game();
+    if (!g) return;
+    const char *k = argc > 1 ? argv[1] : "hit";
+    g->hitmarker_kill = !strcmp(k, "kill") || !strcmp(k, "headkill");
+    g->hitmarker_head = !strcmp(k, "head") || !strcmp(k, "headkill");
+    g->hitmarker_time = crosshair_hitmarker_duration(g->hitmarker_kill);
+}
+
 void crosshair_init(void) {
     CH.style = cvar_reg_int("crosshair_style", 0, 0, 3, CVAR_ARCHIVE | CVAR_EDITABLE, "0 cross, 1 cross + dot, 2 dot, 3 circle");
     CH.length = cvar_reg_float("crosshair_length", 8, 1, 40, CVAR_ARCHIVE | CVAR_EDITABLE, "crosshair line length (px at 1080p)");
@@ -156,11 +178,15 @@ void crosshair_init(void) {
     CH.hitmarker = cvar_reg_bool("crosshair_hitmarker", true, CVAR_ARCHIVE | CVAR_EDITABLE, "show hit markers");
     CH.target_color = cvar_reg_bool("crosshair_target_color", true, CVAR_ARCHIVE | CVAR_EDITABLE, "tint the crosshair over enemies / friendlies");
     cmd_register("crosshair_reload", cmd_reload, "re-read assets/ui/crosshair.json");
+    cmd_register("crosshair_hitmarker_test", cmd_hitmarker_test, "crosshair_hitmarker_test [hit|head|kill|headkill]: show a hit marker (preview)");
     cmd_register("crosshair_pos", cmd_pos, "crosshair_pos: where the crosshair was drawn last frame (UI px, tests)");
     crosshair_reload();
 }
 
-float crosshair_hitmarker_duration(void) { return CH.st.hm_time > 0 ? CH.st.hm_time : 0.25f; }
+float crosshair_hitmarker_duration(bool kill) {
+    float t = kill ? CH.st.hm_kill_time : CH.st.hm_time;
+    return t > 0 ? t : 0.25f;
+}
 int crosshair_color_count(void) { return CH.st.color_count; }
 const char *crosshair_color_name(int i) { return (i >= 0 && i < CH.st.color_count) ? CH.st.color_names[i] : "?"; }
 
@@ -181,21 +207,35 @@ static void circle(float cx, float cy, float r, float th, int seg, u32 c) {
     }
 }
 
-// The marker fades out over its time; a hit's is see-through (fainter aimed, by the crosshair's ADS
-// fade), a kill's opaque.
+// The marker's life: a quick fade in with a springy pop (starts larger, overshoots once, settles),
+// a hold, then a fade out over the last half while the arms drift outwards. A hit's is see-through
+// (the same hip or aimed), a kill's opaque, larger, with two parallel lines per arm, in the kill
+// colour or the head colour for a headshot kill.
 static void draw_hitmarker(Game *g, float cx, float cy, float s) {
     if (!CH.hitmarker->i || g->hitmarker_time <= 0) return;
     const CrossStyle *st = &CH.st;
-    float a = smoothstepf(0.0f, 1.0f, saturate(g->hitmarker_time / crosshair_hitmarker_duration()));
-    if (!g->hitmarker_kill) a *= lerpf(st->hm_alpha, st->hm_ads_alpha, CH.ads_fade);
-    u32 base = g->hitmarker_kill ? st->hm_kill : (g->hitmarker_head ? st->hm_head : st->hm_color);
+    bool kill = g->hitmarker_kill;
+    float dur = crosshair_hitmarker_duration(kill);
+    float left = fminf(g->hitmarker_time, dur), el = dur - left;
+    float a_in = smoothstepf(0.0f, 1.0f, saturate(el / fmaxf(st->hm_fade_in, 1e-3f)));
+    float out_t = saturate(left / (dur * 0.5f));   // 1 until the last half, then down to 0
+    float a = a_in * smoothstepf(0.0f, 1.0f, out_t);
+    if (!kill) a *= st->hm_alpha;
+    float pop = (kill ? st->hm_kill_pop : st->hm_pop) * expf(-el * 16.0f) * cosf(el * 28.0f);
+    float k = (kill ? st->hm_kill_scale : 1.0f) * (1.0f + pop) * (1.0f + st->hm_drift * (1.0f - out_t));
+    u32 base = kill ? (g->hitmarker_head ? st->hm_head : st->hm_kill) : (g->hitmarker_head ? st->hm_head : st->hm_color);
     u32 c = with_alpha(base, a);
-    float k = g->hitmarker_kill ? st->hm_kill_scale : 1.0f;
     float in = st->hm_inner * s * k, out = st->hm_outer * s * k, th = st->hm_thickness * s;
-    ui_line(cx - in, cy - in, cx - out, cy - out, th, c);
-    ui_line(cx + in, cy - in, cx + out, cy - out, th, c);
-    ui_line(cx - in, cy + in, cx - out, cy + out, th, c);
-    ui_line(cx + in, cy + in, cx + out, cy + out, th, c);
+    // Kill: each arm is a pair of lines, offset either side along the arm's normal.
+    float off = kill ? (st->hm_kill_spacing * s + th) * 0.5f * 0.70710678f : 0.0f;
+    for (int i = 0; i < 4; i++) {
+        float dx = (i & 1) ? 1.0f : -1.0f, dy = (i & 2) ? 1.0f : -1.0f;
+        float nx = -dy * off, ny = dx * off;   // normal to (dx, dy), length off * sqrt(2)
+        for (int l = kill ? -1 : 0; l <= (kill ? 1 : 0); l += 2) {
+            float ox = nx * (float)l, oy = ny * (float)l;
+            ui_line(cx + dx * in + ox, cy + dy * in + oy, cx + dx * out + ox, cy + dy * out + oy, th, c);
+        }
+    }
 }
 
 // World point -> UI px (false: behind the camera).

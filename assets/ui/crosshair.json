@@ -20,7 +20,8 @@
   "circle_segments": 48,
   "enemy_check_range": 150.0,
   "hitmarker": {
-    "time": 0.25,
+    "time": 0.32,
+    "kill_time": 0.6,
     "inner": 6.0,
     "outer": 14.0,
     "thickness": 2.5,
@@ -29,6 +30,10 @@
     "kill_color": [255, 60, 40, 255],
     "kill_scale": 1.35,
     "alpha": 0.5,
-    "ads_alpha": 0.25
+    "fade_in": 0.04,
+    "pop": 0.35,
+    "kill_pop": 0.6,
+    "drift": 0.18,
+    "kill_spacing": 3.0
   }
 }

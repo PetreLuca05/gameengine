@@ -12,7 +12,7 @@
 void crosshair_init(void);          // cvars, style file, crosshair_reload command
 bool crosshair_reload(void);
 void crosshair_draw(float dt);      // HUD pass (after the world camera is set)
-float crosshair_hitmarker_duration(void);
+float crosshair_hitmarker_duration(bool kill);
 int crosshair_color_count(void);
 const char *crosshair_color_name(int i);
 

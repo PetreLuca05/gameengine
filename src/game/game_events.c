@@ -77,9 +77,9 @@ void game_handle_event(const GameEvent *ev) {
     case EV_SOUND: audio_play(ev->text, ev->pos, ev->value, SND_SFX); break;
     case EV_DAMAGE_NUMBER: break;   // floating damage numbers removed (hit markers / damage effects remain)
     case EV_HIT_CONFIRM:
-        G->hitmarker_time = crosshair_hitmarker_duration();
         G->hitmarker_kill = (ev->id & 1u) != 0;
         G->hitmarker_head = (ev->id & 2u) != 0;
+        G->hitmarker_time = crosshair_hitmarker_duration(G->hitmarker_kill);
         break;   // visual only: no hit-confirm sound
     case EV_HURT: {
         for (int i = 0; i < MAX_HURT_MARKERS; i++) {

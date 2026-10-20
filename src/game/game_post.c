@@ -498,7 +498,7 @@ static void apply_feedback(PostSettings *s, const PostFrameInfo *fi, float dt) {
     GP.flash = fmaxf(0.0f, GP.flash - dt * 0.45f);
     GP.nightvision_w += ((GP.nightvision ? 1.0f : 0.0f) - GP.nightvision_w) * (1.0f - expf(-dt * 8.0f));
     float hm = 0.0f;
-    if (g && g->hitmarker_time > 0) hm = saturate(g->hitmarker_time / crosshair_hitmarker_duration()) * (g->hitmarker_kill ? 0.6f : 0.3f);
+    if (g && g->hitmarker_time > 0) hm = saturate(g->hitmarker_time / crosshair_hitmarker_duration(g->hitmarker_kill)) * (g->hitmarker_kill ? 0.6f : 0.3f);
     s->fb_damage = (g ? saturate(g->damage_flash) : 0.0f) * k;
     s->fb_lowhealth = GP.lowhealth * k;
     s->fb_flash = GP.flash * k;
