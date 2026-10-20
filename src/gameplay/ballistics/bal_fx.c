@@ -29,7 +29,7 @@ static struct {
     int em_head, em_tail;
     u32 lib_rev;
     Cvar *vfx_quality, *ignition, *shutter, *trace, *vapor, *timescale;
-    Cvar *scale_dist, *scale_min, *scale_max;
+    Cvar *scale_dist, *scale_min;
     double next_trace;
     // muzzle_preview: a flash every 0.8 s in front of the camera, seen from the side, in slow motion.
     bool preview;
@@ -267,11 +267,11 @@ static BalTracerLook draw_tracer(const BalLive *l, vec3 cam, float shutter, bool
     float k = look.intensity;
     vec3 rgb = bal_tracer_rgb(c->tracer.color);
     vec4 col = v4(rgb.x * k, rgb.y * k, rgb.z * k, 1.0f);
-    // Width: 3 cm times a scale growing with the camera distance (scale 1 at bal_tracer_scale_dist),
-    // clamped to bal_tracer_scale_min .. max, so a distant tracer stays visible.
-    float smin = cv(&F.scale_min, "bal_tracer_scale_min", 1.0f);
-    float scale = clampf(cam_d / fmaxf(cv(&F.scale_dist, "bal_tracer_scale_dist", 6.0f), 0.01f), smin, fmaxf(smin, cv(&F.scale_max, "bal_tracer_scale_max", 30.0f)));
-    float width = 0.03f * scale;
+    // Width: 6 cm times a scale growing with the camera distance (scale 1 at bal_tracer_scale_dist),
+    // never below bal_tracer_scale_min and with no upper limit: a tracer keeps its size on screen at
+    // any range.
+    float scale = fmaxf(cam_d / fmaxf(cv(&F.scale_dist, "bal_tracer_scale_dist", 6.0f), 0.01f), cv(&F.scale_min, "bal_tracer_scale_min", 1.0f));
+    float width = 0.06f * scale;
     float streak = fminf(bal_tracer_streak(speed, shutter), l->b.dist);   // never behind the muzzle
     if (F.em_head >= 0) vfx_game_push_sprite(F.em_head, v3_madd(head, dir, -streak), v3_scale(dir, streak), width, col);
     // Tail: the last tick positions (curved by gravity / wind), fading.

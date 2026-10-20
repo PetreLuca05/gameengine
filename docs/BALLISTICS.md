@@ -253,10 +253,10 @@ camera, seen from the side, in slow motion.
 - Full burn until `burn_s` or `burn_m`, whichever comes first.
 - 0.15 s burnout, then dark while the bullet flies on.
 - `bal_tracer_ignition 0` is the arcade mode: bright from the muzzle.
-- Width: 3 cm times a scale that grows with the distance from the camera, `distance / bal_tracer_scale_dist` (6 m),
-  clamped to `bal_tracer_scale_min` .. `bal_tracer_scale_max` (1 .. 30: 3 cm up to 6 m, 0.3 m at 60 m, 0.9 m from
-  180 m on). Up to the max a tracer keeps its size on screen (about 5 px at 1080p, 90 deg); past it, it shrinks.
-  The tail is 0.7 of the head's width. Locked, in the consistency set (the same for everyone).
+- Width: 6 cm times a scale that grows with the distance from the camera, `distance / bal_tracer_scale_dist` (6 m),
+  never below `bal_tracer_scale_min` (1) and with no upper limit: 6 cm up to 6 m, 0.6 m at 60 m, 3 m at 300 m. So a
+  tracer keeps its size on screen at any range (about 10 px at 1080p, 90 deg). The tail is 0.7 of the head's
+  width. Locked, in the consistency set (the same for everyone).
 
 **Drawing**
 - Segment sprites with the `tracer_head` effect's emitters (`vfx_game_push_sprite`).
