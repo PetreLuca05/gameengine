@@ -1,0 +1,75 @@
+DEADGROUND - COMMANDS YOU CAN RUN FROM THE VS CODE TERMINAL
+==========================================================
+Open the terminal: Ctrl+` . The default shell is PowerShell; the ".sh" scripts need Git Bash
+(terminal dropdown "+ v" -> Git Bash). In PowerShell prefix the root launchers with .\  (e.g. .\dg).
+
+
+1. PLAY
+-------
+  dg                       main menu (the playable build in "openable builds\Deadground")
+  dg <map>                 straight into a map, no splash / menu
+                           maps: devroom, devroom_vegetation, vegetation, wateryard, terrain_yard, story_01
+  dg handpose              the hand-pose editor
+  "openable builds\Deadground\Play.bat" [game args]     same build, any game arguments (see 5)
+
+
+2. BUILD
+--------
+  build                    configure + build RelWithDebInfo into build\
+  build Debug              Debug build into build-debug\
+  (Git Bash)
+  .toolchain/b.sh          build build\, print only errors + "build exit=N"
+  .toolchain/ba.sh         same into build-alt\ (use it when the game is running: LNK1168)
+
+
+3. RUN THE DEV BUILD (Git Bash)
+-------------------------------
+  .toolchain/run.sh [args]     build\bin\deadground.exe with Vulkan validation, filtered log
+  .toolchain/runa.sh [args]    same for build-alt\
+  cd build/bin && ./deadground.exe [args]
+
+
+4. TESTS (Git Bash)
+-------------------
+  Unit tests:
+    cd build && ../.toolchain/cmake_x/cmake-4.4.4-windows-x86_64/bin/ctest.exe
+    (add  -R <name>  for one test, e.g. -R test_inventory)
+  Script test (tools/tests/*.cfg):
+    cd build/bin && ./deadground.exe --test --nosound --log <log path> --script ../../tools/tests/<name>.cfg
+  Two-instance network tests:
+    .toolchain/anet.sh       animation replication
+    .toolchain/snet.sh       attachment / sight replication
+    .toolchain/tnet.sh       time-of-day replication
+    tools/tests/*_net.sh     the other network tests (inv_net.sh, revive_net.sh, spec_net.sh, ...)
+
+
+5. GAME COMMAND-LINE ARGUMENTS (deadground.exe / Play.bat)
+---------------------------------------------------------
+  --nomenu                 skip the main menu
+  --menu                   show the main menu in --test runs
+  +map <name>              load a map         +connect <ip>   join a host
+  +<console command>       any console command at start-up (e.g. +scene handpose)
+  --test                   test run: no config load / save
+  --nosound                no audio
+  --log <path>             log file (keeps the normal log untouched)
+  --script <cfg>           run a console script
+  --exec <cfg>             exec a config
+  --screenshot <png>       --frames <n>
+  --validation             Vulkan validation layers (set VK_ADD_LAYER_PATH, see CLAUDE.md)
+  --rebuild-cache          rebuild the asset cache
+  --release-locks          apply the release cvar locks in a dev build
+  --no-async-compute       --gpu-cull       --occlusion
+
+
+6. IN-GAME CONSOLE
+------------------
+  help [filter]            list console commands
+  cvarlist [filter]        list cvars
+
+
+7. TOOLS
+--------
+  bl <id> [<id> ...]       open item models in Blender (bl smg, bl smg att_red_dot, bl all, bl list)
+                           Git Bash: ./bl ...
+  groundgen [--dry-run | --no-push | <recipe>...]
+                           generate ground textures (needs the Higgsfield key in .env, costs money)
