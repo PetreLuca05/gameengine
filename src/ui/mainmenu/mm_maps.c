@@ -206,21 +206,15 @@ static void group_bar(GuiRect content, const int *groups, const GuiRect *rects, 
     if (gui_mouse_pressed(0) && !gui_rect_contains(lr, mp.x, mp.y) && !on_bar) g_open = -1;
 }
 
-// Trials: the development maps (one entry, its list above it); a pick is the party's map.
-void mm_maps_dev_bar(GuiRect content, GuiRect bar) {
-    static const int dev[1] = { MG_DEV };
-    group_bar(content, dev, &bar, 1);
-}
-
-// Story > Chapter select: the story maps on the globe (the bar: the chapter entry, Back), the details
-// and Play this chapter.
-void mm_maps_draw(GuiRect content) {
+// Play > Enroll (trials: the development maps, Start = the party's game) / Story > Chapter select (the
+// story maps, Play this chapter): the maps on the globe (the bar: the group's entry, Back), the details.
+void mm_maps_draw(GuiRect content, bool trials) {
     MainMenu *M = mm();
     MmLayout *L = &M->maps;
     mm_layout_solve(L, content);
-    static const int chapters[1] = { MG_CHAPTER1 };
+    const int group = trials ? MG_DEV : MG_CHAPTER1;
     GuiRect g0 = mm_node(L, "group0"), g1 = mm_node(L, "group1");
-    group_bar(content, chapters, &g0, 1);
+    group_bar(content, &group, &g0, 1);
     GuiRect back = { g1.x, g1.y + (g1.h - TOK("mm_button_h")) * 0.5f, TOK("mm_button_w"), TOK("mm_button_h") };
     if (gw_button(gui_id("mm_chapters_back"), back, "Back", GB_SECONDARY, true)) { M->play_page = PP_MAIN; g_open = -1; }
 
@@ -263,10 +257,32 @@ void mm_maps_draw(GuiRect content) {
         p->lobby.dynamic_weather = s.dynamic_weather;
         mm_party_sync();
     }
+    // Trials: the party's game settings (the host edits them).
+    if (trials && lobby_active()) {
+        const Lobby *lb = lobby_get();
+        bool host = lobby_is_host();
+        LobbySettings ls = lb->settings;
+        bool ch = false;
+        gw_disabled(!host);
+        const char *diff[LD_COUNT];
+        for (int i = 0; i < LD_COUNT; i++) diff[i] = lobby_difficulty_name(i);
+        int d = ls.difficulty;
+        GuiRect rr = gw_setting_row(&c, "Difficulty", NULL, gui_id("mp_diff"));
+        if (gw_dropdown(gui_id("mp_diff_dd"), rr, diff, LD_COUNT, &d)) { ls.difficulty = (u8)d; ch = true; }
+        float mp = (float)ls.max_players;
+        rr = gw_setting_row(&c, "Max players", NULL, gui_id("mp_max"));
+        if (gw_slider(gui_id("mp_max_s"), rr, &mp, 1, LOBBY_MAX_MEMBERS, 1, "%.0f")) { ls.max_players = (u8)mp; ch = true; }
+        bool late = ls.late_join;
+        rr = gw_setting_row(&c, "Join a running game", "Players may join after the start (they load in and spawn).", gui_id("mp_late"));
+        if (gw_toggle(gui_id("mp_late_t"), rr, &late)) { ls.late_join = late; ch = true; }
+        gw_disabled(false);
+        if (ch && host) lobby_set_settings(&ls);
+    }
     GuiRect br = { in.x, in.y + in.h - TOK("mm_button_h"), in.w, TOK("mm_button_h") };
     const MapInfo *sel = lobby_map_info(M->map);
-    const char *label = sel && sel->chapter[0] ? "Play this chapter" : "Host on this map";
-    if (c.y + TOK("mm_gap") < br.y && gw_button(gui_id("mm_maps_host"), br, label, GB_PRIMARY, true)) host_map(sel);
+    const char *label = sel && sel->chapter[0] ? "Play this chapter" : "Start";
+    bool can = !trials || !lobby_active() || lobby_is_host();
+    if (c.y + TOK("mm_gap") < br.y && gw_button(gui_id("mm_maps_host"), br, label, GB_PRIMARY, can)) host_map(sel);
     char hint[160];
     snprintf(hint, sizeof(hint), "Enter / A  select     double click  host     drag  turn the globe     %s", globe_phase_text());
     mm_footer_hint(gui_rect(content.x, content.y + content.h, content.w, TOK("mm_row_h")), hint);

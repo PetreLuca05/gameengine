@@ -82,17 +82,18 @@ static bool lock_button(GuiRect r, bool locked, bool enabled) {
     return enabled && in.clicked;
 }
 
-// Invite friends: the Steam friends list in the menu (a direct Steam lobby invite: no overlay needed),
-// over the party panel, next to its button. Shift+click opens the Steam overlay's dialog instead.
+// Invite friends: the Steam friends list (a direct Steam lobby invite: no overlay needed), opening under
+// the Invite players button. Shift+click opens the Steam overlay's dialog instead.
 static bool g_invite_open;
 
-static void draw_invites(GuiRect anchor, GuiRect panel) {
+static void draw_invites(GuiRect anchor) {
     if (!g_invite_open) return;
     FriendEntry fr[64];
     int n = lobby_friends(fr, 64);
     float rh = TOK("lb_player_h");
-    float h = fminf((float)(n + 2) * rh, anchor.y - panel.y - TOK("mm_gap"));
-    GuiRect r = { panel.x, anchor.y - h - TOK("mm_gap"), panel.w, h };
+    float top = anchor.y + anchor.h + TOK("mm_gap");
+    float h = fminf((float)(n + 2) * rh, gui_h() - top - TOK("mm_gap_lg"));
+    GuiRect r = { anchor.x, top, anchor.w, h };
     int layer = gd_layer();
     gd_set_layer(GL_OVERLAY);
     mm_panel(r);
@@ -120,97 +121,129 @@ static void draw_invites(GuiRect anchor, GuiRect panel) {
     gd_set_layer(layer);
 }
 
-// The party panel (right): the lock + privacy, the players, the map, the host's game settings.
+// A crown (the party's host): three points over a band.
+static void crown(float cx, float cy, float s, u32 c) {
+    float w = s, h = s * 0.72f, x0 = cx - w * 0.5f, y1 = cy + h * 0.5f, y0 = cy - h * 0.5f;
+    vec2 p[8] = {
+        { x0, y1 }, { x0, y0 + h * 0.25f }, { x0 + w * 0.27f, y0 + h * 0.55f }, { cx, y0 },
+        { x0 + w * 0.73f, y0 + h * 0.55f }, { x0 + w, y0 + h * 0.25f }, { x0 + w, y1 }, { x0, y1 },
+    };
+    gd_polyline(p, 8, fmaxf(1.5f, s * 0.12f), c, true);
+    gd_rect(gui_rect(x0, y1 - s * 0.16f, w, s * 0.16f), c);
+}
+
+// Dashes along a rectangle's edges (the Invite players outline).
+static void dotted_outline(GuiRect r, float dash, float gap, float t, u32 c) {
+    for (float x = r.x; x < r.x + r.w; x += dash + gap) {
+        float e = fminf(x + dash, r.x + r.w);
+        gd_rect(gui_rect(x, r.y, e - x, t), c);
+        gd_rect(gui_rect(x, r.y + r.h - t, e - x, t), c);
+    }
+    for (float y = r.y; y < r.y + r.h; y += dash + gap) {
+        float e = fminf(y + dash, r.y + r.h);
+        gd_rect(gui_rect(r.x, y, t, e - y), c);
+        gd_rect(gui_rect(r.x + r.w - t, y, t, e - y), c);
+    }
+}
+
+// The party (right, under the tab bar's divider): "Party n / max" + the lock, the players (a crown left
+// of the host's icon; the host kicks on hover), Invite players +, the countdown.
 static void draw_party(GuiRect r) {
     const Lobby *L = lobby_get();
     bool host = lobby_is_host() && in_lobby_phase();
-    mm_panel(r);
-    GuiRect in = gui_rect_inset(r, gui_s(TH->pad));
-    GuiCursor c = gc_make(in, TOK("mm_gap_sm"));
-    // Header: "Party  n / max", the lock, the privacy in words.
-    GuiRect head = gc_row(&c, TOK("mm_title_h"));
+    float ph = TOK("lb_player_h"), av = TOK("mm_avatar_sm"), gap = TOK("mm_gap");
+    float y = r.y;
+    // Header.
+    GuiRect head = { r.x, y, r.w, TOK("mm_row_h") };
     char title[48];
     snprintf(title, sizeof(title), "Party  %d / %d", lobby_count(L), L->settings.max_players);
-    gw_label(head, title, gui_s(TH->t_title - 4), GW_SEMIBOLD, TH->text, GUI_LEFT);
+    gw_label_caps(head, title, gui_s(TH->t_label + 1), TH->text_dim, GUI_LEFT);
     bool locked = L->settings.privacy != LP_PUBLIC;
     float ls = head.h;
-    GuiRect lr = { head.x + head.w - ls, head.y, ls, ls };
-    gw_label(gui_rect(head.x, head.y, head.w - ls - TOK("mm_gap"), head.h), lobby_privacy_name(L->settings.privacy), gui_s(TH->t_small), GW_REGULAR, locked ? TH->accent : TH->text_dim, GUI_RIGHT);
-    if (lock_button(lr, locked, host)) {
+    gw_label(gui_rect(head.x, head.y, head.w - ls - gap, head.h), lobby_privacy_name(L->settings.privacy), gui_s(TH->t_small), GW_REGULAR, locked ? TH->accent : TH->text_dim, GUI_RIGHT);
+    if (lock_button(gui_rect(head.x + head.w - ls, head.y, ls, ls), locked, host)) {
         LobbySettings s = L->settings;
         s.privacy = locked ? LP_PUBLIC : LP_INVITE;
         lobby_set_settings(&s);
         lobby_profile()->lobby.privacy = s.privacy;   // the next party starts the same
         lobby_profile_changed();
     }
-    // The players (the lobby screen's rows: ready, host, ping, phone; the host kicks / promotes).
-    float ph = TOK("lb_player_h");
-    int n = DG_MAX(1, lobby_count(L));
-    GuiRect pr = gc_row(&c, (float)n * (ph + TOK("mm_gap_sm")));
-    mm_lobby_players(pr);
-    // The map and the start look (the Maps tab picks them).
-    const MapInfo *mi = lobby_map_info(L->settings.map[0] ? L->settings.map : mm()->map);
-    c.y += TOK("mm_gap");
-    gw_section(gc_row(&c, TOK("mm_row_h")), "Map");
-    if (mi) {
-        GuiRect row = gc_row(&c, TOK("mm_map_row_h"));
-        float th = row.h;
-        mm_thumb(gui_rect(row.x, row.y, th * 1.7778f, th), mi->thumbnail);
-        float x = row.x + th * 1.7778f + TOK("mm_gap");
-        gw_label(gui_rect(x, row.y, row.x + row.w - x, row.h * 0.5f), mi->name, gui_s(TH->t_body), GW_SEMIBOLD, TH->text, GUI_LEFT);
-        const SeasonTable *st = weather_seasons();
-        char v[64];
-        snprintf(v, sizeof(v), "%s  ·  %02d:00", st->s[DG_CLAMP(L->settings.season, 0, SEASON_COUNT - 1)].name, L->settings.start_hour);
-        gw_label(gui_rect(x, row.y + row.h * 0.5f, row.x + row.w - x, row.h * 0.4f), v, gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_LEFT);
-    }
-    // Game settings: the host edits, everyone else reads.
-    c.y += TOK("mm_gap");
-    gw_section(gc_row(&c, TOK("mm_row_h")), host ? "Game settings" : "Game settings (host)");
-    LobbySettings s = L->settings;
-    bool changed = false;
-    gw_disabled(!host);
-    const char *diff[LD_COUNT];
-    for (int i = 0; i < LD_COUNT; i++) diff[i] = lobby_difficulty_name(i);
-    int d = s.difficulty;
-    GuiRect rr = gw_setting_row(&c, "Difficulty", NULL, gui_id("pt_diff"));
-    if (gw_dropdown(gui_id("pt_diff_dd"), rr, diff, LD_COUNT, &d)) { s.difficulty = (u8)d; changed = true; }
-    float mp = (float)s.max_players;
-    rr = gw_setting_row(&c, "Max players", NULL, gui_id("pt_max"));
-    if (gw_slider(gui_id("pt_max_s"), rr, &mp, 1, LOBBY_MAX_MEMBERS, 1, "%.0f")) { s.max_players = (u8)mp; changed = true; }
-    bool late = s.late_join;
-    rr = gw_setting_row(&c, "Join a running game", "Players may join after the start (they load in and spawn).", gui_id("pt_late"));
-    if (gw_toggle(gui_id("pt_late_t"), rr, &late)) { s.late_join = late; changed = true; }
-    gw_disabled(false);
-    if (mm_environment_rows(&c, &s, host)) changed = true;   // season, start time, start weather, dynamic weather
-    if (changed && host) {
-        lobby_set_settings(&s);
-        Profile *p = lobby_profile();   // the next party starts with this look
-        p->lobby.season = s.season;
-        p->lobby.start_hour = s.start_hour;
-        dg_strcpy(p->lobby.weather, sizeof(p->lobby.weather), s.weather);
-        p->lobby.dynamic_weather = s.dynamic_weather;
-    }
-    // Bottom: invite friends (Steam), the countdown.
-    GuiRect inv = { in.x, in.y + in.h - TOK("mm_button_h"), in.w, TOK("mm_button_h") };
-    bool steam_lobby = lobby_transport() == TRANSPORT_STEAM && lobby_steam_running();
-    if (c.y + TOK("mm_gap") < inv.y) {
-        GuiId iid = gui_id("pt_invite");
-        if (gw_button(iid, inv, "Invite friends", GB_SECONDARY, steam_lobby && in_lobby_phase())) {
-            if (gui_shift()) lobby_invite_overlay();
-            else g_invite_open = !g_invite_open;
+    y += head.h + gap;
+    // The players.
+    for (int i = 0; i < LOBBY_MAX_MEMBERS; i++) {
+        const LobbyMember *m = &L->members[i];
+        if (!m->active) continue;
+        GuiRect row = { r.x, y, r.w, ph };
+        y += ph + TOK("mm_gap_sm");
+        GuiId id = gui_idi("pt_member", m->id);
+        GuiInteract hi = gui_interact(id, row, GUI_NO_HOVER_SOUND);
+        bool me = m->id == L->local_id;
+        gd_backdrop(row, UI_RGBA(20, 22, 26, 150));
+        if (hi.hot) gd_round(row, gui_s(TH->radius), TH->hover);
+        float cs = av * 0.62f, x = row.x + gap;
+        if (m->host) crown(x + cs * 0.5f, row.y + row.h * 0.5f, cs, TH->accent);
+        x += cs + gap;
+        gw_avatar(gui_rect(x, row.y + (row.h - av) * 0.5f, av, av), 0, m->name, mm_name_color(m->id));
+        x += av + gap;
+        GuiText nt = { gui_s(TH->t_body), me ? GW_SEMIBOLD : GW_MEDIUM, TH->text, GUI_LEFT, 0, false, true, row.x + row.w - x - TOK("mm_button_w") };
+        gd_text(&nt, x, row.y + (row.h - gd_line_height(nt.size)) * 0.5f, m->name);
+        // Right: ready (a dot) and the ping; the host kicks the others on hover.
+        float rx = row.x + row.w - gap;
+        if (host && !me && hi.hot) {
+            GuiRect kb = { rx - TOK("mm_button_w") * 0.55f, row.y + gap * 0.5f, TOK("mm_button_w") * 0.55f, row.h - gap };
+            if (gw_button(gui_idi("pt_kick", m->id), kb, "Kick", GB_DANGER, true)) lobby_kick(m->id);
+            continue;
         }
-        if (!steam_lobby && gui_rect_contains(inv, gui_mouse().x, gui_mouse().y)) gui_tooltip(iid, "LAN party: friends join from Play > Join > LAN or by your IP address.");
-        if (!steam_lobby) g_invite_open = false;
-        draw_invites(inv, r);
+        char ping[16];
+        snprintf(ping, sizeof(ping), me && L->is_host ? "" : "%d ms", m->ping_ms);
+        GuiText pt = { gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_RIGHT, 0, false, true, 0 };
+        rx -= gd_text(&pt, rx, row.y + (row.h - gd_line_height(pt.size)) * 0.5f, ping) + gap;
+        gd_circle(rx - gui_s(4), row.y + row.h * 0.5f, gui_s(4), m->ready ? TH->ok : TH->text_faint);
+        if (gui_rect_contains(gui_rect(rx - gui_s(12), row.y, gui_s(14), row.h), gui_mouse().x, gui_mouse().y)) gui_tooltip(gui_idi("pt_ready", m->id), m->ready ? "Ready" : "Not ready");
     }
+    if (L->state == LS_CREATING || L->state == LS_JOINING) { gw_label(gui_rect(r.x, y, r.w, ph), L->state == LS_JOINING ? "Connecting..." : "Creating the party...", gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_LEFT); y += ph; }
+    if (!lobby_active()) { gw_label(gui_rect(r.x, y, r.w, ph), mm_lobby_offline_text(), gui_s(TH->t_small), GW_REGULAR, TH->warning, GUI_LEFT); y += ph; }
+    // Invite players +: a blurred box, a dotted outline.
+    GuiRect inv = { r.x, y + gap * 0.5f, r.w, ph };
+    bool steam_lobby = lobby_transport() == TRANSPORT_STEAM && lobby_steam_running();
+    bool can = steam_lobby && in_lobby_phase();
+    GuiId iid = gui_id("pt_invite");
+    GuiInteract ii = gui_interact(iid, inv, can ? GUI_FOCUSABLE : GUI_DISABLED);
+    float hv = gui_tween(iid, ii.hot && can ? 1.0f : 0.0f, TH->hover_t);
+    gd_backdrop(inv, UI_RGBA(20, 22, 26, 110));
+    if (hv > 0.01f) gd_rect(inv, gui_rgba_mul(TH->hover, hv));
+    dotted_outline(inv, gui_s(6), gui_s(4), fmaxf(1.0f, gui_s(1.2f)), gui_rgba_lerp(TH->text_faint, TH->accent, hv));
+    GuiText it = { gui_s(TH->t_small + 1), GW_SEMIBOLD, can ? gui_rgba_lerp(TH->text_dim, TH->text, hv) : TH->text_faint, GUI_CENTER, TH->tracking_caps, true, false, 0 };
+    gd_text(&it, inv.x + inv.w * 0.5f, inv.y + (inv.h - gd_line_height(it.size)) * 0.5f, "Invite players  +");
+    if (ii.focused) gw_focus_ring(inv, gui_s(TH->radius), 1.0f);
+    if (ii.clicked && can) {
+        if (gui_shift()) lobby_invite_overlay();
+        else g_invite_open = !g_invite_open;
+    }
+    if (!steam_lobby && ii.hovered) gui_tooltip(iid, "LAN party: friends join from Play > Join > LAN or by your IP address.");
+    if (!can) g_invite_open = false;
+    draw_invites(inv);
     if (L->state == LS_COUNTDOWN && L->countdown >= 0) {
         char cd[48];
         snprintf(cd, sizeof(cd), "Starting in %d", (int)ceilf(L->countdown));
-        GuiText t = { gui_s(TH->t_title), GW_SEMIBOLD, TH->accent, GUI_CENTER, 0.04f, true, true, 0 };
-        gd_text(&t, r.x + r.w * 0.5f, inv.y - gd_line_height(t.size) - TOK("mm_gap"), cd);
+        GuiText t = { gui_s(TH->t_title), GW_SEMIBOLD, TH->accent, GUI_RIGHT, 0.04f, true, true, 0 };
+        gd_text(&t, r.x + r.w, inv.y + inv.h + gap * 2, cd);
     }
-    if (L->state == LS_CREATING || L->state == LS_JOINING) gw_label(gc_row(&c, TOK("mm_row_h")), L->state == LS_JOINING ? "Connecting..." : "Creating the party...", gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_LEFT);
-    if (!lobby_active()) gw_label(gc_row(&c, TOK("mm_row_h")), mm_lobby_offline_text(), gui_s(TH->t_small), GW_REGULAR, TH->warning, GUI_LEFT);
+}
+
+// Enroll: the big filled button (the divider's underline colour) at the bottom of the stack.
+static bool enroll_button(GuiRect r, const char *label, bool enabled, float appear) {
+    GuiId id = gui_id("mm_enroll");
+    GuiInteract in = gui_interact(id, r, enabled ? GUI_FOCUSABLE : GUI_DISABLED);
+    float h = gui_tween(id, in.hot && enabled ? 1.0f : 0.0f, TH->hover_t);
+    gd_alpha_push(gui_ease_out(appear) * (enabled ? 1.0f : 0.45f));
+    gd_round(r, gui_s(TH->radius), gui_rgba_lerp(TH->accent, UI_RGBA(255, 255, 255, 255), h * 0.15f));
+    GuiText t = { gui_s(TH->t_body + 3), GW_SEMIBOLD, TH->text_dark, GUI_CENTER, TH->tracking_caps * 1.4f, true, false, 0 };
+    gd_text(&t, r.x + r.w * 0.5f, r.y + (r.h - gd_line_height(t.size)) * 0.5f, label);
+    gd_alpha_pop();
+    if (in.focused) gw_focus_ring(r, gui_s(TH->radius), 1.0f);
+    if (in.clicked && enabled) gui_sound(TH->snd_click);
+    return in.clicked && enabled;
 }
 
 // A story save to continue (checked every 2 s): its chapter.
@@ -284,7 +317,7 @@ static void draw_main(GuiRect content) {
         LayoutNode *n = &L->nodes[i];
         if (!strcmp(n->id, "card") || !strcmp(n->id, "chapters")) n->hidden = !story || !saved;
         if (!strcmp(n->id, "newgame")) n->hidden = !story || saved || guest;
-        if (!strcmp(n->id, "join") || !strcmp(n->id, "mapbar")) n->hidden = story;
+        if (!strcmp(n->id, "join")) n->hidden = story;
         if (!strcmp(n->id, "start")) n->hidden = story && !guest;   // Story: the host starts with Continue / New game, a guest readies up
         if (!strcmp(n->id, "leave")) n->hidden = !guest;
     }
@@ -313,28 +346,26 @@ static void draw_main(GuiRect content) {
         float appear = saturate((t - (float)k * TH->menu_stagger) / fmaxf(0.01f, TH->menu_in));
         k++;
         if (!strcmp(n->id, "card")) { continue_card(n->rect, appear); continue; }
+        if (!strcmp(n->id, "start")) {
+            // Enroll (the host): the Trials maps, where Start starts the party's game (Cancel start
+            // during the countdown); a guest readies up.
+            if (host) {
+                bool cd = lb->state == LS_COUNTDOWN;
+                if (enroll_button(n->rect, cd ? "Cancel start" : "Enroll", in_lobby_phase(), appear)) {
+                    if (cd) lobby_cancel_start();
+                    else { M->play_page = PP_TRIALS; gui_anim_restart(gui_id("mm_tab_in")); gui_set_focus(0); }
+                }
+            } else if (enroll_button(n->rect, me && me->ready ? "Unready" : "Ready", in_lobby_phase() && me, appear)) {
+                lobby_set_ready(!(me && me->ready));
+            }
+            continue;
+        }
         if (!n->action[0]) continue;
         bool enabled = true;
         const char *tip = NULL, *label = n->label;
-        if (!strcmp(n->action, "start")) {
-            // The host starts (or cancels the countdown); a guest readies up.
-            if (host) {
-                label = lb->state == LS_COUNTDOWN ? "Cancel start" : "Start game";
-                enabled = in_lobby_phase();
-                tip = "Creating the party...";
-            } else {
-                label = me && me->ready ? "Unready" : "Ready";
-                enabled = in_lobby_phase() && me;
-                tip = lobby_active() ? "Connecting..." : mm_lobby_offline_text();
-            }
-        }
         GuiId id = gui_id(n->id);
         if (gw_menu_item(id, n->rect, label, false, appear, enabled)) {
-            if (!strcmp(n->action, "start")) {
-                if (!host) lobby_set_ready(!(me && me->ready));
-                else if (lb->state == LS_COUNTDOWN) lobby_cancel_start();
-                else mm_play_start();
-            } else if (!strcmp(n->action, "join")) { M->play_page = PP_BROWSER; P.source = steam() ? BS_STEAM : BS_LAN; refresh(P.source); gui_set_focus(0); }
+            if (!strcmp(n->action, "join")) { M->play_page = PP_BROWSER; P.source = steam() ? BS_STEAM : BS_LAN; refresh(P.source); gui_set_focus(0); }
             else if (!strcmp(n->action, "leave")) lobby_leave("left the party");   // the menu makes a new party of your own
             else if (!strcmp(n->action, "newgame")) mm_play_story("01_tenth_floor", NULL);
             else if (!strcmp(n->action, "chapters")) { M->play_page = PP_CHAPTERS; gui_anim_restart(gui_id("mm_tab_in")); gui_set_focus(0); }
@@ -342,8 +373,7 @@ static void draw_main(GuiRect content) {
         if (!enabled && tip && gui_rect_contains(n->rect, gui_mouse().x, gui_mouse().y)) gui_tooltip(id, tip);
         if (!gui_focus() && !strcmp(n->action, "start") && gui_nav_mode()) gui_set_focus(id);
     }
-    draw_party(mm_node(L, "side"));
-    if (!story) mm_maps_dev_bar(content, mm_node(L, "mapbar"));   // the development maps (the party's map)
+    draw_party(mm_node(L, "party"));
 }
 
 // ------------------------------------------------------------------ browser
@@ -483,6 +513,7 @@ static void draw_browser(GuiRect content) {
 
 void mm_play_draw(GuiRect content) {
     if (mm()->play_page == PP_BROWSER) draw_browser(content);
-    else if (mm()->play_page == PP_CHAPTERS) mm_maps_draw(content);
+    else if (mm()->play_page == PP_CHAPTERS) mm_maps_draw(content, false);
+    else if (mm()->play_page == PP_TRIALS) mm_maps_draw(content, true);
     else draw_main(content);
 }

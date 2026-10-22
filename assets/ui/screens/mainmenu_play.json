@@ -1,5 +1,5 @@
 {
-  "_doc": "Play tab: the mode switch (Trials / Story) centred under the tab bar; the button stack bottom left. Story: the Continue card (square) and Chapter select; without a story save only New game. Trials: Start game, Join, Leave party (only in someone else's party), the party panel on the right and the Development maps bar at the bottom centre. The screen hides the other mode's nodes before solving.",
+  "_doc": "Play tab: the mode switch (Trials / Story) centred under the tab bar; the button stack bottom left. Story: the Continue card (square) and Chapter select; without a story save only New game. Trials: Join, Leave party (only in someone else's party), Enroll (the host: the Trials maps; a guest: Ready). Both: the party list top right under the divider. The screen hides the other mode's nodes before solving.",
   "nodes": [
     { "id": "root" },
     { "id": "mode", "parent": "root", "anchor": "top", "w": "@mm_side_w", "h": "@mm_title_h" },
@@ -7,10 +7,9 @@
     { "id": "card", "parent": "stack", "h": "@mm_side_w", "label": "Continue", "action": "continue" },
     { "id": "chapters", "parent": "stack", "h": "@mm_item_h", "label": "Chapter select", "action": "chapters" },
     { "id": "newgame", "parent": "stack", "h": "@mm_item_h", "label": "New game", "action": "newgame" },
-    { "id": "start", "parent": "stack", "h": "@mm_item_h", "label": "Start game", "action": "start" },
     { "id": "join", "parent": "stack", "h": "@mm_item_h", "label": "Join", "action": "join" },
     { "id": "leave", "parent": "stack", "h": "@mm_item_h", "label": "Leave party", "action": "leave" },
-    { "id": "side", "parent": "root", "anchor": "right", "w": "@mm_panel_w", "h_pct": 1.0, "max_h": "@mm_panel_max_h" },
-    { "id": "mapbar", "parent": "root", "anchor": "bottom", "w": "@mm_list_w", "h": "@mm_map_row_h" }
+    { "id": "start", "parent": "stack", "h": "@mm_title_h", "label": "Enroll", "action": "start" },
+    { "id": "party", "parent": "root", "anchor": "top_right", "w": "@lb_side_w", "h_pct": 1.0 }
   ]
 }
