@@ -206,6 +206,7 @@ void items_game_shutdown(void);
 // game_blender.c: blender_open, tools/blender/open_models.py from the console (docs/ITEM_PIPELINE.md "Open models in Blender")
 void blender_open_register(void);
 void blender_open_poll(void);   // per frame: the running scripts' output -> the console
+void game_items_poll(void);     // per frame: item meshes changed on disk (exported from Blender) -> reloaded
 // game_ground_ref.c: reference viewer, camera presets, colour sampler (docs/GROUND_REFERENCE.md)
 void ground_ref_register(void);
 void ground_ref_draw(void);

@@ -1,6 +1,7 @@
 // Detailed item models in game (docs/ITEM_PIPELINE.md): hot reload, the inspector and the dev room
 // item showcase.
 //   item_reload                                  re-read changed .dgim files + assets/items/materials.json, re-bake icons
+//   (no command) a .dgim changed on disk (saved in Blender, tools/blender/dg_item_addon.py) reloads by itself
 //   item_inspect <item id | att_<id> | off> [view] orbit any item in front of the camera (world lighting)
 //   item_inspect_view <shaded|wire|matid|wear|ao|dirt|sockets>
 //   item_inspect_orbit <yaw> <pitch> [zoom]      degrees; zoom 1 = the item fills ~2/3 of the view height
@@ -70,6 +71,16 @@ static void cmd_item_reload(int argc, const char **argv) {
     icons_rerender();
     log_info("item_reload: %d mesh(es) re-read, materials re-layered, icons re-rendering (bake_icons writes the PNGs)", n);
     game_add_hint("Item meshes reloaded");
+}
+
+void game_items_poll(void) {
+#ifdef DG_SOURCE_DIR   // a source checkout: the item files can change under the running game
+    ItemMesh *m = item_mesh_poll();
+    if (!m) return;
+    icons_rerender();
+    log_info("item_mesh: %s changed on disk: reloaded", m->path);
+    game_add_hint("Item mesh reloaded");
+#endif
 }
 
 static void cmd_item_inspect(int argc, const char **argv) {

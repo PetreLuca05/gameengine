@@ -145,6 +145,9 @@ bool item_mesh_socket(const ItemMesh *m, const char *name, Xform *out);
 int item_mesh_lod_for(const ItemMesh *m, float dist);
 // Re-reads the material library and every loaded mesh whose file changed (item_reload); returns meshes reloaded.
 int item_mesh_reload_all(bool force);
+// Checks one loaded mesh's file per call, round robin, and re-reads it when it changed on disk (an export
+// from Blender, docs/ITEM_PIPELINE.md "Edit items in Blender"); returns the mesh re-read, or NULL.
+ItemMesh *item_mesh_poll(void);
 void item_mesh_shutdown(void);
 // Stats for item_inspect / tests.
 int item_mesh_count(void);

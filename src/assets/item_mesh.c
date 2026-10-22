@@ -546,6 +546,23 @@ int item_mesh_reload_all(bool force) {
     return n;
 }
 
+ItemMesh *item_mesh_poll(void) {
+    static int next;
+    if (!s_mesh_count) return NULL;
+    next = (next + 1) % s_mesh_count;
+    ItemMesh *m = &s_meshes[next];
+    if (!m->loaded) return NULL;
+    char buf[512];
+    i64 t = platform_file_mtime(platform_data_path(m->path, buf, sizeof(buf)));
+    if (!t || t == m->mtime) return NULL;
+    free_gpu(m);
+    if (!load(m)) {
+        m->mtime = t;   // a broken file: logged once, the old mesh stays
+        return NULL;
+    }
+    return m;
+}
+
 void item_mesh_set_debug_view(int view) {
     if (view == s_debug_view) return;
     s_debug_view = view;

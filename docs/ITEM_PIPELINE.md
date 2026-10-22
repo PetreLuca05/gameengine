@@ -11,6 +11,7 @@ engine layers at load. There are no textures (by design: colours, roughness and 
 | Modelling kit | `tools/blender/item_lib.py` |
 | Build (script -> .blend -> .dgim -> validate) | `tools/blender/build_items.py` |
 | Open any model in Blender (items, characters, vehicles, trees, kit...) | `tools/blender/open_models.py` (+ `.bat` / `.sh`), `models_scene.py`, console `blender_open` (see "Open models in Blender") |
+| Edit an item in Blender, save = in the game | `tools/blender/dg_item_addon.py` (the Blender side), `item_source.py` (which file is the source, copies into the builds), `item_mesh_poll` (see "Edit items in Blender") |
 | Export conventions / writer | `tools/blender/item_export.py` |
 | Baking (AO, curvature, dirt, grunge, cavity) | `tools/bake_item/bake_item.py` |
 | Validator | `tools/validate_item/validate_item.py` (ctest `validate_items`) |
@@ -25,7 +26,8 @@ engine layers at load. There are no textures (by design: colours, roughness and 
 
 ## Modelling path used
 
-Every model in this pass uses **path (b): procedural modelling in Blender scripts**. There is no
+Every model in this pass uses **path (b): procedural modelling in Blender scripts**. An item edited by hand
+in Blender records `"path": "blend"`: its `.blend` is the source from then on (see "Edit items in Blender"). There is no
 image/text-to-3D service available to the project: the Higgsfield key drives the image model only,
 and this pass uses no textures anyway. So there is no `tools/gen_item`. The `path` field of each
 catalog entry records the path an item used, so a future generated base mesh can be tracked.
@@ -201,7 +203,7 @@ validator checks they exist.
 4. Build: `python tools/blender/build_items.py <id>` (`pip install bpy`), or
    `blender -b -P tools/blender/build_items.py -- <id>`. This saves `assets/src/items/<id>.blend`,
    which is git-ignored, and writes the `.dgim`, then validates it.
-   - To export a hand-edited scene that follows the conventions:
+   - To edit it by hand instead: `bl <id>`, edit, Ctrl+S (see "Edit items in Blender"). Headless:
      `build_items.py --blend <file>`.
 5. Point the JSON's `"mesh"` at the file (`assets/items/meshes/<id>.dgim`), plus `"condition"` if
    it shouldn't be `worn`.
@@ -295,6 +297,78 @@ game keeps running. The script's output (builds, errors, "ready") comes into the
 needs the source tree (it finds `tools/` through `DG_SOURCE_DIR`) and Python 3 (the `py` launcher, else
 `python`). `blender_open dry <args>` only logs the command line. Test: `tools/tests/blender_open.cfg`.
 It runs `dry`, plus `--list` / `--no-open` runs that never open a window.
+
+## Edit items in Blender
+
+The loop: `bl smg` (or `blender_open smg` in the game console), edit the model, **Ctrl+S**. About 5 s later the
+game, if it is running, shows the new model by itself. No export dialog, no copying, no restart.
+
+**Why not FBX:** the `.blend` keeps what the game needs from a model, which FBX would lose or mangle: the part
+hierarchy with each part's pivot, the roles (`mech`, `hide`, `fold`...), the sockets and the material slot
+names. So the item's own `.blend` is the editable file, and the exporter turns it into the `.dgim`.
+
+**Which file is the source:**
+
+- An item starts from its script: `assets/src/items/<id>.py`, catalog `"path": "procedural"`. `bl <id>` builds
+  `assets/src/items/<id>.blend` from it (git-ignored).
+- The first time that scene is saved from Blender, the `.blend` becomes the source:
+  - the catalog entry gets `"path": "blend"`;
+  - `.gitignore` gets a `!/assets/src/items/<id>.blend` line, so git tracks the file: commit it with the item.
+- From then on nothing rebuilds the item from its script: `open_models` (even with `--rebuild`) opens the
+  `.blend` as it is, and `build_items.py <id>` / `--all` exports the `.blend`.
+- Back to the script: `bl <id> --from-script` (or `build_items.py <id> --from-script`). The edited `.blend` is
+  copied to `tools/blender/cache/backup/<id>-<time>.blend` first. Then the scene and the `.dgim` are rebuilt from
+  the script, and the catalog and `.gitignore` go back.
+- An edited item no longer follows its script or its JSON. When a gameplay socket moves in the JSON, move the
+  `S_` empty by hand. `validate_items` says which one is off.
+
+**What a save does** (`dg_item_addon.py`, loaded by `open_models` when it opens one item):
+
+1. Blender saves the `.blend` as usual.
+2. A headless Blender runs `build_items.py --blend <file>` on the saved file, in the background, so the window
+   stays usable. A save during a run queues one more run.
+   1. It marks the item edited (above).
+   2. It prepares the scene (`item_export.prepare_edited`, on the export's copy only; the `.blend` is not
+      changed):
+      - a visible mesh, curve or text object outside the item joins it as a part of the root;
+      - an unprefixed mesh becomes a part `P_<name>`;
+      - curves, text and surfaces become meshes;
+      - object scale, negative scale included, goes into the mesh: no "apply the scale" error;
+      - a part without a material gets `polymer_matte`;
+      - a camera, light, or an empty that is not `S_<name>` is left out.
+   3. It bakes and writes `assets/items/meshes/<id>.dgim`, as a script build does.
+   4. It copies the file into every build of the checkout, replacing the old copy in one step: `build*/bin` and
+      `openable builds/*` (`item_source.deploy`). The game reads those copies first.
+   5. It validates the item (`validate_item`).
+3. The viewport's bottom left line and the sidebar say how it went: "Exported smg in 4 s: 24 parts, 46312 tris,
+   in the game", plus every note and validation problem. Failures are red and the old `.dgim` stays.
+4. The game (a source checkout: `DG_SOURCE_DIR`) checks one loaded item mesh's file per frame
+   (`item_mesh_poll`, `game_items_poll`). A changed file is re-read, its icon re-rendered, and the log and a
+   hint say `item_mesh: assets/items/meshes/<id>.dgim changed on disk: reloaded`. With about 70 meshes at
+   60 fps, that is within about a second.
+
+**The sidebar** (N, tab "Deadground", open on start):
+
+| Control | What it does |
+|---|---|
+| Item / Source | the item id, and whether the script or this `.blend` is the source |
+| Export on save | on by default; off: only the button exports |
+| Save + export to game | saves, then exports |
+| Game material + Assign | the `materials.json` library. In Edit Mode it assigns to the selected faces, else to the whole selected objects (creates the material with its viewport colour) |
+| Make part | the selected meshes become parts in place: `P_` names, under the root (or under the active part when it is not selected) |
+| Add socket | an `S_<name>` empty at the 3D cursor, under the active part or the root |
+
+**Rules that still hold:**
+
+- The item origin (the root `ITEM_<id>`) is the `grip_r` hand point: leave the root at the origin.
+- Moving parts (`mech`) keep their names and pivots: the fire animation moves them by name.
+- Material names outside `materials.json` draw grey. The notes name them; pick one in the sidebar.
+- After big shape changes, run `tools/bake_icons/bake_icons.sh` for the committed icon PNGs. The game
+  re-renders the icons live in the meantime.
+
+**Test:** `tools/tests/item_hot_reload.sh [build dir]`. The game inspects the smg, and the pistol's file is
+copied over the build's `smg.dgim`. The log must show the reload. The before / after screenshots are
+`<build>/bin/item_hot_reload_{before,after}.png`, and the file is restored afterwards.
 
 ## Tests
 

@@ -92,6 +92,118 @@ def collect(root):
     return parts, sockets
 
 
+GEOMETRY = ('MESH', 'CURVE', 'FONT', 'SURFACE', 'META')
+DEFAULT_MAT = "polymer_matte"
+
+
+def _to_mesh(ob):
+    """A curve / text / surface object -> a mesh object with the same name, parent, transform and children."""
+    dg = bpy.context.evaluated_depsgraph_get()
+    me = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
+    name, parent, mw, kids, props = ob.name, ob.parent, ob.matrix_world.copy(), list(ob.children), {k: ob[k] for k in ob.keys()}
+    ob.name = name + "_src"
+    new = bpy.data.objects.new(name, me)
+    for c in ob.users_collection:
+        c.objects.link(new)
+    for k, v in props.items():
+        new[k] = v
+    new.parent = parent
+    new.matrix_world = mw
+    for c in kids:
+        w = c.matrix_world.copy()
+        c.parent = new
+        c.matrix_world = w
+    bpy.data.objects.remove(ob)
+    return new
+
+
+def prepare_edited(root):
+    """Hand edits -> the conventions, on the scene about to be exported (never saved back). Returns the warnings.
+
+    * a visible mesh / curve / text object outside the item joins it as a part of the root;
+    * an unprefixed mesh under the item becomes a part (P_<its name>); curves, text and surfaces become meshes;
+      a camera, light or other object under the item is left out;
+    * object scale (and negative scale) is baked into the meshes: every object ends with scale 1 and no parent
+      inverse, at the same place."""
+    warns = []
+    for ob in list(bpy.data.objects):
+        if ob is root or ob.parent is not None or ob.type not in GEOMETRY or not ob.visible_get():
+            continue
+        w = ob.matrix_world.copy()
+        ob.parent = root
+        ob.matrix_world = w
+        warns.append("%s was not under ITEM_%s: exported as a part of the root" % (ob.name, root.name[5:]))
+
+    def walk(o):
+        for c in list(o.children):
+            if c.type in GEOMETRY and not c.name.startswith("S_"):
+                if c.type != 'MESH':
+                    warns.append("%s: %s converted to a mesh" % (c.name, c.type.lower()))
+                    c = _to_mesh(c)
+                if not c.name.startswith("P_"):
+                    old = c.name
+                    c.name = "P_" + old
+                    warns.append("%s exported as part %s" % (old, c.name[2:]))
+            elif c.type == 'EMPTY' and not c.name.startswith(("S_", "P_")):
+                warns.append("%s: an empty that is not a socket (S_<name>): left out" % c.name)
+                c.parent = None
+                continue
+            elif c.type not in ('MESH', 'EMPTY'):
+                warns.append("%s: a %s is not part of an item: left out" % (c.name, c.type.lower()))
+                c.parent = None
+                continue
+            walk(c)
+
+    walk(root)
+    bpy.context.view_layer.update()
+    # Materials: a part without one gets DEFAULT_MAT; a name outside the library draws grey in game.
+    import item_lib
+    lib = item_lib.library()
+    unknown = set()
+
+    def mats(o):
+        for c in o.children:
+            if c.type == 'MESH' and c.name.startswith("P_"):
+                if not any(c.data.materials):
+                    c.data.materials.clear()
+                    c.data.materials.append(bpy.data.materials.get(DEFAULT_MAT) or bpy.data.materials.new(DEFAULT_MAT))
+                    warns.append("%s has no material: %s" % (c.name, DEFAULT_MAT))
+                unknown.update(_clean(m.name) for m in c.data.materials if m and _clean(m.name) not in lib)
+            mats(c)
+
+    mats(root)
+    for n in sorted(unknown):
+        warns.append("material '%s' is not in assets/items/materials.json: it draws grey (Deadground > Game material)" % n)
+    # Scale out: every object keeps its world place and turns, its scale goes into its mesh.
+    order = []
+
+    def gather(o):
+        for c in o.children:
+            order.append(c)
+            gather(c)
+
+    gather(root)
+    world = {o.name: o.matrix_world.copy() for o in order}
+    frame = {root.name: root.matrix_world.copy()}
+    for o in order:
+        w = world[o.name]
+        loc, rot, _sc = w.decompose()
+        f = Matrix.Translation(loc) @ rot.to_matrix().to_4x4()
+        frame[o.name] = f
+        rest = f.inverted() @ w
+        if o.type == 'MESH' and any(abs(rest[i][j] - (i == j)) > 1e-5 for i in range(3) for j in range(3)):
+            if o.data.users > 1:
+                o.data = o.data.copy()
+            o.data.transform(rest)
+            if rest.to_3x3().determinant() < 0:
+                o.data.flip_normals()
+            warns.append("%s: scale %.3f %.3f %.3f applied" % (o.name, *_sc))
+        o.matrix_parent_inverse = Matrix.Identity(4)
+        o.matrix_basis = frame[o.parent.name].inverted() @ f
+    bpy.context.view_layer.update()
+    return warns
+
+
 def engine_xform(ob):
     """matrix_local (Blender, relative to the parent object) -> engine (pos, quat xyzw)."""
     m = B2E @ ob.matrix_local @ E2B

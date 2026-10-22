@@ -8,7 +8,9 @@ standard library only; Blender runs headless for the builds and detached for the
 
     --no-open        build / assemble only, no Blender window
     --no-copy        leave the clipboard alone (else the opened model's folder is copied to it)
-    --rebuild        rebuild the item .blend files and the combined scene even when up to date
+    --rebuild        rebuild the item .blend files and the combined scene even when up to date (never an edited item)
+    --from-script    rebuild the items from their scripts, edited ones too: their .blend goes to
+                     tools/blender/cache/backup first and the script is the source again
     --blender <exe>  this Blender (else $BLENDER, else the newest installed, else PATH)
     --verbose        every line of Blender's output
 
@@ -19,6 +21,9 @@ in game, `blender_open` (src/game/game_blender.c).
 Items (weapons, attachments, items: assets/src/items/<id>.py) build headless through build_items.py
 --blend-only into the git-ignored assets/src/items/<id>.blend when it is missing or older than its script,
 a shared _*.py it imports, item_lib.py or its weapon / attachment JSON (the tracked .dgim is not touched).
+One item opens with tools/blender/dg_item_addon.py: saving the scene (Ctrl+S) makes the .blend the item's
+source (catalog "path": "blend", tracked in git; item_source.py) and exports it to the game in the background.
+An edited item is never rebuilt from its script, unless --from-script.
 Everything else is imported as it is: characters (assets/human/skins.json), animation clips (the other
 assets/human/*.fbx, armatures only: not in `all`), vehicles, props, foliage, Tree It trees, building kit pieces
 (their src/<piece>.blend when there is one), the PBR test models and any other model under assets/.
@@ -43,6 +48,7 @@ ITEMS_SRC = os.path.join(ROOT, "assets", "src", "items")
 CACHE = os.path.join(HERE, "cache")
 BUILD_ITEMS = os.path.join(HERE, "build_items.py")
 SCENE_SCRIPT = os.path.join(HERE, "models_scene.py")
+ADDON = os.path.join(HERE, "dg_item_addon.py")
 MODEL_EXTS = (".blend", ".fbx", ".glb", ".gltf", ".obj")
 
 # Kind order: --list, and the blocks of the combined scene. Kinds found elsewhere under assets/ follow.
@@ -136,7 +142,8 @@ def scan_items(out):
         script = os.path.join(ITEMS_SRC, i + ".py")
         deps = sorted(script_deps(script)) + [lib] + ([jdeps[i]] if i in jdeps else [])
         kind = catalog.get(i, {}).get("kind", "item")
-        out.append(Model(i, kind, os.path.join(ITEMS_SRC, i + ".blend"), "item", deps=deps))
+        edited = catalog.get(i, {}).get("path") == "blend"   # item_source.py: the .blend is the source
+        out.append(Model(i, kind, os.path.join(ITEMS_SRC, i + ".blend"), "item", deps=[] if edited else deps, note="edited" if edited else None))
 
 
 def scan_human(out, missing):
@@ -281,13 +288,14 @@ def run_blender(blender, args, verbose, what):
     return rc
 
 
-def open_gui(blender, target):
-    """Starts the Blender window detached: the terminal (or the game) returns at once."""
+def open_gui(blender, target, item=False):
+    """Starts the Blender window detached: the terminal (or the game) returns at once. An item's own scene
+    opens with the export add-on (dg_item_addon.py)."""
     exe = blender
     launcher = os.path.join(os.path.dirname(blender), "blender-launcher.exe")
     if os.name == "nt" and os.path.isfile(launcher):
         exe = launcher   # no console window (it forwards the arguments to blender.exe)
-    cmd = [exe, target, "--python", SCENE_SCRIPT, "--", "view"]
+    cmd = [exe, target, "--python", SCENE_SCRIPT] + (["--python", ADDON] if item else []) + ["--", "view"]
     print("open_models: opening %s in %s" % (rel(target), blender), flush=True)
     io = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=ROOT, close_fds=True)
     if os.name == "nt":
@@ -336,17 +344,25 @@ def mtime(p):
         return 0.0
 
 
-def stale_items(items, rebuild):
-    return [m for m in items if rebuild or mtime(m.path) == 0.0 or mtime(m.path) < max(mtime(d) for d in m.deps)]
+def stale_items(items, rebuild, from_script=False):
+    """Items to build: missing or older than a source. An edited item (its .blend is the source) only with
+    --from-script."""
+    if from_script:
+        return list(items)
+    return [m for m in items if m.note != "edited" and (rebuild or mtime(m.path) == 0.0 or mtime(m.path) < max(mtime(d) for d in m.deps))]
 
 
-def build_items(blender, items, rebuild, verbose):
-    todo = stale_items(items, rebuild)
+def build_items(blender, items, rebuild, verbose, from_script=False):
+    for m in items:
+        if m.note == "edited" and not from_script:
+            print("open_models: %s is edited in Blender: its .blend is the source (--from-script rebuilds it)" % m.id, flush=True)
+    todo = stale_items(items, rebuild, from_script)
     if not todo:
         return []
     print("open_models: building %d item .blend file(s) headless: %s" % (len(todo), " ".join(m.id for m in todo)), flush=True)
     t0 = time.time() - 1.0
-    run_blender(blender, ["-P", BUILD_ITEMS, "--"] + [m.id for m in todo] + ["--blend-only"], verbose, "item build")
+    run_blender(blender, ["-P", BUILD_ITEMS, "--"] + [m.id for m in todo] + (["--from-script"] if from_script else ["--blend-only"]), verbose,
+                "item build")
     failed = [m for m in todo if mtime(m.path) < t0]
     for m in failed:
         old = " (an older .blend is used)" if mtime(m.path) else ""
@@ -511,7 +527,7 @@ def main(argv):
         sys.stdout.reconfigure(errors="replace")
     sys.stdout = SafeOut(sys.stdout)
     args, opts = [], {"kind": []}
-    flags = {"--no-open", "--no-copy", "--rebuild", "--verbose", "--list"}
+    flags = {"--no-open", "--no-copy", "--rebuild", "--verbose", "--list", "--from-script"}
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -558,7 +574,7 @@ def main(argv):
     t0 = time.time()
     rc = 0
     items = [m for m in sel if m.fmt == "item"]
-    failed = build_items(blender, items, opts.get("--rebuild"), opts.get("--verbose")) if items else []
+    failed = build_items(blender, items, opts.get("--rebuild"), opts.get("--verbose"), opts.get("--from-script")) if items else []
     if failed:
         rc = 1
         dropped = [m for m in failed if mtime(m.path) == 0.0]
@@ -572,7 +588,7 @@ def main(argv):
         prune_selections()
     print("open_models: ready in %.1fs: %s" % (time.time() - t0, rel(target)), flush=True)
     if not opts.get("--no-open"):
-        open_gui(blender, target)
+        open_gui(blender, target, len(sel) == 1 and sel[0].fmt == "item")
         if not opts.get("--no-copy"):
             d = model_dir(sel)
             print("open_models: %s %s" % ("copied to the clipboard:" if copy_to_clipboard(d) else "could not copy to the clipboard:", d), flush=True)
