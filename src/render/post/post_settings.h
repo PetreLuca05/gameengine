@@ -94,6 +94,11 @@ typedef struct PostSettings {
         float flash;
         u32 seed;
         bool nir;                  // render the near-IR image (nvg_nir.comp)
+        // near-IR layer: the moon's / sun's and the sky's (airglow) near-IR share, the sky's own glow,
+        // reflectances (default, metal, foliage), the haze that shows beams, the IR-only illuminators
+        float ir_moon, ir_sky, sky_glow, refl_default, refl_metal, refl_foliage, haze, rain;
+        int ir_count;
+        struct { vec3 pos, dir; float range, cos_outer, cos_inner, intensity; } ir[8];
     } nvg;
     // debug
     int debug_view;                // index into post_debug_names (0 = off)

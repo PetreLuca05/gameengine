@@ -21,15 +21,19 @@
 #include <math.h>
 #include <string.h>
 
+#define NIR_BUF_SIZE ((3 + 24 + 16) * 16)   // nvg_nir.comp's Nir block
+
 static struct {
     NvgState abc;
     bool abc_live;                     // goggles running last frame (else the ABC restarts)
     GpuBuffer buf;                     // device: reduce output
     GpuBuffer rb[FRAMES_IN_FLIGHT];
+    GpuBuffer nirbuf[FRAMES_IN_FLIGHT];  // host: the near-IR pass's lights (nvg_nir.comp, binding 14)
     u32 rb_frame[FRAMES_IN_FLIGHT];    // frame each readback slot was written (0 = none)
     bool shutoff;                      // the tube protection tripped (game_post consumes it)
     NvgPostStats stats;
     FgRes color, normal, nir, flux, halo, hist_in, hist_out, tube, out;
+    FgRes nir_img;                     // this frame's near-IR image
     float gain, f_out, f_flux, halo_uv[2];
     int quality;
     u32 frame;
@@ -41,14 +45,20 @@ void post_nvg_init(void) {
     N.quality_cv = cvar_reg_int("r_night_optics", 3, 0, 3, CVAR_TIER,
                                 "night vision / thermal optics quality: 0 Low (half-res tube, no halo / persistence, 384 x 288 thermal) .. 3 Modern");
     N.buf = vkr_buffer_create(64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, false);
-    for (int i = 0; i < FRAMES_IN_FLIGHT; i++) N.rb[i] = vkr_buffer_create_readback(64);
+    for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+        N.rb[i] = vkr_buffer_create_readback(64);
+        N.nirbuf[i] = vkr_buffer_create(NIR_BUF_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+    }
     N.init = true;
 }
 
 void post_nvg_shutdown(void) {
     if (!N.init) return;
     vkr_buffer_destroy_now(&N.buf);
-    for (int i = 0; i < FRAMES_IN_FLIGHT; i++) vkr_buffer_destroy_now(&N.rb[i]);
+    for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+        vkr_buffer_destroy_now(&N.rb[i]);
+        vkr_buffer_destroy_now(&N.nirbuf[i]);
+    }
     Cvar *q = N.quality_cv;
     memset(&N, 0, sizeof(N));
     N.quality_cv = q;
@@ -221,7 +231,7 @@ FgRes post_nvg_build(FgRes color, FgRes nir, FgRes normal) {
     N.gain = nvg_gain(&N.abc);
     N.stats = (NvgPostStats){ .phi_mean = phi_mean, .phi_current = phi_current, .gain = N.gain, .log_gain = N.abc.log_gain,
                               .whiteout = N.abc.whiteout, .flicker = N.abc.flicker, .overbright = N.abc.overbright,
-                              .quality = N.quality, .nir = fg_valid(nir) };
+                              .quality = N.quality, .nir = nir >= 0 };
     // the tube's internal resolution: tube_px across one circle (less at Low), never above the output
     u32 ow = P.in.output_w, oh = P.in.output_h;
     N.f_out = P.in.proj.m[0] * (float)ow * 0.5f;
@@ -270,7 +280,55 @@ FgRes post_nvg_build(FgRes color, FgRes nir, FgRes normal) {
     fg_read(p, normal, FG_SAMPLED);
     fg_write(p, N.out, FG_STORAGE);
     DG_UNUSED(oh);
-    return p >= 0 ? N.out : (fg_valid(normal) ? normal : color);
+    return p >= 0 ? N.out : (normal >= 0 ? normal : color);
+}
+
+// ---------------------------------------------------------------- near-IR image
+
+static void exec_nir(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    const PostSettings *s = &P.set;
+    float *d = (float *)N.nirbuf[R->frame_slot].mapped;
+    memset(d, 0, NIR_BUF_SIZE);
+    int ns = DG_CLAMP(s->nvg.ir_count, 0, 8);
+    u32 nl = DG_MIN(R->light_count, (u32)MAX_POINT_LIGHTS);
+    d[0] = (float)ns; d[1] = (float)nl; d[2] = s->nvg.ir_moon; d[3] = s->nvg.ir_sky;
+    d[4] = s->nvg.haze; d[5] = s->nvg.rain; d[6] = s->nvg.sky_glow; d[7] = s->nvg.refl_foliage;
+    d[8] = s->nvg.refl_default; d[9] = s->nvg.refl_metal;
+    for (int i = 0; i < ns; i++) {
+        float *o = d + 12 + i * 12;
+        o[0] = s->nvg.ir[i].pos.x; o[1] = s->nvg.ir[i].pos.y; o[2] = s->nvg.ir[i].pos.z; o[3] = s->nvg.ir[i].range;
+        o[4] = s->nvg.ir[i].dir.x; o[5] = s->nvg.ir[i].dir.y; o[6] = s->nvg.ir[i].dir.z; o[7] = s->nvg.ir[i].cos_outer;
+        o[8] = s->nvg.ir[i].intensity; o[9] = s->nvg.ir[i].cos_inner;
+    }
+    for (u32 i = 0; i < nl; i++) d[12 + 24 * 4 + i] = R->light_ir[i];
+    PostBind b = { 0 };
+    pb_ubo(&b);
+    pb_tex_fg(&b, 0, P.in.depth, P.point);
+    pb_tex_fg(&b, 1, P.in.normal, P.point);
+    pb_tex_fg(&b, 2, P.in.material, P.point);
+    pb_tex(&b, 16, R->shadow.view, P.shadow_cmp);
+    pb_buf(&b, 14, N.nirbuf[R->frame_slot].buffer, NIR_BUF_SIZE, false);
+    pb_img_fg(&b, 8, N.nir_img);
+    pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
+    u32 w, h;
+    fg_extent(N.nir_img, &w, &h);
+    post_dispatch(cmd, "nvg_nir", w, h, 1, 8);
+}
+
+// The near-IR image at half render resolution (Low: a quarter): built when the goggles run.
+FgRes post_nvg_nir(void) {
+    N.nir_img = FG_NONE;
+    if (!P.set.nvg.nir || P.set.nvg.amount <= 0.0f || P.in.normal < 0 || P.in.material < 0) return FG_NONE;   // (fg_valid: only after allocation)
+    FgTexDesc d = { "nvg_nir", VK_FORMAT_R16_SFLOAT, post_night_optics_quality() == 0 ? FG_SIZE_QUARTER : FG_SIZE_HALF, 0, 0, 0, 1, 0 };
+    N.nir_img = fg_texture(&d);
+    int p = fg_pass("nvg_nir", exec_nir, NULL);
+    fg_read(p, P.in.depth, FG_SAMPLED);
+    fg_read(p, P.in.normal, FG_SAMPLED);
+    fg_read(p, P.in.material, FG_SAMPLED);
+    fg_write(p, N.nir_img, FG_STORAGE);
+    if (p < 0) N.nir_img = FG_NONE;
+    return N.nir_img;
 }
 
 // The goggles are off: the next time they run, the ABC starts from the scene (no stale gain).

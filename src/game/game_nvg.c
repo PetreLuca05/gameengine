@@ -395,6 +395,8 @@ float nvg_hud_amount(void) {
 
 // ---------------------------------------------------------------- the image (game_post.c)
 
+void nvg_ir_lights(World *w, int view_slot, PostSettings *s);
+
 // The intensifier's settings for this frame: the viewed player's goggles (a spectator in first person
 // sees through them too), the flip, the variant, the item's seed; the own muzzle flash kicks the
 // whiteout. The tube protection's trip switches the local request off.
@@ -420,5 +422,45 @@ void nvg_post(PostSettings *s) {
     s->nvg.seed = uid ? dg_hash_u32(uid * 977u + (u32)slot) : dg_hash_u32((u32)slot + 31u);
     const Player *p = &w->players[slot];
     if (w->flags[ENT_INDEX(p->ent)] & EF_FIRING) s->nvg.flash = 3.0f;   // the own muzzle flash, right in front of the tube
+    // near-IR layer: moonlight ~half near-IR; airglow and starlight mostly near-IR, the daytime sky little
+    float day = daynight_daylight();
     s->nvg.nir = true;
+    s->nvg.ir_moon = NV.cfg.ir_moon;
+    s->nvg.ir_sky = NV.cfg.ir_sky + (0.5f - NV.cfg.ir_sky) * day;
+    s->nvg.sky_glow = 0.5f;
+    s->nvg.refl_default = 0.40f;
+    s->nvg.refl_metal = 0.25f;
+    s->nvg.refl_foliage = 0.55f;
+    WeatherParams wp;
+    weather_current(w, &wp);
+    s->nvg.haze = 0.00005f;   // clear night air: aerosols show a beam barely; fog, smoke and rain show it well
+    s->nvg.rain = wp.v[WP_PRECIP];
+    nvg_ir_lights(w, slot, s);
+}
+
+// IR illuminators (EF_NVG_IR, the local request at once): IR-only spots from each player's eye along
+// the aim, seen by every NVG (the own one included), invisible to the naked eye.
+void nvg_ir_lights(World *w, int view_slot, PostSettings *s) {
+    const NvgVariant *dv = &NV.cfg.v[0];
+    s->nvg.ir_count = 0;
+    for (int k = 0; k < MAX_PLAYERS && s->nvg.ir_count < 8; k++) {
+        const Player *op = &w->players[k];
+        if (!op->active || !ent_valid(w, op->ent)) continue;
+        int i = (int)ENT_INDEX(op->ent);
+        bool on = k == G->local_slot ? nvg_local_ir() : (w->flags[i] & EF_NVG_IR) != 0;
+        if (!on || (w->flags[i] & EF_DEAD)) continue;
+        bool own = k == G->local_slot;
+        float yaw = own ? G->view.yaw : quat_get_yaw(w->xf[i].rot), pitch = own ? G->view.pitch : w->anim[i];
+        vec3 f = dir_from_angles(yaw, pitch);
+        vec3 eye = v3_add(w->xf[i].pos, v3(0, (w->flags[i] & EF_CROUCHED) ? PLAYER_EYE_CROUCH : PLAYER_EYE_STAND, 0));
+        const NvgVariant *v = own ? nvg_player_variant(w, k) : dv;
+        int n = s->nvg.ir_count++;
+        s->nvg.ir[n].pos = v3_madd(eye, f, 0.12f);
+        s->nvg.ir[n].dir = f;
+        s->nvg.ir[n].range = v->illum_range;
+        s->nvg.ir[n].cos_outer = cosf(v->illum_angle * 0.5f * DG_DEG2RAD);
+        s->nvg.ir[n].cos_inner = cosf(v->illum_angle * 0.25f * DG_DEG2RAD);
+        s->nvg.ir[n].intensity = v->illum_intensity;
+    }
+    DG_UNUSED(view_slot);
 }

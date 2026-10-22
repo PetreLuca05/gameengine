@@ -8,10 +8,14 @@ float nvg_axis_angle(vec2 xy, float f, float cx_deg) {
     return degrees(acos(clamp((xy.x * sin(c) + f * cos(c)) / length(vec3(xy, f)), -1.0, 1.0)));
 }
 
-// A tube's field against its radius r_deg (0.4 deg soft edge).
+// A tube's field against its radius r_deg: no hard rim, an extreme eyepiece vignette (full brightness to
+// NVG_VIG_INNER of the radius, a long fall to black at NVG_VIG_OUTER; nvg_model.h).
+const float NVG_VIG_INNER = 0.35, NVG_VIG_OUTER = 1.15;
 float nvg_circle(vec2 xy, float f, float cx_deg, float r_deg) {
     float d = nvg_axis_angle(xy, f, cx_deg);
-    return smoothstep(0.0, 1.0, clamp((r_deg - d) / 0.4 + 0.5, 0.0, 1.0));
+    float t = clamp((d / r_deg - NVG_VIG_INNER) / (NVG_VIG_OUTER - NVG_VIG_INNER), 0.0, 1.0);
+    float v = 1.0 - t * t;
+    return v * v * v;
 }
 
 // One circle, or two overlapping ones (dual tube: a figure 8). xy from the view centre in pixels.

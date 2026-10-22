@@ -24,7 +24,7 @@ static void variant_base(NvgVariant *v, const char *id, const char *label) {
     v->protect_s = 3.0f;
     v->runtime_h = 1.0f;
     v->illum_drain = 1.4f;
-    v->illum_range = 40.0f; v->illum_angle = 30.0f; v->illum_intensity = 60.0f;
+    v->illum_range = 25.0f; v->illum_angle = 30.0f; v->illum_intensity = 6.0f;
 }
 
 void nvg_config_default(NvgConfig *c) {
@@ -224,13 +224,16 @@ void nvg_pixel_angles(float px, float py, float w, float h, float hfov_deg, floa
     *ay = atanf((py - h * 0.5f) / f) * 57.29578f;
 }
 
-// Angle between the pixel's ray and a tube axis turned cx deg about the vertical: a true cone.
+// Angle between the pixel's ray and a tube axis turned cx deg about the vertical: a true cone. The
+// field has no hard rim: an extreme eyepiece vignette, full brightness to NVG_VIG_INNER of the
+// radius, then a long fall to black at NVG_VIG_OUTER (shaders/post/nvg_common.glsl nvg_circle).
 static float circle(float x, float y, float f, float cx, float r) {
     float c = cx * 0.017453293f;
     float len = sqrtf(x * x + y * y + f * f);
     float d = acosf(DG_CLAMP((x * sinf(c) + f * cosf(c)) / len, -1.0f, 1.0f)) * 57.29578f;
-    float t = DG_CLAMP((r - d) / 0.4f + 0.5f, 0.0f, 1.0f);
-    return t * t * (3.0f - 2.0f * t);
+    float t = DG_CLAMP((d / r - NVG_VIG_INNER) / (NVG_VIG_OUTER - NVG_VIG_INNER), 0.0f, 1.0f);
+    float v = 1.0f - t * t;
+    return v * v * v;
 }
 
 float nvg_mask(const NvgVariant *v, float px, float py, float w, float h, float hfov_deg) {

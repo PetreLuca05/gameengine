@@ -1,0 +1,112 @@
+#version 450
+// Night vision: the near-IR image (docs/NIGHT_OPTICS.md "Near-IR layer"), half render resolution.
+// What the photocathode sees beyond the visible image: near-IR irradiance x near-IR reflectance.
+//   moon / sun     its near-IR share x N.L x the sun shadow map (moonlight is ~half near-IR)
+//   sky            airglow and starlight: mostly near-IR (ir_sky x the sky ambient), the sky itself glows
+//   lamps          every point light x its ir emission (incandescent / fire high, LED low)
+//   illuminators   IR-only spots (the goggles' own, other players': EF_NVG_IR), invisible to the eye;
+//                  their beams scatter in haze / fog / rain (a bright cone; the source a bright dot)
+//   reflectance    per pixel from the G-buffer: foliage (thin) bright (chlorophyll's red edge), metal
+//                  lower, the rest mid-grey (texture detail comes from the visible image)
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+#include "nvg_common.glsl"
+float nvg_jitter(ivec2 p) { return nvg_rand3(uvec3(p, uint(U.depthp.w))).x; }   // white noise: the tube's own noise hides it
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D depth_tex;
+layout(set = 0, binding = 1) uniform sampler2D normal_tex;
+layout(set = 0, binding = 2) uniform sampler2D material_tex;
+layout(set = 0, binding = 16) uniform sampler2DShadow shadow_map;
+layout(set = 0, binding = 8, r16f) uniform writeonly image2D dst;
+layout(std430, set = 0, binding = 14) readonly buffer Nir {
+    vec4 head;          // x IR spots, y point lights, z moon / sun ir share, w sky ir share
+    vec4 haze;          // x base density (1/m), y rain, z sky glow, w reflectance foliage
+    vec4 refl;          // x default, y metal, z skin / cloth, w unused
+    vec4 spot[24];      // per spot: pos range, dir cos_outer, intensity cos_inner 0 0
+    vec4 light_ir[16];  // per point light (4 per vec4)
+} D;
+
+float sun_visibility(vec3 wp) {
+    if (U.sun_color.w <= 0.0) return 1.0;
+    vec4 sc = U.shadow_vp * vec4(wp, 1.0);
+    vec3 s = sc.xyz / sc.w;
+    vec2 uv = s.xy * 0.5 + 0.5;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || s.z > 1.0) return 1.0;
+    return mix(1.0, texture(shadow_map, vec3(uv, s.z - 0.0008)), U.sun_color.w);
+}
+
+float spot_irr(int i, vec3 wp, vec3 n, out float cone) {
+    vec4 a = D.spot[i * 3], b = D.spot[i * 3 + 1], c = D.spot[i * 3 + 2];
+    vec3 l = a.xyz - wp;
+    float d2 = max(dot(l, l), 0.01), d = sqrt(d2);
+    l /= d;
+    cone = smoothstep(b.w, c.y, dot(-l, b.xyz));
+    float fall = clamp(1.0 - pow(d / a.w, 4.0), 0.0, 1.0);
+    return c.x * cone * fall * fall / d2 * max(dot(n, l), 0.0);
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(dst);
+    if (p.x >= size.x || p.y >= size.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(size);
+    float d = textureLod(depth_tex, uv, 0.0).r;
+    int nspot = int(D.head.x);
+    vec3 cam = U.cam_pos.xyz;
+    vec3 wp = world_pos(uv, d);
+    bool sky = d >= 1.0;
+    vec3 ray = normalize(wp - cam);
+    float dist = sky ? 300.0 : length(wp - cam);
+    float nir = 0.0;
+    if (sky) {
+        nir = D.haze.z * U.sky.w * luma(U.sky.rgb) * D.head.w;   // airglow
+    } else {
+        vec3 n = oct_decode(textureLod(normal_tex, uv, 0.0).xy);
+        vec4 m = textureLod(material_tex, uv, 0.0);
+        uint fl = gb_flags(m);
+        float refl = (fl & GB_THIN) != 0u ? D.haze.w : mix(D.refl.x, D.refl.y, step(0.5, m.g));
+        vec3 L = normalize(U.sun_dir.xyz);
+        float e = D.head.z * U.sun_dir.w * luma(U.sun_color.rgb) * max(dot(n, L), 0.0) * sun_visibility(wp + n * 0.05);
+        e += D.head.w * U.sky.w * luma(U.sky.rgb) * (0.6 + 0.4 * n.y);
+        int nl = int(D.head.y);
+        for (int i = 0; i < nl && i < MAX_POINT_LIGHTS; i++) {
+            float ir = D.light_ir[i >> 2][i & 3];
+            if (ir <= 0.0) continue;
+            vec3 lp = U.lights[i * 2].xyz;
+            float r = U.lights[i * 2].w;
+            vec3 l = lp - wp;
+            float dd = length(l);
+            if (dd >= r) continue;
+            float att = clamp(1.0 - pow(dd / r, 4.0), 0.0, 1.0);
+            att = att * att / max(dd * dd, 0.01);
+            e += ir * U.lights[i * 2 + 1].w * luma(U.lights[i * 2 + 1].rgb) * att * max(dot(n, l / max(dd, 1e-3)), 0.0);
+        }
+        for (int i = 0; i < nspot && i < 8; i++) {
+            float cone;
+            e += spot_irr(i, wp, n, cone);
+        }
+        nir = refl / PI * e;
+    }
+    // illuminator beams: single scattering along the view ray in the haze (isotropic phase)
+    float dens = D.haze.x + U.s_vol.x + D.haze.y * 0.01;
+    if (nspot > 0 && dens > 0.0) {
+        float len = min(dist, 120.0);
+        const int STEPS = 16;
+        float jit = nvg_jitter(p);
+        for (int i = 0; i < nspot && i < 8; i++) {
+            vec4 a = D.spot[i * 3], b = D.spot[i * 3 + 1], c = D.spot[i * 3 + 2];
+            float acc = 0.0;
+            for (int k = 0; k < STEPS; k++) {
+                float t = (float(k) + jit) / float(STEPS) * len;
+                vec3 x = cam + ray * t;
+                vec3 l = a.xyz - x;
+                float d2 = max(dot(l, l), 1.0);   // no singular near field at the emitter (the own one sits at the eye)
+                float cone = smoothstep(b.w, c.y, dot(-normalize(l), b.xyz));
+                float fall = clamp(1.0 - pow(sqrt(d2) / a.w, 4.0), 0.0, 1.0);
+                acc += cone * fall / d2;
+            }
+            nir += c.x * dens * acc * (len / float(STEPS)) / (4.0 * PI);
+        }
+    }
+    imageStore(dst, p, vec4(min(nir, 6.0e4), 0.0, 0.0, 0.0));
+}

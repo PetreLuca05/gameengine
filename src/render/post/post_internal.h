@@ -151,7 +151,7 @@ void post_nvg_init(void);
 void post_nvg_shutdown(void);
 FgRes post_nvg_build(FgRes color, FgRes nir, FgRes normal);
 void post_nvg_idle(void);
-FgRes post_nvg_nir(void);                      // this frame's near-IR image (nvg_nir.c), FG_NONE if none            // post_exposure.c: zero the exposure / histogram buffers once
+FgRes post_nvg_nir(void);                      // this frame's near-IR image (post_nvg.c), FG_NONE if off            // post_exposure.c: zero the exposure / histogram buffers once
 void post_textures_init(void);                 // post_textures.c: noise, LUT, dirt, SMAA tables
 void post_textures_shutdown(void);
 bool post_lut_load_cube(const char *path, int slot);

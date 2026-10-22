@@ -61,9 +61,9 @@ void main() {
     y /= wsum;
     // the fiber-optic plate: honeycomb at low output, chicken wire along the bundle boundaries
     float per = pc.p3.y;
-    float low = 1.0 - smoothstep(0.05, 0.45, y);
-    float hc = 1.0 - pc.p2.z * 0.10 * low * (1.0 - smoothstep(0.0, 0.18, hex_dist(xy / per)));
-    float cw = 1.0 - pc.p2.z * 0.06 * low * (1.0 - hex_edge(xy / (per * 14.0)));
+    float low = 1.0 - smoothstep(0.02, 0.25, y);
+    float hc = 1.0 - pc.p2.z * 0.05 * low * (1.0 - smoothstep(0.0, 0.18, hex_dist(xy / per)));
+    float cw = 1.0 - pc.p2.z * 0.04 * low * (1.0 - hex_edge(xy / (per * 14.0)));
     y *= hc * cw;
     // blemishes: small dark spots inside the field
     for (int i = 0; i < int(pc.p3.x); i++) {
@@ -73,8 +73,7 @@ void main() {
         float s = (0.8 + 2.2 * r.z) * per;
         y *= mix(0.15, 1.0, smoothstep(s * 0.4, s, length(xy - c)));
     }
-    // eyepiece vignette + edge softness
-    y *= 1.0 - 0.35 * edge;
+    // the brightness floor (accessibility) inside the field; the vignette (mask) is the eyepiece
     y = max(y, pc.p1.w);
     vec3 nvg = pc.p1.rgb * y * mask;
     // the flip: the housing swings in front of the eye (dark in the middle), then the tube

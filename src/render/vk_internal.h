@@ -402,6 +402,7 @@ typedef struct Renderer {
     GpuSpotLight spots[MAX_SPOT_LIGHTS];
     u32 spot_count;
     u32 light_flags[MAX_POINT_LIGHTS], spot_flags[MAX_SPOT_LIGHTS];   // LIGHT_* (render.h)
+    float light_ir[MAX_POINT_LIGHTS];   // near-IR emission per point light (night vision, post_nvg.c)
     // Unity-style per-light shadow settings (docs/SHADOWS_UNITY_MODEL.md); has_*: given explicitly
     // (otherwise the engine defaults: points 0.05 m near plane, spots 0.6 m).
     LightShadowSettings light_set[MAX_POINT_LIGHTS], spot_set[MAX_SPOT_LIGHTS];

@@ -697,6 +697,13 @@ void render_add_light(const PointLight *l) {
     R->light_set_given[R->light_count] = l->shadow != NULL;
     if (l->shadow) R->light_set[R->light_count] = *l->shadow;
     else shs_light_default(&R->light_set[R->light_count], SHADOW_LIGHT_POINT);
+    // Near-IR (night vision): thermal sources are red-heavy and IR-rich, white LEDs have almost none.
+    float ir = l->ir;
+    if (ir <= 0.0f) {
+        float mx = fmaxf(l->color.x, fmaxf(l->color.y, l->color.z));
+        ir = mx > 0.0f ? clampf((l->color.x - l->color.z) / mx * 4.5f, 0.1f, 3.0f) : 1.0f;
+    }
+    R->light_ir[R->light_count] = ir;
     GpuPointLight *g = &R->lights[R->light_count++];
     g->pos_radius = v4(l->pos.x, l->pos.y, l->pos.z, l->radius);
     g->color_intensity = v4(l->color.x, l->color.y, l->color.z, l->intensity);

@@ -330,17 +330,34 @@ static void test_nvg(void) {
     float W = 1920, H = 1080, F = 100.0f;
     float f = (W * 0.5f) / tanf(F * 0.5f * 0.017453293f);
     float edge = f * tanf(20.0f * 0.017453293f);
-    CHECK(nvg_mask(v, W * 0.5f, H * 0.5f, W, H, F) > 0.99f, "centre inside");
-    CHECK(nvg_mask(v, W * 0.5f + edge * 0.95f, H * 0.5f, W, H, F) > 0.99f, "inside near the 20 deg edge");
-    CHECK(nvg_mask(v, W * 0.5f + edge * 1.06f, H * 0.5f, W, H, F) < 0.01f, "outside past 20 deg");
-    CHECK(nvg_mask(v, W * 0.5f, H * 0.5f + edge * 1.06f, W, H, F) < 0.01f, "circular (vertical)");
+    // the field: an extreme vignette, no hard rim: full in the middle, falling monotonically to black
+    float at = 0.0f, prev_m = 2.0f;
+    bool mono = true;
+    for (int i = 0; i <= 60; i++) {
+        float deg = 0.5f * (float)i, x = f * tanf(deg * 0.017453293f);
+        float m = nvg_mask(v, W * 0.5f + x, H * 0.5f, W, H, F);
+        mono &= m <= prev_m + 1e-6f;
+        prev_m = m;
+        if (deg <= 20.0f * NVG_VIG_INNER) at = fmaxf(at, 1.0f - m);
+    }
+    CHECK(mono, "vignette falls monotonically");
+    CHECK(at < 1e-4f, "full brightness in the centre");
+    float m_half = nvg_mask(v, W * 0.5f + f * tanf(13.0f * 0.017453293f), H * 0.5f, W, H, F);
+    float m_rim = nvg_mask(v, W * 0.5f + edge, H * 0.5f, W, H, F);
+    CHECK(m_half > 0.2f && m_half < 0.9f && m_rim > 0.0f && m_rim < 0.15f, "a long soft fall (13 deg %.2f, 20 deg %.3f): no hard edge", m_half, m_rim);
+    float soft = nvg_mask(v, W * 0.5f + f * tanf(19.6f * 0.017453293f), H * 0.5f, W, H, F) - nvg_mask(v, W * 0.5f + f * tanf(20.4f * 0.017453293f), H * 0.5f, W, H, F);
+    CHECK(soft < 0.05f, "no step at the old rim (%.3f over 0.8 deg)", soft);
+    float out = f * tanf(23.5f * 0.017453293f);
+    CHECK(nvg_mask(v, W * 0.5f + out, H * 0.5f, W, H, F) < 1e-4f, "black past 1.15 x the radius");
+    CHECK(nvg_mask(v, W * 0.5f, H * 0.5f + out, W, H, F) < 1e-4f, "circular (vertical)");
     float ex = f * tanf(27.0f * 0.017453293f);
-    CHECK(nvg_mask(dual, W * 0.5f + ex, H * 0.5f, W, H, F) > 0.99f, "dual: wider (27 deg inside)");
-    CHECK(nvg_mask(dual, W * 0.5f, H * 0.5f + edge * 1.06f, W, H, F) < 0.01f, "dual: same height");
-    CHECK(nvg_mask(v, W * 0.5f + ex, H * 0.5f, W, H, F) < 0.01f, "single: 27 deg outside");
-    // the figure 8 pinches at the middle top: a point 19 deg up at the centre is outside both circles
-    float up19 = f * tanf(19.5f * 0.017453293f);
-    CHECK(nvg_mask(dual, W * 0.5f, H * 0.5f + up19, W, H, F) < 0.5f, "dual: figure 8 waist");
+    CHECK(nvg_mask(dual, W * 0.5f + ex, H * 0.5f, W, H, F) > 0.05f, "dual: wider (27 deg still lit)");
+    CHECK(nvg_mask(dual, W * 0.5f, H * 0.5f + out, W, H, F) < 1e-4f, "dual: same height");
+    CHECK(nvg_mask(v, W * 0.5f + ex, H * 0.5f, W, H, F) < 1e-4f, "single: 27 deg dark");
+    // the figure 8 is darker at the top middle than along a tube axis at the same height
+    float up = f * tanf(12.0f * 0.017453293f), side = f * tanf(8.0f * 0.017453293f);
+    CHECK(nvg_mask(dual, W * 0.5f, H * 0.5f + up, W, H, F) < nvg_mask(dual, W * 0.5f + side, H * 0.5f + up, W, H, F),
+          "dual: figure 8 waist");
     // daylight: the tube protection shuts it off after protect_s
     nvg_state_reset(&s, v, 0.8f);
     float off_t = -1.0f;

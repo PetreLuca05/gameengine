@@ -139,6 +139,8 @@ typedef struct PointLight {
     float intensity;
     u32 flags;          // LIGHT_*; lights cast shadows by default (docs/LIGHT_SHADOWS.md)
     const LightShadowSettings *shadow;   // Unity-style shadow settings (copied); NULL = the engine default (Soft)
+    float ir;           // near-IR emission relative to the visible (night vision, docs/NIGHT_OPTICS.md); 0 = from the
+                        // colour: warm (incandescent, fire) ~2..3, neutral ~0.6, cool white (LED) ~0.1
 } PointLight;
 
 typedef struct RenderCamera {
