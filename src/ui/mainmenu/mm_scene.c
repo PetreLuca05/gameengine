@@ -180,10 +180,29 @@ void mm_select_map(const char *id) {
     mm_party_sync();
 }
 
+// Play's mode: Story selects a chapter map (Chapter select), Trials a development map (the party's).
+void mm_set_play_mode(int mode) {
+    MainMenu *M = mm();
+    M->play_mode = mode;
+    M->play_page = PP_MAIN;
+    const MapInfo *cur = lobby_map_info(M->map);
+    bool chapter = cur && cur->chapter[0];
+    if ((mode == PM_STORY) == chapter && cur) return;
+    const MapList *ml = lobby_maps();
+    const char *want = NULL;
+    if (mode == PM_TRIALS && M->trials_map[0] && lobby_map_info(M->trials_map)) want = M->trials_map;
+    for (int i = 0; i < ml->count && !want; i++) if ((ml->maps[i].chapter[0] != 0) == (mode == PM_STORY)) want = ml->maps[i].id;
+    if (want) mm_select_map(want);
+}
+
 // The host's party follows the menu's selection: the map and its start look (season, time, weather).
+// A chapter map stays out of it (chapters start through Story).
 void mm_party_sync(void) {
     MainMenu *M = mm();
     LobbyState st = lobby_state();
+    const MapInfo *mi = lobby_map_info(M->map);
+    if (mi && !mi->chapter[0]) dg_strcpy(M->trials_map, sizeof(M->trials_map), M->map);
+    if (!mi || mi->chapter[0]) return;
     if (!lobby_is_host() || (st != LS_LOBBY && st != LS_COUNTDOWN)) return;
     LobbySettings s = lobby_get()->settings;
     dg_strcpy(s.map, sizeof(s.map), M->map);

@@ -1,5 +1,5 @@
 {
-  "_doc": "Maps tab: the globe in 'spacer', the group bar at the bottom (Development, Chapter 1: each opens its maps in a list above it), the details (thumbnail, facts, description) and the session look: season, start time, start weather, dynamic weather. Selecting changes the lobby map.",
+  "_doc": "Play > Story > Chapter select: the globe in 'spacer', the bar at the bottom (group0: the chapter entry, its maps in a list above it; group1: Back), the details (thumbnail, facts, description), the session look and Play this chapter.",
   "nodes": [
     { "id": "root", "dir": "row", "align": "stretch", "gap": "@mm_gap_lg" },
     { "id": "main", "parent": "root", "flex": 1, "dir": "column", "align": "stretch", "gap": "@mm_gap" },

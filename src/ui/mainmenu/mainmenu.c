@@ -31,7 +31,7 @@ static MainMenu g_mm;
 MainMenu *mm(void) { return &g_mm; }
 #define M (&g_mm)
 
-static const char *const k_tab_names[MT_COUNT] = { "Play", "Player", "Cosmetics", "Maps", "Settings", "Patch notes", "Credits" };
+static const char *const k_tab_names[MT_COUNT] = { "Play", "Player", "Cosmetics", "Settings", "Patch notes", "Credits" };
 
 // ------------------------------------------------------------------ layouts
 
@@ -255,8 +255,7 @@ static bool draw_closed(void) {
 // ------------------------------------------------------------------ tabs
 
 static bool tab_allowed(int tab, const char **why) {
-    // A guest can't pick the map: the party's host does.
-    if (tab == MT_MAPS && lobby_active() && !lobby_is_host()) { if (why) *why = "In someone else's party: the host picks the map"; return false; }
+    (void)tab;
     if (why) *why = NULL;
     return true;
 }
@@ -358,7 +357,7 @@ bool mainmenu_draw(bool top) {
     }
     float a = gui_ease_out(gui_anim_t(gui_id("mm_open")) / fmaxf(0.01f, TH->menu_in * 2));
     // The Maps tab's globe takes the character's place (docs/MENU_GLOBE.md).
-    bool globe = M->tab == MT_MAPS && tab_allowed(MT_MAPS, NULL) && st != LS_CLOSED;
+    bool globe = M->tab == MT_PLAY && M->play_page == PP_CHAPTERS && st != LS_CLOSED;   // Story > Chapter select
     mm_background_draw(globe);
     if (globe) {
         mm_layout_solve(&M->shell, gui_rect(0, 0, gui_w(), gui_h()));
@@ -382,7 +381,6 @@ bool mainmenu_draw(bool top) {
         break;
     case MT_PLAYER: mm_player_draw(content); break;
     case MT_COSMETICS: mm_cosmetics_draw(content); break;
-    case MT_MAPS: mm_maps_draw(content); break;
     case MT_SETTINGS: {
         mm_layout_solve(&M->settings, content);
         screens_modal_untitled();
@@ -404,7 +402,7 @@ bool mainmenu_draw(bool top) {
         // the lobby screen's Leave asks).
         if (gui_nav(NAV_BACK)) {
             gui_nav_consume(NAV_BACK);
-            if (M->tab == MT_PLAY && M->play_page == PP_BROWSER) M->play_page = PP_MAIN;
+            if (M->tab == MT_PLAY && M->play_page != PP_MAIN) M->play_page = PP_MAIN;
             else if (M->tab != MT_PLAY) set_tab(MT_PLAY);
             else if (!lobby_active()) screens_confirm(CONFIRM_QUIT, "Quit to desktop?", "Your settings and profile are saved.", 0);
         }
@@ -493,8 +491,10 @@ static void cmd_mainmenu(int argc, const char **argv) {
 }
 
 static void cmd_mm_tab(int argc, const char **argv) {
-    if (argc < 2) { log_info("mm_tab <play|player|cosmetics|maps|settings|credits|browser>"); return; }
+    if (argc < 2) { log_info("mm_tab <play|player|cosmetics|settings|patch|credits|browser|trials|story|chapters>"); return; }
     if (!strcmp(argv[1], "browser")) { set_tab(MT_PLAY); M->play_page = PP_BROWSER; return; }
+    if (!strcmp(argv[1], "maps") || !strcmp(argv[1], "chapters")) { set_tab(MT_PLAY); mm_set_play_mode(PM_STORY); M->play_page = PP_CHAPTERS; return; }
+    if (!strcmp(argv[1], "story") || !strcmp(argv[1], "trials")) { set_tab(MT_PLAY); mm_set_play_mode(argv[1][0] == 's' ? PM_STORY : PM_TRIALS); M->play_page = PP_MAIN; return; }
     for (int i = 0; i < MT_COUNT; i++) if (!SDL_strcasecmp(argv[1], k_tab_names[i])) set_tab(i);
 }
 
@@ -514,7 +514,7 @@ static void cmd_mm_dump(int argc, const char **argv) {
     LobbyState st = lobby_state();
     char phone[96];
     log_info("mm_dump: active %d tab %s page %s lobby %s splash %d map %s season %d hour %d weather '%s' top %s preview %.0fx%.0f phone '%s'",
-             mainmenu_active() ? 1 : 0, k_tab_names[M->tab], M->play_page == PP_BROWSER ? "browser" : "main", lobby_state_name(st), M->splash ? 1 : 0,
+             mainmenu_active() ? 1 : 0, k_tab_names[M->tab], M->play_page == PP_BROWSER ? "browser" : (M->play_page == PP_CHAPTERS ? "chapters" : (M->play_mode == PM_STORY ? "story" : "trials")), lobby_state_name(st), M->splash ? 1 : 0,
              M->map, M->season, M->hour, M->weather, screen_name(screens_top()), M->preview_rect.w, M->preview_rect.h, mm_phone_status_text(phone, sizeof(phone)));
 }
 
@@ -549,8 +549,9 @@ void mainmenu_init(void) {
     M->hour = p->lobby.start_hour;
     dg_strcpy(M->weather, sizeof(M->weather), p->lobby.weather);
     M->dynamic_weather = p->lobby.dynamic_weather;
+    mm_set_play_mode(PM_TRIALS);   // a development map for the party (a saved chapter map stays with Story)
     cmd_register("mainmenu", cmd_mainmenu, "open the main menu (leaves a lobby / game)");
-    cmd_register("mm_tab", cmd_mm_tab, "mm_tab <play|player|cosmetics|maps|settings|credits|browser>: main menu tab");
+    cmd_register("mm_tab", cmd_mm_tab, "mm_tab <play|player|cosmetics|settings|patch|credits|browser|trials|story|chapters>: main menu tab");
     cmd_register("mm_map", cmd_mm_map, "mm_map <id> [season] [hour] [weather|random]: select a map in the main menu");
     cmd_register("mm_dump", cmd_mm_dump, "log the main menu state (scripted tests)");
 }

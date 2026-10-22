@@ -9,8 +9,9 @@
 #define TH (gui_theme())
 #define TOK(n) gui_s(gui_tok(n))
 
-typedef enum MmTab { MT_PLAY, MT_PLAYER, MT_COSMETICS, MT_MAPS, MT_SETTINGS, MT_NEWS, MT_CREDITS, MT_COUNT } MmTab;
-typedef enum MmPlayPage { PP_MAIN, PP_BROWSER } MmPlayPage;
+typedef enum MmTab { MT_PLAY, MT_PLAYER, MT_COSMETICS, MT_SETTINGS, MT_NEWS, MT_CREDITS, MT_COUNT } MmTab;
+typedef enum MmPlayPage { PP_MAIN, PP_BROWSER, PP_CHAPTERS } MmPlayPage;   // PP_CHAPTERS: Story > Chapter select (the maps view)
+typedef enum MmPlayMode { PM_TRIALS, PM_STORY } MmPlayMode;
 
 // A screen layout (assets/ui/screens/<name>.json) solved into a rect each frame.
 #define MM_LAYOUT_NODES 48
@@ -30,6 +31,8 @@ typedef struct MainMenu {
     bool inited, enabled, active;
     int tab;
     int play_page;
+    int play_mode;                 // MmPlayMode
+    char trials_map[64];           // the last development map (Trials comes back to it)
     double open_time, boot_time;
     bool splash;
     char notice[192];              // shown once on the Play tab (Disconnected: ..., Kicked ...)
@@ -72,6 +75,8 @@ void mm_maps_draw(GuiRect content);
 void mm_maps_background(GuiRect content, float alpha);   // the globe, before the shading and the panels
 void mm_credits_draw(GuiRect content);
 void mm_play_start(void);
+void mm_set_play_mode(int mode);       // Trials / Story (the selection follows: a development map / a chapter)
+void mm_maps_dev_bar(GuiRect content, GuiRect bar);   // Trials: the development maps bar (mm_maps.c)
 void mm_party_sync(void);              // the host's party takes the menu's map / season / time / weather (mm_scene.c)              // the party's game (host): ready, then start / the countdown
 void mm_lobby_players(GuiRect r);      // the party's player rows (mm_lobby.c)
 const char *mm_lobby_offline_text(void);   // why there is no party right now (mainmenu.c)

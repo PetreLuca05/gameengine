@@ -29,27 +29,29 @@ launch ── splash (1.6 s, any key / click skips) ──▶ MAIN MENU
               same on every tab; no world behind it: the menu holds an empty world (game_host_ex
               GH_MENU: no level, not simulated, not drawn) with the local player for the render and
               for the lobby to host from
-  top bar:  Play · Player · Cosmetics · Maps · Settings · Patch notes · Credits   account  [⏻]
-            Q / E · LB / RB · 1-7 · mouse                         ⏻ ─▶ CONFIRM "Quit to desktop?"
+  top bar:  [⏻]        Play · Player · Cosmetics · Settings · Patch notes · Credits        account
+            (quit left, the tabs centred, the account right)
+            Q / E · LB / RB · 1-6 · mouse                         ⏻ ─▶ CONFIRM "Quit to desktop?"
             account: avatar · name · phone glyph + status (click: the Connect portal) · Online /
             Offline (LAN only) / LAN build · relay ping · version
-  ├─ Play ──┬─ Continue  (the last story checkpoint, docs/STORY.md; else the party's game; greyed without)
-  │         ├─ Story: 10th Floor (starts chapter 1, story_chapter 1)
-  │         ├─ Start game (host: ready + start, or the 10 s countdown when not all are ready;
-  │         │             Cancel start) / Ready · Unready (a guest)
-  │         ├─ Join ─▶ SERVER BROWSER [Steam lobbies | Friends | LAN | Direct IP] ─▶ their party
-  │         ├─ Leave party (in someone else's: back to a party of your own)
-  │         └─ PARTY panel (right): the lock + privacy · the players · the map · game settings
+  ├─ Play ── [Trials | Story] (mm_set_play_mode; mm_tab trials / story / chapters)
+  │   Trials ┬─ Start game (host: ready + start, or the 10 s countdown when not all are ready;
+  │          │             Cancel start) / Ready · Unready (a guest)
+  │          ├─ Join ─▶ SERVER BROWSER [Steam lobbies | Friends | LAN | Direct IP] ─▶ their party
+  │          ├─ Leave party (in someone else's: back to a party of your own)
+  │          ├─ PARTY panel (right): the lock + privacy · the players · the map · game settings
+  │          │   (+ season, start time, start weather, dynamic weather)
+  │          └─ Development bar (bottom centre): a click opens the development maps above it; a pick
+  │              is the party's map (a chapter map never is: chapters start through Story)
+  │   Story  ┬─ Continue card (square, the chapter's picture: Continue = the last checkpoint,
+  │          │   docs/STORY.md "Saves"; New game = chapter 1 from the beginning)
+  │          └─ Chapter select ─▶ the story maps on the globe (docs/MENU_GLOBE.md): the chapter
+  │              entry (its maps above it), Back, the details + session, Play this chapter
   ├─ Player     a drag over the character turns it (eases back),
   │             name (LAN name field offline), stats (stubs), loadout,
   │             the Phone card (Connect ─▶ CONNECT PORTAL modal; docs/PHONE.md "Phone flow")
   ├─ Cosmetics  [Player | Items] sub-tabs (Items: weapon skins; the character turns to face the
   │             left and the camera closes on the SMG, half the screen wide, centred) ▸ categories ▸ item grid (inventory slot widget, rarity strip, LOCKED) ▸ equip
-  ├─ Maps       bottom bar (no background): Development · Chapter 1: The Beginning; a click opens
-  │             the group's maps (thumbnail, biome, size, players) in a list rising above it (fades
-  │             in, rows stagger), a click elsewhere closes it ▸ details ▸ Session:
-  │             Season · Start time · Start weather · Dynamic weather ▸ Host on this map
-  │             background: the globe (docs/MENU_GLOBE.md), flying to the selected map's place
   ├─ Settings   (untitled, the whole content area) the game's settings screen (Engine Fidelity, Graphics, Controls, Crosshair,
   │             Audio, Character, Phone), applying live
   ├─ Patch notes  assets/ui/news.txt (## heading; a "# " title line is skipped)
@@ -65,9 +67,9 @@ PARTY (no lobby screen: the Play tab is the lobby; mm_play.c draw_party, mainmen
           made from "Friends only" becomes Invite only (private)
   players (avatar, name colour, HOST, ready, phone icon (a paired real phone), mic stub, ping;
            host: Kick, Make host)
-  map: thumbnail, name, season · time (the Maps tab picks them: mm_party_sync; a guest can't
-       open Maps)
-  game settings (difficulty, max players, join a running game)   host edits, others read
+  map: thumbnail, name, season · time (Trials' Development bar picks it: mm_party_sync)
+  game settings (difficulty, max players, join a running game, season, start time, start weather,
+                 dynamic weather)   host edits, others read
   [Invite friends] (Steam party): the Steam friends list over the panel, Invite = a direct Steam lobby
   invite (no overlay needed; Shift+click: the overlay's dialog); "Starting in n" during the countdown
   Steam overlay (Shift+Tab) outside Steam: Steam starts before the renderer (net_steam_early_init)
