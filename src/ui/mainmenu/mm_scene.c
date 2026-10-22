@@ -1,7 +1,7 @@
 // Main menu background (docs/MENU_LOBBY.md "Main menu shell"): a pale blue backdrop and the player's
-// character alone on it (chars_preview: the inventory's studio render, own idle pose) holding the
-// SMG, right of centre; on the Player and Cosmetics tabs inside the preview rect, where the mouse
-// turns / zooms it. The local dev room world still runs under it (a dev scene, src/game/scene.h:
+// character alone on it (chars_preview: the inventory's studio render) holding the SMG in the
+// hip-fire hold, centred, the same on every tab (a drag on the Player / Cosmetics tabs turns it);
+// Cosmetics > Items closes on the gun. The local dev room world still runs under it (a dev scene, src/game/scene.h:
 // the lobby hosts from it) but is covered; the selected map's season / time / weather still go to it.
 #include "mm_internal.h"
 #include "game/game.h"
@@ -87,40 +87,43 @@ static const GameScene k_scene = {
 
 void mm_scene_register(void) { scene_register(&k_scene); }
 
-// framed.w > 0: the tab's preview rect; framed.w < 0 (the Maps tab's globe): the backdrop only.
-void mm_background_draw(GuiRect framed) {
+#define MM_TURN (25.0f * DG_DEG2RAD)   // the character's turn to its left (every tab)
+#define MM_SIDE (-90.0f * DG_DEG2RAD)   // Cosmetics > Items: facing the screen's left, the gun side-on
+
+// The whole screen, the character centred, the same framing on every tab; Cosmetics > Items turns it
+// to face the left and closes the camera on the SMG (half the screen wide, centred). globe: the
+// backdrop only (the Maps tab).
+void mm_background_draw(bool globe) {
     MainMenu *M = mm();
     float W = gui_w(), H = gui_h();
     gd_rect_grad(gui_rect(0, 0, W, H), UI_RGBA(214, 230, 242, 255), UI_RGBA(178, 203, 224, 255));
     Game *g = game();
     World *w = game_world();
     Player *p = game_local_player();
-    if (framed.w < 0 || !g || !w || !p) return;
-    GuiRect r;
+    if (globe || !g || !w || !p || W < 8 || H < 8) return;
+    float dt = gui_dt();
+    bool items = M->tab == MT_COSMETICS && M->cos_items;
+    M->items_t += ((items ? 1.0f : 0.0f) - M->items_t) * saturate(dt * 5.0f);
+    float e = M->items_t * M->items_t * (3.0f - 2.0f * M->items_t);
+    if (!gui_mouse_down(0)) M->orbit_yaw *= 1.0f - saturate(dt * 3.0f);   // a drag's turn eases back
     CharPreviewIn in;
     memset(&in, 0, sizeof(in));
     in.target = CHAR_PREVIEW_MENU;
-    if (framed.w > 0) {
-        // The preview rect, zoomed about its centre; the drag turns the character.
-        float z = M->orbit_zoom, h = framed.h * z, cw = h * 0.85f;
-        r = gui_rect(framed.x + framed.w * 0.5f - cw * 0.5f, framed.y + framed.h * 0.5f - h * 0.5f, cw, h);
-        in.yaw = -M->orbit_yaw;
-    } else {
-        // Screen high, bottom-aligned right of centre (the menu is on the left), a slow sway.
-        float h = H, cw = h * 0.85f;
-        r = gui_rect(W * 0.64f - cw * 0.5f, 0, cw, h);
-        in.yaw = -0.35f + 0.12f * sinf((float)gui_time() * 0.09f);
-    }
-    in.w = (int)lrintf(fminf(r.w, CHAR_PREVIEW_MAX_SIZE));
-    in.h = (int)lrintf(fminf(r.h, CHAR_PREVIEW_MAX_SIZE));
-    in.held_item = w->items ? item_find(w->items, "smg") : 0;   // the idle pose with the SMG in the hands
+    float k = fminf(1.0f, 2560.0f / W);   // the render size (the image is stretched over the screen)
+    in.w = (int)lrintf(W * k);
+    in.h = (int)lrintf(H * k);
+    in.yaw = lerpf(MM_TURN, MM_SIDE, e) + M->orbit_yaw;
+    in.hold = 1;   // the hip-fire hold, as standing still in game
+    in.item_focus = e;
+    in.item_fill = 0.55f;   // the longest bounds side; the gun itself then spans about half the screen
+    in.held_item = w->items ? item_find(w->items, "smg") : 0;
     static const int worn[CWORN_COUNT] = { EQ_HEADWEAR, EQ_BODY_ARMOR, EQ_BACKPACK };
-    for (int k = 0; k < CWORN_COUNT; k++) {
-        const InvItem *it = inv_equipped_c(&p->inv.t, worn[k]);
-        in.worn[k] = it ? it->s.item : 0;
+    for (int n = 0; n < CWORN_COUNT; n++) {
+        const InvItem *it = inv_equipped_c(&p->inv.t, worn[n]);
+        in.worn[n] = it ? it->s.item : 0;
     }
     TextureId tex = chars_preview(w, g->local_slot, &in);
-    if (tex) gd_image(r, tex, v4(0, 0, 1, 1), WHITE);
+    if (tex) gd_image(gui_rect(0, 0, W, H), tex, v4(0, 0, 1, 1), WHITE);
 }
 
 void mm_scene_enter(void) {

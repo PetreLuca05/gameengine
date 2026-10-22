@@ -1,8 +1,5 @@
-// Player tab (docs/MENU_LOBBY.md): the 3D preview is the menu scene (mm_scene.c frames the real
-// character - shared skeleton, equipped cosmetics, idle animation, the item on its hold point -
-// inside the preview rect; drag to orbit, wheel to zoom), name, stats, loadout, and the "Preview in
-// map lighting" toggle (the selected map's season / time / weather, else neutral daylight), and
-// the Phone card (mm_phone.c).
+// Player tab (docs/MENU_LOBBY.md): the character is the menu background (mm_scene.c; a drag over the
+// preview area turns it), name, stats, loadout, and the Phone card (mm_phone.c).
 #include "mm_internal.h"
 #include "game/game.h"
 #include "gameplay/items.h"
@@ -12,7 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// Mouse / pad orbit over a rect: drag rotates, wheel zooms, the right stick or Q-less arrows too.
+// Mouse / pad turn over a rect: drag rotates (eases back on release), the right stick too.
 static void orbit_input(GuiRect r) {
     MainMenu *M = mm();
     GuiId id = gui_id("mm_preview");
@@ -24,14 +21,9 @@ static void orbit_input(GuiRect r) {
         else {
             vec2 m = gui_mouse();
             M->orbit_yaw -= (m.x - last.x) * 0.008f;
-            M->orbit_pitch = clampf(M->orbit_pitch + (m.y - last.y) * 0.004f, -0.6f, 0.5f);
         }
     }
     last = gui_mouse();
-    if (gui_rect_contains(r, gui_mouse().x, gui_mouse().y) && gui_wheel() != 0) {
-        M->orbit_zoom = clampf(M->orbit_zoom * (1.0f + gui_wheel() * 0.1f), 0.6f, 2.6f);
-        gui_wheel_consume();
-    }
     vec2 st = gui_pad_stick();
     if (gui_nav_mode() && fabsf(st.x) > 0.01f) M->orbit_yaw -= st.x * gui_dt() * 2.0f;
 }
@@ -45,7 +37,7 @@ void mm_player_draw(GuiRect content) {
     orbit_input(area);
     // Preview bar: a hint.
     GuiRect bar = mm_node(L, "preview_bar");
-    gw_label(bar, "Drag to rotate  ·  wheel to zoom", gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_RIGHT);
+    gw_label(bar, "Drag to rotate", gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_RIGHT);
 
     GuiRect info = mm_node(L, "info");
     mm_panel(info);

@@ -1,4 +1,5 @@
-// Cosmetics tab (docs/MENU_LOBBY.md): categories (the character's part slots + weapon skins), the
+// Cosmetics tab (docs/MENU_LOBBY.md): two sub-tabs, Player (the character's part slots) and Items
+// (weapon skins: the background closes on the gun, mm_scene.c); categories, the
 // owned / locked items as inventory slots (gw_slot) with their rarity, equip / unequip; the
 // character in the middle wears the choice at once (cl_skin / cl_parts -> the replicated part
 // selection). Unlocks are data (assets/cosmetics/*.json "unlock") plus the profile; Steam Inventory
@@ -12,7 +13,11 @@ static GuiScroll g_grid_scroll;
 
 static u32 rarity_color(int r) { return TH->rarity[DG_CLAMP(r, 0, 4)]; }
 
+static bool slot_is_item(int slot) { return slot == COS_SLOT_WEAPON; }
+
+// Items in a slot of the open sub-tab (0 for the other sub-tab's slots).
 static int slot_item_count(const CosmeticDB *db, int slot) {
+    if (slot_is_item(slot) != mm()->cos_items) return 0;
     int n = 0;
     for (int i = 0; i < db->count; i++) if (db->items[i].slot == slot) n++;
     return n;
@@ -51,7 +56,14 @@ void mm_cosmetics_draw(GuiRect content) {
     // Categories.
     GuiRect cats = mm_node(L, "cats");
     GuiCursor c = gc_make(cats, TOK("mm_gap_sm"));
-    mm_title(gc_row(&c, TOK("mm_title_h")), "Cosmetics");
+    static const char *const sub[2] = { "Player", "Items" };
+    int st = gw_tabs(gui_id("mm_cos_sub"), gc_row(&c, TOK("mm_title_h")), sub, 2, M->cos_items ? 1 : 0);
+    if (st != (M->cos_items ? 1 : 0)) {
+        M->cos_items = st == 1;
+        M->cos_selected = -1;
+        g_grid_scroll.target = g_grid_scroll.offset = 0;
+        gui_sound(TH->snd_tab);
+    }
     float t = gui_anim_t(gui_id("mm_tab_in"));
     int k = 0;
     for (int s = 0; s < COS_SLOTS; s++) {

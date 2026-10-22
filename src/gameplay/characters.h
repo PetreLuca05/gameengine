@@ -215,6 +215,9 @@ typedef struct CharPreviewIn {
     u16 worn[CWORN_COUNT];       // worn gear item defs (head = helmet, chest = plate carrier, back = backpack; 0 none)
     float yaw;                   // extra turn about the vertical axis (radians; the UI may drag-rotate)
     float head_top;              // the image height above the head top (fraction; 0 = assets/ui/char_preview.json's framing)
+    u8 hold;                     // the held item's pose: 0 = char_preview.json's held.pose, 1 = the hip-fire hold (in game, standing still, looking ahead)
+    float item_focus;            // 0..1: the camera blends from the framing to the held item (aimed at its centre, the lens
+    float item_fill;             //       narrowed until it spans item_fill of the image width; 0 = 0.5); the camera doesn't move
 } CharPreviewIn;
 TextureId chars_preview(World *w, int player_slot, const CharPreviewIn *in);
 TextureId chars_preview_cached(int target);

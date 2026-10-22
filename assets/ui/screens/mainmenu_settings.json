@@ -1,7 +1,7 @@
 {
-  "_doc": "Settings tab: the game's settings screen (Engine Fidelity, Graphics, Controls, Crosshair, Audio, Character, Phone) as in the pause menu, centred.",
+  "_doc": "Settings tab: the game's settings screen (Engine Fidelity, Graphics, Controls, Crosshair, Audio, Character, Phone) as in the pause menu, over the whole content area, untitled.",
   "nodes": [
     { "id": "root" },
-    { "id": "settings", "parent": "root", "anchor": "center", "w_pct": 0.7, "h_pct": 1.0, "min_w": "@mm_settings_min_w", "max_w": "@mm_settings_max_w" }
+    { "id": "settings", "parent": "root", "anchor": "center", "w_pct": 1.0, "h_pct": 1.0 }
   ]
 }

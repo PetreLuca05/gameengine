@@ -310,7 +310,6 @@ static void tab_keys(void) {
 bool mainmenu_draw(bool top) {
     if (!M->active) return false;
     if (M->env_dirty) mm_scene_apply_environment();
-    GuiRect framed = M->preview_rect;   // set by the Player / Cosmetics tabs (last frame's)
     M->preview_rect = gui_rect(0, 0, 0, 0);
     gui_push_input(top && !M->splash);
     LobbyState st = lobby_state();
@@ -323,7 +322,7 @@ bool mainmenu_draw(bool top) {
     float a = gui_ease_out(gui_anim_t(gui_id("mm_open")) / fmaxf(0.01f, TH->menu_in * 2));
     // The Maps tab's globe takes the character's place (docs/MENU_GLOBE.md).
     bool globe = M->tab == MT_MAPS && tab_allowed(MT_MAPS, NULL) && st != LS_CLOSED;
-    mm_background_draw(globe ? gui_rect(-1, -1, 0, 0) : framed);
+    mm_background_draw(globe);
     if (globe) {
         mm_layout_solve(&M->shell, gui_rect(0, 0, gui_w(), gui_h()));
         mm_maps_background(mm_node(&M->shell, "content"), a * gui_ease_out(gui_anim_t(gui_id("mm_tab_in")) / TH->modal_in));
@@ -350,6 +349,7 @@ bool mainmenu_draw(bool top) {
     case MT_MAPS: mm_maps_draw(content); break;
     case MT_SETTINGS: {
         mm_layout_solve(&M->settings, content);
+        screens_modal_untitled();
         settings_draw(mm_node(&M->settings, "settings"));
         break;
     }
@@ -409,9 +409,11 @@ void mainmenu_enter(const char *message) {
     if (!M->inited) return;
     // The background world: a local dev room nobody can join (the lobby hosts from it when asked).
     Game *g = game();
-    bool have_bg = g && g->world && g->mode == GM_HOST && !strcmp(g->map, "devroom") && net_role() != NET_CLIENT && lobby_state() != LS_IN_GAME;
+    // A world a session played on is never reused: the menu always starts on a fresh dev room.
+    bool have_bg = !M->bg_played && g && g->world && g->mode == GM_HOST && !strcmp(g->map, "devroom") && net_role() != NET_CLIENT && lobby_state() != LS_IN_GAME;
     menus_close_all();
     if (!have_bg) game_host_ex("devroom", GH_NO_AUTOHOST);
+    M->bg_played = false;
     mm_scene_enter();
     screens_push(SCR_MAINMENU);
     gui_anim_restart(gui_id("mm_open"));
@@ -433,6 +435,7 @@ void mainmenu_enter(const char *message) {
 
 void mainmenu_session_started(void) {
     M->active = false;
+    M->bg_played = true;
     globe_release();   // the Maps tab's globe (~90 MB of tiles, vectors, heights) isn't kept through the game
     mainmenu_leave_scene();
     menus_close_all();
@@ -493,7 +496,7 @@ void mainmenu_init(void) {
         if (!strcmp(g_engine.argv[i], "--nomenu")) nomenu = true;
     }
     M->enabled = menu || (!test && !nomenu);
-    M->orbit_yaw = 0.35f;
+    M->orbit_yaw = 0.0f;
     M->orbit_pitch = -0.05f;
     M->orbit_zoom = 1.0f;
     M->preview_tod = true;

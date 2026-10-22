@@ -40,6 +40,9 @@ typedef struct MainMenu {
     char weather[24];              // "" = the season's pick
     bool dynamic_weather;
     bool show_dev_maps;
+    bool cos_items;                // Cosmetics: the Items sub-tab (else Player)
+    float items_t;                 // 0..1 towards the Items close-up (the background's camera)
+    bool bg_played;                // a session ran since the menu world was made (the next menu loads a fresh one)
     bool env_dirty;                // the background must take the selection's look
     // player preview (scene camera)
     float orbit_yaw, orbit_pitch, orbit_zoom;
@@ -72,7 +75,7 @@ void mm_loading_draw(void);
 // scene (mm_scene.c)
 void mm_scene_register(void);
 void mm_scene_enter(void);
-void mm_background_draw(GuiRect framed);   // the pale blue backdrop + the character (framed: last frame's preview rect)
+void mm_background_draw(bool globe);   // the pale blue backdrop + the character (globe: the backdrop only)
 void mm_scene_apply_environment(void); // the selection's season / time / weather on the background world
 void mm_select_map(const char *id);    // Maps tab / lobby: selection, defaults from the map, background
 

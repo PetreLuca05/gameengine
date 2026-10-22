@@ -163,7 +163,7 @@ static Xform pv_pose(World *w, const CharPreviewIn *in, float turn, const ItemSo
             sock = it->sockets;
         }
         pi.item = &sock;
-        pi.sprinting = PV.rig.held_low;   // the low ready: not aimed at the camera
+        pi.sprinting = in->hold == 1 ? false : PV.rig.held_low;   // the low ready: not aimed at the camera; the hip-fire hold
         *sock_out = &sock;
     }
     charrt_post(rt, &pi);
@@ -217,15 +217,36 @@ TextureId chars_preview(World *w, int player_slot, const CharPreviewIn *in) {
     CharPreviewShot shot = char_preview_frame(&fr, PV.head_y, PV.bottom_y);
     vec3 look = v3(0, shot.cam_y, 0), cam = v3(0, shot.cam_y, -shot.dist);
     vec3 back = v3(0, 0, -1), right = v3(-1, 0, 0), up = v3(0, 1, 0);   // camera axes (it looks down +Z)
+    float fov = shot.fov_rad, aspect = (float)in->w / (float)in->h;
+    Xform iw = { 0 };
+    bool held = sock && PV.rt->proc.has_item;
+    if (held) {
+        Xform im = PV.rt->proc.item_model;
+        iw = xf_mul(xf_make(root.t, root.r), xf_make(v3_scale(im.t, c->def->scale), im.r));
+    }
+    vec3 mn, mx;
+    float f = saturate(in->item_focus);
+    if (held && f > 0.0f && item_model_bounds(w->items, in->held_item, &mn, &mx)) {
+        // Close on the held item: the camera turns to its centre and the lens narrows until its longest
+        // side spans item_fill of the image width (tan-space blend: a steady zoom).
+        float s = PV.rt->proc.item_scale;
+        vec3 ext = v3_scale(v3_sub(mx, mn), s);
+        vec3 centre = v3_add(iw.t, quat_rotate(iw.r, v3_scale(v3_add(mn, mx), 0.5f * s)));
+        float len = fmaxf(ext.x, fmaxf(ext.y, ext.z));
+        float fill = in->item_fill > 0.0f ? in->item_fill : 0.5f;
+        float d = fmaxf(0.1f, v3_len(v3_sub(centre, cam)));
+        float tan_h = len / (fill * d) * 0.5f;           // half the image width at the item's distance
+        float tv0 = tanf(fov * 0.5f), tv1 = tan_h / aspect;
+        fov = 2.0f * atanf(tv0 + (tv1 - tv0) * f);
+        look = v3_lerp(look, centre, f);
+    }
     // Draws: the parts (the preview view), the gear and the held item (captured: the preview's own list).
     chars_preview_draw(c);
-    render_char_preview_capture_begin(cam, shot.fov_rad * DG_RAD2DEG);
+    render_char_preview_capture_begin(cam, fov * DG_RAD2DEG);
     chars_preview_draw_worn(w, c);
-    if (sock && PV.rt->proc.has_item) {
+    if (held) {
         const ItemDef *it = item_def(w->items, in->held_item);
         const WeaponDef *wd = item_weapon(w->items, in->held_item);
-        Xform im = PV.rt->proc.item_model;
-        Xform iw = xf_mul(xf_make(root.t, root.r), xf_make(v3_scale(im.t, c->def->scale), im.r));
         hands_set_draw_scale(PV.rt->proc.item_scale);
         hands_set_fire_mech(false, 0.0f, v3(0, 0, 0));
         hands_draw_held_att(wd, wd ? NULL : it, in->held_att, iw.t, iw.r, 0);
@@ -240,7 +261,7 @@ TextureId chars_preview(World *w, int player_slot, const CharPreviewIn *in) {
     rq.supersample = rig->supersample;
     rq.cam_pos = cam;
     rq.view = mat4_look_at(cam, look, up);
-    rq.proj = mat4_perspective(shot.fov_rad, (float)in->w / (float)in->h, 0.05f, 30.0f);
+    rq.proj = mat4_perspective(fov, aspect, 0.05f, 30.0f);
     rq.key_dir = cam_to_world(right, up, back, rig->key_dir);
     rq.key_color = v3_scale(rig->key_color, rig->key);
     rq.fill_dir = cam_to_world(right, up, back, rig->fill_dir);

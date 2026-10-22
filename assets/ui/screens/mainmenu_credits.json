@@ -1,7 +1,7 @@
 {
-  "_doc": "Credits tab: scrolling credits and the third-party licences (assets/ui/credits.txt, tools/gen_credits.py).",
+  "_doc": "Credits and Patch notes tabs: the text page over the whole content area (assets/ui/credits.txt from tools/gen_credits.py, assets/ui/news.txt).",
   "nodes": [
     { "id": "root" },
-    { "id": "credits", "parent": "root", "anchor": "center", "w_pct": 0.62, "max_w": "@mm_credits_w", "h_pct": 1.0 }
+    { "id": "credits", "parent": "root", "anchor": "center", "w_pct": 1.0, "h_pct": 1.0 }
   ]
 }

@@ -24,8 +24,9 @@ pause menu's look (thin lines, semi-transparent blurred panels, small-caps label
 ```
 launch ── splash (1.6 s, any key / click skips) ──▶ MAIN MENU
   background: a pale blue backdrop and your character alone on it (chars_preview, the inventory's
-              studio render: idle, your cosmetics and worn gear, the SMG in the hands; mm_scene.c
-              mm_background_draw), right of centre, a slow sway; the dev room world runs under it
+              studio render over the whole screen: your cosmetics and worn gear, the SMG in the
+              hip-fire hold; mm_scene.c mm_background_draw), centred, turned 25 deg to its left, the
+              same on every tab; the dev room world runs under it, a fresh one after every session
   top bar:  Play · Player · Cosmetics · Maps · Settings · Patch notes · Credits   account  [⏻]
             Q / E · LB / RB · 1-7 · mouse                         ⏻ ─▶ CONFIRM "Quit to desktop?"
             account: avatar · name · phone glyph + status (click: the Connect portal) · Online /
@@ -35,19 +36,21 @@ launch ── splash (1.6 s, any key / click skips) ──▶ MAIN MENU
   │         ├─ Host game ─────────────────────────────────────▶ LOBBY (host)
   │         ├─ Join ─▶ SERVER BROWSER [Steam lobbies | Friends | LAN | Direct IP] ─▶ LOBBY
   │         └─ Host on: Steam / LAN
-  ├─ Player     the character framed in the preview rect (drag turns, wheel / stick zooms),
+  ├─ Player     a drag over the character turns it (eases back),
   │             name (LAN name field offline), stats (stubs), loadout,
   │             the Phone card (Connect ─▶ CONNECT PORTAL modal; docs/PHONE.md "Phone flow")
-  ├─ Cosmetics  categories ▸ item grid (inventory slot widget, rarity strip, LOCKED) ▸ equip
+  ├─ Cosmetics  [Player | Items] sub-tabs (Items: weapon skins; the character turns to face the
+  │             left and the camera closes on the SMG, half the screen wide, centred) ▸ categories ▸ item grid (inventory slot widget, rarity strip, LOCKED) ▸ equip
   ├─ Maps       bottom bar (no background): Development · Chapter 1: The Beginning; a click opens
   │             the group's maps (thumbnail, biome, size, players) in a list rising above it (fades
   │             in, rows stagger), a click elsewhere closes it ▸ details ▸ Session:
   │             Season · Start time · Start weather · Dynamic weather ▸ Host on this map
   │             background: the globe (docs/MENU_GLOBE.md), flying to the selected map's place
-  ├─ Settings   the game's settings screen (Engine Fidelity, Graphics, Controls, Crosshair,
+  ├─ Settings   (untitled, the whole content area) the game's settings screen (Engine Fidelity, Graphics, Controls, Crosshair,
   │             Audio, Character, Phone), applying live
-  ├─ Patch notes  assets/ui/news.txt on the credits page (# title, ## heading)
-  └─ Credits    rolling credits + third-party licences
+  ├─ Patch notes  assets/ui/news.txt (## heading; a "# " title line is skipped)
+  └─ Credits    credits + third-party licences (no auto-roll; Patch notes and Credits use the whole
+                content area)
   footer: key hints
 
 LOBBY (the Play tab while in a session; Maps and Credits are locked, the tab reads "Lobby")

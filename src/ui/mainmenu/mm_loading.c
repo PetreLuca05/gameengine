@@ -46,68 +46,26 @@ void mm_loading_draw(void) {
     gd_text_wrap(&tt, tip.x, tip.y + gd_line_height(gui_s(TH->t_label)) + gui_s(TH->gap * 0.5f), tip.w, lobby_load_tip(), true);
 }
 
-// ------------------------------------------------------------------ credits
+// ------------------------------------------------------------------ credits / patch notes
 
-static char *g_credits;
-static GuiScroll g_cs;
-static void draw_page(GuiScroll *sc, GuiId id, GuiRect view, const char *text);
-static double g_last_input;
-
-void mm_credits_draw(GuiRect content) {
+// A text page over the whole content area, scrolled by the wheel / drag / up-down: "## " heading,
+// blank line = half a line, else wrapped body; the "# " title line is skipped (the tab bar names it).
+static void text_page(GuiRect content, GuiScroll *sc, GuiId id, const char *text) {
     MmLayout *Ly = &mm()->credits;
     mm_layout_solve(Ly, content);
     GuiRect r = mm_node(Ly, "credits");
-    if (!g_credits) {
-        char buf[512];
-        g_credits = platform_read_file(platform_data_path("assets/ui/credits.txt", buf, sizeof(buf)), NULL);
-        if (!g_credits) { g_credits = (char *)malloc(64); dg_strcpy(g_credits, 64, "Credits missing (tools/gen_credits.py)."); }
-    }
     mm_panel(r);
     GuiRect view = gui_rect_inset(r, gui_s(TH->pad));
     view.w -= TOK("mm_gap");
-    if (gui_wheel() != 0 || gui_nav(NAV_UP) || gui_nav(NAV_DOWN) || gui_active() == (g_cs.id ^ 0x5C5Cu)) g_last_input = gui_time();
-    if (gui_nav(NAV_DOWN)) { g_cs.target += TOK("mm_row_h") * 3; gui_nav_consume(NAV_DOWN); }
-    if (gui_nav(NAV_UP)) { g_cs.target -= TOK("mm_row_h") * 3; gui_nav_consume(NAV_UP); }
-    // Rolls by itself unless the reader took over in the last 4 s; back to the top at the end.
-    if (gui_time() - g_last_input > 4.0) {
-        g_cs.target += gui_dt() * TOK("mm_row_h");
-        if (g_cs.content_h > view.h && g_cs.target >= g_cs.content_h - view.h + 1) g_cs.target = g_cs.offset = 0;
-    }
-    draw_page(&g_cs, gui_id("mm_credits_scroll"), view, g_credits);
-}
-
-// Patch notes tab: assets/ui/news.txt on the credits' page (same markup, no rolling).
-void mm_news_draw(GuiRect content) {
-    static char *news;
-    static GuiScroll ns;
-    MmLayout *Ly = &mm()->credits;
-    mm_layout_solve(Ly, content);
-    GuiRect r = mm_node(Ly, "credits");
-    if (!news) {
-        char buf[512];
-        char *t = platform_read_file(platform_data_path("assets/ui/news.txt", buf, sizeof(buf)), NULL);
-        size_t n = (t ? strlen(t) : 0) + 32;
-        news = (char *)malloc(n);
-        snprintf(news, n, "# Patch notes\n\n%s", t && t[0] ? t : "No notes yet.");
-        free(t);
-    }
-    mm_panel(r);
-    GuiRect view = gui_rect_inset(r, gui_s(TH->pad));
-    view.w -= TOK("mm_gap");
-    if (gui_nav(NAV_DOWN)) { ns.target += TOK("mm_row_h") * 3; gui_nav_consume(NAV_DOWN); }
-    if (gui_nav(NAV_UP)) { ns.target -= TOK("mm_row_h") * 3; gui_nav_consume(NAV_UP); }
-    draw_page(&ns, gui_id("mm_news_scroll"), view, news);
-}
-
-// A text page in a scroll view: "# " title, "## " heading, blank line = half a line, else wrapped body.
-static void draw_page(GuiScroll *sc, GuiId id, GuiRect view, const char *text) {
+    if (gui_nav(NAV_DOWN)) { sc->target += TOK("mm_row_h") * 3; gui_nav_consume(NAV_DOWN); }
+    if (gui_nav(NAV_UP)) { sc->target -= TOK("mm_row_h") * 3; gui_nav_consume(NAV_UP); }
     gw_scroll_begin(sc, id, view);
     float y = gw_scroll_y(sc), y0 = y;
     GuiText body = { gui_s(TH->t_body - 1), GW_REGULAR, TH->text_dim, GUI_LEFT, 0, false, false, 0 };
     GuiText head = { gui_s(TH->t_label + 1), GW_SEMIBOLD, TH->accent, GUI_LEFT, TH->tracking_caps * 1.5f, true, false, 0 };
-    GuiText title = { gui_s(TH->t_title), GW_SEMIBOLD, TH->text, GUI_LEFT, 0.04f, true, false, 0 };
     const char *p = text;
     char line[512];
+    bool top = true;   // no gap above a heading on the first line
     while (*p) {
         const char *e = strchr(p, '\n');
         size_t n = e ? (size_t)(e - p) : strlen(p);
@@ -116,10 +74,35 @@ static void draw_page(GuiScroll *sc, GuiId id, GuiRect view, const char *text) {
         line[n] = 0;
         if (n && line[n - 1] == '\r') line[--n] = 0;
         p = e ? e + 1 : p + strlen(p);
-        if (!strncmp(line, "## ", 3)) { y += gui_s(TH->gap * 2); gd_text(&head, view.x, y, line + 3); y += gd_line_height(head.size) + gui_s(TH->gap * 0.5f); }
-        else if (!strncmp(line, "# ", 2)) { gd_text(&title, view.x, y, line + 2); y += gd_line_height(title.size) + gui_s(TH->gap); }
+        if (!strncmp(line, "# ", 2)) continue;
+        if (top && !line[0]) continue;
+        if (!strncmp(line, "## ", 3)) { y += top ? 0 : gui_s(TH->gap * 2); gd_text(&head, view.x, y, line + 3); y += gd_line_height(head.size) + gui_s(TH->gap * 0.5f); }
         else if (!line[0]) y += gd_line_height(body.size) * 0.5f;
         else y += gd_text_wrap(&body, view.x, y, view.w, line, true);
+        top = false;
     }
     gw_scroll_end(sc, y - y0 + gui_s(TH->pad));
+}
+
+void mm_credits_draw(GuiRect content) {
+    static char *credits;
+    static GuiScroll sc;
+    if (!credits) {
+        char buf[512];
+        credits = platform_read_file(platform_data_path("assets/ui/credits.txt", buf, sizeof(buf)), NULL);
+        if (!credits) { credits = (char *)malloc(64); dg_strcpy(credits, 64, "Credits missing (tools/gen_credits.py)."); }
+    }
+    text_page(content, &sc, gui_id("mm_credits_scroll"), credits);
+}
+
+// Patch notes tab: assets/ui/news.txt.
+void mm_news_draw(GuiRect content) {
+    static char *news;
+    static GuiScroll sc;
+    if (!news) {
+        char buf[512];
+        news = platform_read_file(platform_data_path("assets/ui/news.txt", buf, sizeof(buf)), NULL);
+        if (!news || !news[0]) { free(news); news = (char *)malloc(16); dg_strcpy(news, 16, "No notes yet."); }
+    }
+    text_page(content, &sc, gui_id("mm_news_scroll"), news);
 }
