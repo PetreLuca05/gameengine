@@ -992,6 +992,9 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
         dg_strcpy(d->hold_style_alt, sizeof(d->hold_style_alt), jstr(hold, "style_landscape", ""));
         d->builtin = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "builtin"));
         d->hands = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "hands"));
+        d->battery_h = jnum(it, "battery_h", 0.0f);
+        dg_strcpy(d->nvg, sizeof(d->nvg), jstr(it, "nvg", ""));
+        d->battery_cell = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "battery_cell"));
         const cJSON *wn = cJSON_GetObjectItemCaseSensitive(it, "worn");   // docs/CHARACTERS.md "Worn gear"
         dg_strcpy(d->worn.bone, sizeof(d->worn.bone), jstr(wn, "bone", ""));
         d->worn.has_pos = cJSON_GetObjectItemCaseSensitive(wn, "pos") != NULL;

@@ -56,6 +56,7 @@ static const FidFeatureDef k_features[FF_COUNT] = {
     [FF_VFX_LIGHTING] = { "vfx_lighting", "vfx_lighting", B, true, 0, 0, 1, false, false, "Lit particles" },
     [FF_PRECIP_QUALITY] = { "precip_quality", "r_precip_quality", I, false, 0, -1, 3, false, false, "Rain / snow quality" },
     [FF_WATER] = { "water", "r_water", I, false, 0, 0, 3, false, false, "Water quality" },
+    [FF_NIGHT_OPTICS] = { "night_optics", "r_night_optics", I, false, 0, 0, 3, false, false, "Night vision / thermal optics" },
 };
 #undef B
 #undef I
@@ -704,7 +705,7 @@ static const int k_g_post[] = { FF_AO, FF_CONTACT_SHADOWS, FF_SSR, FF_SSGI, FF_P
 static const int k_g_shadows[] = { FF_SHADOWS, FF_SHADOW_RESOLUTION, FF_SHADOW_PROJECTION, FF_SHADOW_CASCADES, FF_SOFT_SHADOW_QUALITY, FF_SHADOW_MIN_RADIUS,
                                    FF_SHADOW_CASTER_LIMIT, FF_SHADOW_FAR_INTERVAL, FF_LIGHT_SHADOW_QUALITY };
 static const int k_g_textures[] = { FF_TEXTURE_QUALITY, FF_ANISO, FF_TERRAIN_QUALITY };
-static const int k_g_effects[] = { FF_VFX_QUALITY, FF_VFX_LIGHTING, FF_PRECIP_QUALITY, FF_WATER, FF_SCOPE_PIP_SCALE };
+static const int k_g_effects[] = { FF_VFX_QUALITY, FF_VFX_LIGHTING, FF_PRECIP_QUALITY, FF_WATER, FF_SCOPE_PIP_SCALE, FF_NIGHT_OPTICS };
 // Foliage / view distance: their density and ranges are locked (docs/SETTINGS_AUDIT.md); what is
 // left is shading cost (wind layers, the shadow-view geometry error).
 static const int k_g_foliage[] = { FF_FOLIAGE_WIND };

@@ -279,7 +279,7 @@ static void test_nvg(void) {
     float target = nvg_target_log_gain(v, 5e-4f), start = s.log_gain, peak = start;
     float settle_t = -1.0f;
     for (int i = 0; i < 60 * 4; i++) {
-        nvg_step(&s, &g_nc, v, &(NvgInput){ .phi_mean = 5e-4f, .phi_peak = 5e-4f, .dt = 1.0f / 60.0f });
+        nvg_step(&s, &g_nc, v, &(NvgInput){ .phi_mean = 5e-4f, .phi_current = 5e-4f, .dt = 1.0f / 60.0f });
         if (s.log_gain > peak) peak = s.log_gain;
         if (settle_t < 0.0f && i > 5 && fabsf(s.log_gain - target) < 0.05f * fabsf(target - start) && fabsf(s.vel) < 0.2f)
             settle_t = i / 60.0f;
@@ -289,13 +289,13 @@ static void test_nvg(void) {
     CHECK(fabsf(s.log_gain - target) < 0.02f, "ABC at target");
     // whiteout on a muzzle flash, recovered within whiteout_recover after it ends
     nvg_state_reset(&s, v, 1e-3f);
-    for (int i = 0; i < 30; i++) nvg_step(&s, &g_nc, v, &(NvgInput){ .phi_mean = 1e-3f, .phi_peak = 1e-3f, .dt = 1.0f / 60.0f });
+    for (int i = 0; i < 30; i++) nvg_step(&s, &g_nc, v, &(NvgInput){ .phi_mean = 1e-3f, .phi_current = 1e-3f, .dt = 1.0f / 60.0f });
     CHECK(s.whiteout < 0.01f, "no whiteout at night");
-    for (int i = 0; i < 2; i++) nvg_step(&s, &g_nc, v, &(NvgInput){ .phi_mean = 2e-3f, .phi_peak = 5.0f, .dt = 1.0f / 60.0f });
+    for (int i = 0; i < 2; i++) nvg_step(&s, &g_nc, v, &(NvgInput){ .phi_mean = 2e-3f, .phi_current = 5.0f, .dt = 1.0f / 60.0f });
     CHECK(s.whiteout > 0.5f, "flash washes out (%.2f)", s.whiteout);
     float t = 0.0f;
     while (s.whiteout > 0.05f && t < 3.0f) {
-        nvg_step(&s, &g_nc, v, &(NvgInput){ .phi_mean = 1e-3f, .phi_peak = 1e-3f, .dt = 1.0f / 60.0f });
+        nvg_step(&s, &g_nc, v, &(NvgInput){ .phi_mean = 1e-3f, .phi_current = 1e-3f, .dt = 1.0f / 60.0f });
         t += 1.0f / 60.0f;
     }
     CHECK(t <= v->whiteout_recover + 0.02f && t > 0.2f, "recovers in %.2f s (limit %.2f)", t, v->whiteout_recover);
@@ -345,7 +345,7 @@ static void test_nvg(void) {
     nvg_state_reset(&s, v, 0.8f);
     float off_t = -1.0f;
     for (int i = 0; i < 60 * 6 && off_t < 0.0f; i++) {
-        nvg_step(&s, &g_nc, v, &(NvgInput){ .phi_mean = 0.8f, .phi_peak = 1.0f, .dt = 1.0f / 60.0f });
+        nvg_step(&s, &g_nc, v, &(NvgInput){ .phi_mean = 0.8f, .phi_current = 1.0f, .dt = 1.0f / 60.0f });
         if (s.shutoff) off_t = i / 60.0f;
     }
     CHECK(off_t > v->protect_s - 0.1f && off_t < v->protect_s + 0.5f, "daylight protection at %.2f s", off_t);

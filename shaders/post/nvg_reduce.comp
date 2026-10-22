@@ -1,0 +1,46 @@
+#version 450
+// Night vision, ABC metering: the log-average and the peak of the photocathode flux inside the tube
+// field, one workgroup over the whole image. The CPU's ABC / whiteout model (nvg_model.c) reads them
+// two frames late through the readback ring.
+//   out[0] mean log2(flux + ebi), out[1] linear mean flux (the photocurrent: whiteout / tube
+//   protection), out[2] samples, out[3] peak (the brightest 2 x 2)
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+#include "nvg_common.glsl"
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(set = 0, binding = 0) uniform sampler2D flux_tex;
+layout(std430, set = 0, binding = 13) buffer Nvg { float v[16]; } N;
+// pc.p0.x focal length (flux px), p0.y tubes, p0.z circle deg, p0.w tube separation deg; p1.x ebi
+
+shared float s_sum[256], s_max[256], s_n[256], s_lin[256];
+
+void main() {
+    uint t = gl_LocalInvocationIndex;
+    ivec2 size = textureSize(flux_tex, 0);
+    float sum = 0.0, mx = 0.0, n = 0.0, lin = 0.0;
+    // every second texel: plenty for a mean, the peak takes a 2 x 2 average
+    for (int y = int(gl_LocalInvocationID.y) * 2; y < size.y; y += 32) {
+        for (int x = int(gl_LocalInvocationID.x) * 2; x < size.x; x += 32) {
+            vec2 xy = vec2(x, y) + 1.0 - vec2(size) * 0.5;
+            if (nvg_mask(xy, pc.p0.x, pc.p0.y, pc.p0.z, pc.p0.w) < 0.5) continue;
+            float f = 0.25 * (texelFetch(flux_tex, ivec2(x, y), 0).r + texelFetch(flux_tex, min(ivec2(x + 1, y), size - 1), 0).r +
+                              texelFetch(flux_tex, min(ivec2(x, y + 1), size - 1), 0).r + texelFetch(flux_tex, min(ivec2(x + 1, y + 1), size - 1), 0).r);
+            sum += log2(f + pc.p1.x);
+            lin += f;
+            mx = max(mx, f);
+            n += 1.0;
+        }
+    }
+    s_sum[t] = sum; s_max[t] = mx; s_n[t] = n; s_lin[t] = lin;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1u) {
+        if (t < s) { s_sum[t] += s_sum[t + s]; s_max[t] = max(s_max[t], s_max[t + s]); s_n[t] += s_n[t + s]; s_lin[t] += s_lin[t + s]; }
+        barrier();
+    }
+    if (t == 0u) {
+        N.v[0] = s_n[0] > 0.0 ? s_sum[0] / s_n[0] : log2(pc.p1.x);
+        N.v[1] = s_n[0] > 0.0 ? s_lin[0] / s_n[0] : 0.0;
+        N.v[2] = s_n[0];
+        N.v[3] = s_max[0];
+    }
+}

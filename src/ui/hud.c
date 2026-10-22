@@ -129,6 +129,34 @@ static void draw_vitals(World *w, GuiRect safe) {
     gd_text(&num, x + bw + gui_s(10), hy + (row - gd_line_height(num.size)) * 0.5f, b);
 }
 
+// Night vision goggles (docs/NIGHT_OPTICS.md): a chip right of the vitals while the local player
+// carries an nvg: its state (lit while down, "IR" with the illuminator), the battery as a pill bar
+// and the key. Local only: a spectator sees the watched player's image, not their inventory.
+static void draw_nvg_chip(World *w, GuiRect safe) {
+    Player *p = hud_player();
+    if (!p || !p->local) return;
+    float charge = 0.0f;
+    u16 item = 0;
+    if (!nvg_local_item(&charge, &item)) return;
+    bool on = nvg_local_want();
+    float bw = gui_s(gui_tok("hud_vitals_w")), lab = gui_s(gui_tok("hud_vitals_label_w")), numw = gui_s(gui_tok("hud_vitals_num_w"));
+    float row = gui_s(gui_tok("hud_vitals_row_h"));
+    float total = lab + bw + numw, x = gui_w() * 0.5f + total * 0.5f + gui_s(40);
+    float y = safe.y + safe.h - 2.0f * row + gui_s(4);
+    GuiRect pill = { x, y, gui_s(54), gui_s(20) };
+    gd_round(pill, pill.h * 0.5f, on ? TH->select : gui_rgba_mul(TH->slot_hi, 0.9f));
+    GuiText t = { gui_s(TH->t_tiny), GW_SEMIBOLD, on ? TH->text_dark : TH->text_dim, GUI_CENTER, 0.1f, true, false, 0 };
+    gd_text(&t, pill.x + pill.w * 0.5f, pill.y + (pill.h - gd_line_height(t.size)) * 0.5f, nvg_local_ir() ? "NVG IR" : "NVG");
+    bar(gui_rect(x, y + pill.h + gui_s(8), pill.w, gui_s(4)), charge, charge < 0.2f ? TH->danger : TH->hud_text, gui_rgba_mul(TH->slot_hi, 0.8f));
+    char b[16];
+    snprintf(b, sizeof(b), "%d%%", (int)lroundf(charge * 100.0f));
+    caps(x + pill.w + gui_s(8), y + (pill.h - gui_s(TH->t_tiny)) * 0.5f - gui_s(1), gui_s(TH->t_tiny), charge < 0.2f ? TH->danger : TH->text_dim, GUI_LEFT, b);
+    char key[32];
+    binding_name(input_get_binding(ACT_NVG, 0), key, sizeof(key));
+    caps(x + pill.w + gui_s(8), y + pill.h + gui_s(2), gui_s(TH->t_tiny), TH->text_faint, GUI_LEFT, key);
+    DG_UNUSED(w);
+}
+
 static const char *hud_fire_mode_name(int m) { return m == FM_SINGLE ? "Single" : (m == FM_BURST ? "Burst" : "Auto"); }
 
 static void draw_ammo(Game *g, World *w, GuiRect safe) {
@@ -549,16 +577,25 @@ void hud_draw(void) {
     draw_prompt(g);
     draw_hang_prompts();
     draw_damage_indicators(g);
+    // HUD rules while the night vision goggles are down (docs/NIGHT_OPTICS.md): dimmed (the eye is on
+    // the tube) and minimal: vitals, ammo, weapons, hints; no compass, pings or kill feed.
+    float nvg = nvg_hud_amount();
+    gd_alpha_push(1.0f - 0.65f * nvg);
     draw_vitals(w, safe);
+    draw_nvg_chip(w, safe);
     draw_ammo(g, w, safe);
     draw_weapon_list(g, w, safe);
     draw_hints(g, safe);
-    hud_story_draw(safe);
-    hud_pings_draw(g, safe);
-    s_compass_bottom = hud_compass_draw(g, safe);
-    gd_alpha_push(hud_cvars()->opacity->f);
-    hud_kills_draw(g, safe);
     gd_alpha_pop();
+    hud_story_draw(safe);
+    s_compass_bottom = 0.0f;
+    if (nvg < 0.5f) {
+        hud_pings_draw(g, safe);
+        s_compass_bottom = hud_compass_draw(g, safe);
+        gd_alpha_push(hud_cvars()->opacity->f);
+        hud_kills_draw(g, safe);
+        gd_alpha_pop();
+    }
     Player *p = hud_player();
     if (p && p->local && p->sim.move.mode == MOVE_DEAD && spectator_mode() == SPEC_OFF) {
         GuiText t = { gui_s(TH->t_huge * 1.2f), GW_SEMIBOLD, TH->danger, GUI_CENTER, 0.2f, true, true, 0 };

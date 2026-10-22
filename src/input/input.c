@@ -37,7 +37,7 @@ static const char *k_action_names[ACT_COUNT] = {
     "slot1", "slot2", "slot3", "slot4", "slot5", "slot6", "slot7", "slot8", "slot9",
     "nextitem", "previtem", "firemode", "flashlight", "vehiclecam", "headlights", "horn",
     "phoneui", "phonegallery", "phone", "phoneselfie", "phonenav",
-    "healwheel", "ping", "plate",
+    "healwheel", "ping", "plate", "nvg", "opticmode",
 };
 
 static const char *k_action_labels[ACT_COUNT] = {
@@ -48,6 +48,7 @@ static const char *k_action_labels[ACT_COUNT] = {
     "Next Item", "Previous Item", "Fire Mode", "Flashlight / Enter Vehicle", "Vehicle Camera", "Headlights", "Horn",
     "Phone: Use Screen (cursor)", "Phone: Gallery", "Phone: Take Out / Put Away", "Phone: Front / Back Camera", "Phone: Navigate Screen (hold)",
     "Healing Wheel (hold) / Quick Heal (tap)", "Ping (tap) / Ping Wheel (hold)", "Insert Armor Plate",
+    "Night Vision (tap) / IR Illuminator (hold)", "Optic Mode (thermal palette)",
 };
 
 const char *action_name(Action a) { return (a >= 0 && a < ACT_COUNT) ? k_action_names[a] : "?"; }
@@ -107,6 +108,8 @@ void input_reset_bindings(void) {
     IN->binds[ACT_PING][0] = mouse(SDL_BUTTON_MIDDLE);
     IN->binds[ACT_PING][1] = key(SDL_SCANCODE_Z);
     IN->binds[ACT_PLATE][0] = key(SDL_SCANCODE_V);   // shared with the vehicle camera: no plating in a seat
+    IN->binds[ACT_NVG][0] = key(SDL_SCANCODE_8);     // shared with slot 8 (wheel option / spectator target): NVG only outside those
+    IN->binds[ACT_OPTIC_MODE][0] = key(SDL_SCANCODE_N);
 }
 
 static bool binding_eq(Binding a, Binding b) { return a.type == b.type && a.code == b.code; }
@@ -127,7 +130,7 @@ void input_bind_missing_defaults(void) {
         for (int s = 0; s < BINDS_PER_ACTION; s++) {
             if (def[a][s].type == BIND_NONE) continue;
             bool taken = false;
-            for (int o = 0; o < ACT_COUNT && !taken && a != ACT_PHONE_UI; o++)   // phoneui shares Alt with walk by design
+            for (int o = 0; o < ACT_COUNT && !taken && a != ACT_PHONE_UI && a != ACT_NVG; o++)   // phoneui shares Alt with walk, nvg 8 with slot 8 by design
                 for (int t = 0; t < BINDS_PER_ACTION; t++) taken |= binding_eq(IN->binds[o][t], def[a][s]);
             if (!taken) IN->binds[a][s] = def[a][s];
         }

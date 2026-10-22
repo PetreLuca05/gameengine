@@ -451,6 +451,8 @@ static void graphics_comfort(GuiCursor *c) {
     row_slider_cvar(c, "Screen effects", "r_post_feedback", 0.5f, 1, 0.05f, "%.2f", "Damage, flash and low-health effects (photosensitivity).");
     static const char *const gore[] = { "Off", "Low", "High" };
     row_combo_cvar(c, "Gore", "gore_level", gore, 3, "Off: neutral impact puffs (hits stay readable), no blood.");
+    row_slider_cvar(c, "Night vision brightness floor", "nvg_brightness_floor", 0, 0.15f, 0.01f, "%.2f",
+                    "The darkest the night vision image gets (low vision). The goggles' look is otherwise fixed.");
 }
 
 static void tab_graphics_normal(GuiCursor *c) {

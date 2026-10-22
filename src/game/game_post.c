@@ -62,8 +62,7 @@ static struct {
     char vol_level[64];
     float lut_loaded_mod;
     // feedback state
-    float sprint, lowhealth, desat, flash, nightvision_w;
-    bool nightvision;
+    float sprint, lowhealth, desat, flash;
     // photo mode
     bool photo;
     float photo_focus, photo_fstop, photo_focal, photo_exposure, photo_vignette, photo_grain, photo_temp, photo_sat;
@@ -212,9 +211,10 @@ static void cmd_reload_volumes(int argc, const char **argv) {
 }
 
 static void cmd_flash(int argc, const char **argv) { game_post_flash(argc > 1 ? (float)atof(argv[1]) : 1.0f); }
+// The old screen tint is gone: night vision is the goggles (an nvg item, key 8, docs/NIGHT_OPTICS.md).
 static void cmd_nightvision(int argc, const char **argv) {
-    GP.nightvision = argc > 1 ? atoi(argv[1]) != 0 : !GP.nightvision;
-    log_info("night vision %s", GP.nightvision ? "on" : "off");
+    DG_UNUSED(argc); DG_UNUSED(argv);
+    cbuf_add("nvg\n");
 }
 
 // post_bench [frames] [label]: average GPU time per frame graph pass over N frames.
@@ -390,7 +390,7 @@ void game_post_init(void) {
     cmd_register("post_volumes", cmd_volumes, "list the post volumes of the level and their weights here");
     cmd_register("post_reload", cmd_reload_volumes, "reload the level's post volumes");
     cmd_register("post_flash", cmd_flash, "post_flash [strength]: flashbang screen effect");
-    cmd_register("nightvision", cmd_nightvision, "toggle the night vision effect");
+    cmd_register("nightvision", cmd_nightvision, "nightvision: the night vision goggles on / off (as nvg; needs an nvg item)");
     cmd_register("post_bench", cmd_bench, "post_bench [frames] [label]: average GPU ms per render pass");
     cmd_register("perf_stop", cmd_perf_stop, "perf_stop [frames=300] [label]: avg / worst CPU and GPU frame time, draws, triangles over N frames");
     cmd_register("post_status", cmd_post_status, "print the active post settings");
@@ -496,7 +496,6 @@ static void apply_feedback(PostSettings *s, const PostFrameInfo *fi, float dt) {
     float sprint_t = fi->sprinting ? 1.0f : 0.0f;
     GP.sprint += (sprint_t - GP.sprint) * (1.0f - expf(-dt * 4.0f));
     GP.flash = fmaxf(0.0f, GP.flash - dt * 0.45f);
-    GP.nightvision_w += ((GP.nightvision ? 1.0f : 0.0f) - GP.nightvision_w) * (1.0f - expf(-dt * 8.0f));
     float hm = 0.0f;
     if (g && g->hitmarker_time > 0) hm = saturate(g->hitmarker_time / crosshair_hitmarker_duration(g->hitmarker_kill)) * (g->hitmarker_kill ? 0.6f : 0.3f);
     s->fb_damage = (g ? saturate(g->damage_flash) : 0.0f) * k;
@@ -514,9 +513,7 @@ static void apply_feedback(PostSettings *s, const PostFrameInfo *fi, float dt) {
     }
     s->fb_sprint = GP.sprint * 0.6f * k;
     s->fb_underwater = GP.underwater->f;
-    s->fb_nightvision = GP.nightvision_w;
     s->fb_desaturate = GP.desat * 0.85f * k;
-    if (GP.nightvision_w > 0.01f) s->exposure_comp += 2.5f * GP.nightvision_w;   // amplified light
     if (GP.desat > 0.01f) s->fb_tint = v3_lerp(v3(1, 1, 1), v3(0.85f, 0.8f, 0.8f), GP.desat);
 }
 
@@ -560,6 +557,7 @@ void game_post_frame(const PostFrameInfo *fi) {
     apply_feedback(&s, fi, dt);
     game_death_post(&s);   // death sequence / downed variant (game_death.c)
     peek_post(&s);   // door peek: fisheye through the visor
+    nvg_post(&s);    // night vision goggles: the intensifier replaces the grade (game_nvg.c)
     apply_photo(&s);
     // With ADS DoF on (game_sights.c), aiming switches the DoF exactly when the aim completes;
     // the older button-driven "ADS only" mode stays for ads_dof 0.

@@ -83,7 +83,18 @@ float post_direct_exposure(void);                  // Off: fixed exposure multip
 // Diagnostics (profiler overlay, tests)
 float post_exposure_ev(void);                      // last known exposure (EV100), host readback
 bool post_lut_load_cube(const char *path, int slot);   // NULL = identity
-bool post_hdr_capture(const char *exr_path);       // next frame: write the linear HDR output as EXR
+bool post_hdr_capture(const char *exr_path);
+// Night vision goggles (post_nvg.c, docs/NIGHT_OPTICS.md): the intensifier's state for nvg_debug /
+// tests, and the tube protection's shutoff (true once per trip; the game switches the goggles off).
+typedef struct NvgPostStats {
+    float phi_mean, phi_current, gain, log_gain, whiteout, flicker, overbright;
+    float tube_scale, halo_px;
+    int quality;
+    bool nir;
+} NvgPostStats;
+const NvgPostStats *post_nvg_stats(void);
+bool post_nvg_take_shutoff(void);
+int post_night_optics_quality(void);            // r_night_optics (fidelity tier): NVG and thermal       // next frame: write the linear HDR output as EXR
 bool post_exr_capture_armed(void);                 // this frame copies an EXR capture (wait for the fence)
 void post_exr_finish(void);                        // after the fence: write the file
 

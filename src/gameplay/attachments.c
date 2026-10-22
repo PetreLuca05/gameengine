@@ -158,6 +158,9 @@ static void parse_attachment(AttachmentDef *a, const cJSON *j, const char *file)
     {
         const char *em = jstr(j, "emitter", "");
         a->emitter = !strcmp(em, "light") ? 1 : !strcmp(em, "laser") ? 2 : 0;
+        a->sensor = !strcmp(jstr(j, "sensor", ""), "thermal") ? SENSOR_THERMAL : SENSOR_OPTICAL;
+        a->zoom_max = (int)clampf(jnum(j, "zoom_max", 1.0f), 1.0f, 4.0f);
+        a->battery_h = jnum(j, "battery_h", 0.0f);
     }
     const cJSON *mf;
     cJSON_ArrayForEach(mf, cJSON_GetObjectItemCaseSensitive(j, "mesh_for")) {

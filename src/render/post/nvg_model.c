@@ -144,10 +144,11 @@ void nvg_step(NvgState *s, const NvgConfig *c, const NvgVariant *v, const NvgInp
     if (s->log_gain < lo) { s->log_gain = lo; s->vel = DG_MAX(s->vel, 0.0f); }
     if (s->log_gain > hi) { s->log_gain = hi; s->vel = DG_MIN(s->vel, 0.0f); }
 
-    // whiteout: the mean over saturation or a peak over c->overload x saturation, log scale (2 stops
+    // whiteout: the log mean over saturation or the photocurrent (linear mean: a few small lamps
+    // barely move it, a light filling the tube does) over c->overload x saturation, log scale (2 stops
     // over = full whiteout)
     float g = nvg_gain(s);
-    float load = g * DG_MAX(in->phi_peak / c->overload, in->phi_mean) / c->y_sat;
+    float load = g * DG_MAX(in->phi_current / c->overload, in->phi_mean) / c->y_sat;
     float over = log2f(DG_MAX(load, 1e-6f));
     float w_target = DG_CLAMP(over * 0.5f, 0.0f, 1.0f);
     if (w_target > s->whiteout)

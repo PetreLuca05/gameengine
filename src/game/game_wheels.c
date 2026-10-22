@@ -559,4 +559,5 @@ void wheels_register(void) {
     cmd_register("peek", cmd_peek, "peek through the visor of the door you look at (again: stop)");
     peek_register();
     lean_register();
+    nvg_register();
 }

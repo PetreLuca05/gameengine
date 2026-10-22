@@ -101,6 +101,12 @@ typedef struct ItemDef {
     bool camera;
     bool builtin;              // always carried, outside the inventory (taken out with its own key)
     bool hands;                // "hands": true: a tool taken into the hands like a consumable (the flashlight)
+    // Battery-powered items (docs/NIGHT_OPTICS.md): runtime in hours of real time on one battery_aa;
+    // the charge is InvItem.dur (0..durability = NVG_CHARGE_FULL). "nvg": the goggles' variant
+    // (assets/nvg/nvg.json): key 8 uses the first such item with charge.
+    float battery_h;
+    char nvg[16];
+    bool battery_cell;         // "battery_cell": true: replaces another item's battery (II_RECHARGE)
     char hold_style_alt[16];   // "hold": { "style_landscape" }: two-handed landscape hold style
     // Worn on a character ("worn", docs/CHARACTERS.md "Worn gear"): the bone (empty = the slot's), the
     // item origin relative to it in the character's model axes at the bind pose (m: x right, y up, z back)
@@ -134,6 +140,7 @@ typedef struct WeaponModelPart { vec3 offset; vec3 half; vec4 color; u8 mech; } 
 typedef enum AttachSlot { ATT_OPTIC, ATT_MUZZLE, ATT_UNDERBARREL, ATT_MAGAZINE, ATT_STOCK } AttachSlot;
 typedef enum SightKind { SIGHT_IRON, SIGHT_REDDOT, SIGHT_SCOPE } SightKind;
 typedef enum ReticleShape { RET_DOT, RET_CIRCLE_DOT, RET_DUPLEX, RET_MILDOT } ReticleShape;
+typedef enum SightSensor { SENSOR_OPTICAL, SENSOR_THERMAL } SightSensor;
 
 typedef struct Reticle {
     int shape;                // ReticleShape
@@ -186,6 +193,12 @@ typedef struct AttachmentDef {
     i8 grid_dw, grid_dh;      // inventory footprint change of the weapon carrying it ("grid", docs/INVENTORY.md)
     int muzzle_device;        // VfxMuzzleDevice, -1 = keep ("muzzle_device" string, or the "kind" of its object)
     int emitter;              // "emitter": "light" (1) | "laser" (2): the flashlight toggle drives it (its mesh's emitter socket)
+    // Digital optics (docs/NIGHT_OPTICS.md): "sensor": "thermal" renders the PiP with the thermal pass;
+    // digital zoom steps 1..zoom_max (mouse wheel while ADS); battery runtime (h of real time; the
+    // charge is the carrying weapon's InvItem.dur counted as used, 0 = full).
+    int sensor;               // SightSensor
+    int zoom_max;
+    float battery_h;
     bool bal_device;          // the "muzzle_device" object is a ballistics device block (gameplay/ballistics)
     bool has_grip_l;
     Xform grip_l;             // underbarrel grips: left hand socket (attachment space)

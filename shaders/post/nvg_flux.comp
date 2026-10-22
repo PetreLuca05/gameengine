@@ -1,0 +1,27 @@
+#version 450
+// Night vision, stage 1 (docs/NIGHT_OPTICS.md "Photocathode input"): the photocathode flux at the
+// tube's internal resolution. A Gen-3 GaAs photocathode sees red and near-IR far better than blue:
+//   flux = k_vis * dot(hdr, w_GaAs) + k_nir * NIR
+// hdr is the linear scene before exposure (the goggles have their own gain), NIR the near-IR image
+// (nvg_nir.comp: moon / stars / airglow on IR-reflective surfaces, IR lights, self-emission).
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D color_tex;
+layout(set = 0, binding = 1) uniform sampler2D nir_tex;
+layout(set = 0, binding = 8, r16f) uniform writeonly image2D dst;
+// pc.p0.xyz photocathode weights, p0.w k_vis; p1.x k_nir, p1.y NIR present
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(dst);
+    if (p.x >= size.x || p.y >= size.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(size);
+    // a 2 x 2 box over the source: the tube resamples (the photocathode integrates over its pixel)
+    vec2 o = 0.25 / vec2(size);
+    vec3 c = 0.25 * (textureLod(color_tex, uv + vec2(-o.x, -o.y), 0.0).rgb + textureLod(color_tex, uv + vec2(o.x, -o.y), 0.0).rgb +
+                     textureLod(color_tex, uv + vec2(-o.x, o.y), 0.0).rgb + textureLod(color_tex, uv + vec2(o.x, o.y), 0.0).rgb);
+    float flux = pc.p0.w * dot(max(c, vec3(0.0)), pc.p0.xyz);
+    if (pc.p1.y > 0.5) flux += pc.p1.x * max(textureLod(nir_tex, uv, 0.0).r, 0.0);
+    imageStore(dst, p, vec4(min(flux, 6.0e4), 0.0, 0.0, 0.0));
+}

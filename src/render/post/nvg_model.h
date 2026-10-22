@@ -60,7 +60,7 @@ typedef struct NvgConfig {
     float k_vis, k_nir;              // photocathode weights of the visible image / the NIR image
     float w_gaas[3];                 // photocathode spectral weights on linear RGB
     float y_sat;                     // screen saturation
-    float overload;                  // G * phi_peak / y_sat above which whiteout builds (log2 scale starts here)
+    float overload;                  // G * photocurrent / y_sat above which whiteout builds (log2 scale starts here)
     float flip_time;                 // s: flip-down / flip-up hand case
 } NvgConfig;
 
@@ -81,7 +81,8 @@ typedef struct NvgState {
 
 typedef struct NvgInput {
     float phi_mean;                  // mean photocathode flux in the circle (log average)
-    float phi_peak;                  // peak flux (muzzle flash, a lamp in the face): drives the whiteout
+    float phi_current;               // linear mean flux = the tube's photocurrent (a flashlight in the face, headlights,
+                                     // the own muzzle flash: much of the field very bright): drives the whiteout
     float dt;
 } NvgInput;
 

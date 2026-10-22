@@ -144,7 +144,14 @@ FgRes post_tonemap_build(FgRes color, FgRes bloom, FgRes flare);   // post_tonem
 FgRes post_debug_coc(void);                    // post_camera.c (debug views)
 FgRes post_debug_mb_tiles(void);
 u32 post_bloom_mips(void);
-void post_buffers_init_build(void);            // post_exposure.c: zero the exposure / histogram buffers once
+void post_buffers_init_build(void);
+// post_nvg.c: night vision goggles (docs/NIGHT_OPTICS.md). The intensifier from the linear HDR (+ the
+// near-IR image) to the display-linear output; normal = this frame's normal output (the flip), or none.
+void post_nvg_init(void);
+void post_nvg_shutdown(void);
+FgRes post_nvg_build(FgRes color, FgRes nir, FgRes normal);
+void post_nvg_idle(void);
+FgRes post_nvg_nir(void);                      // this frame's near-IR image (nvg_nir.c), FG_NONE if none            // post_exposure.c: zero the exposure / histogram buffers once
 void post_textures_init(void);                 // post_textures.c: noise, LUT, dirt, SMAA tables
 void post_textures_shutdown(void);
 bool post_lut_load_cube(const char *path, int slot);

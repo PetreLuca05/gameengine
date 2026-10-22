@@ -150,6 +150,7 @@ void game_respawn_player_at(World *w, int slot, vec3 pos, float yaw, float hp) {
     inv_ensure_pack(&p->inv.t, w->items);     // everyone wears at least the default bag
     w->flags[i] &= ~(u32)(EF_DEAD | EF_HIDDEN);   // hidden: joined dead (sv_join_dead)
     revive_sv_on_respawn(w, slot);
+    nvg_player_reset(slot);
     ent_set_pos(w, p->ent, pos, quat_yaw(yaw), true);
     spectate_on_respawn(slot);
     GameEvent ev;
@@ -192,6 +193,7 @@ void game_remove_player(World *w, int slot) {
     if (p->character) phys_character_destroy(w->phys, p->character);
     ent_destroy(w, p->ent);
     log_info("player %d '%s' left", slot, p->name);
+    nvg_player_reset(slot);
     memset(p, 0, sizeof(*p));
     p->peer = -1;
 }
@@ -298,6 +300,9 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     // A driver's right click holds the gun out at the hip: no aim-down-sights from it.
     if (p->sim.move.mode == MOVE_SEATED && p->sim.move.veh_onehand) c.buttons &= (u16)~BTN_AIM;
     if (p->sim.move.mode == MOVE_SWIM) c.buttons &= (u16)~BTN_AIM;
+    // Night vision goggles: the host's state / battery; no ADS while they are down or flipping.
+    if (w->authority && first) nvg_host_tick(w, slot, &c, dt);
+    if (nvg_blocks_ads(w, slot)) c.buttons &= (u16)~BTN_AIM;
     // Hanging: a sidearm is fired one-handed from the hip (the other hand holds the ledge); long guns stay slung.
     if (p->sim.move.mode == MOVE_HANG) {
         c.buttons &= (u16)~BTN_AIM;
@@ -344,6 +349,8 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     if (c.buttons & BTN_AIM) f |= EF_ADS;
     if (p->sim.wpn.recoil_kick > 0.8f) f |= EF_FIRING;
     if ((c.buttons & BTN_FLASHLIGHT) && m->mode != MOVE_DEAD && game_player_has_light(w, slot)) f |= EF_FLASHLIGHT;
+    if (w->authority) f |= nvg_entity_flags(slot);   // night vision goggles (game_nvg.c)
+    else f |= w->flags[i] & (EF_NVG | EF_NVG_IR);    // the client's prediction keeps the host's
     w->flags[i] = f;
     const InvSlot *eq = weapon_equipped(w, slot);
     w->item[i] = eq ? eq->item : 0;
@@ -547,6 +554,7 @@ static UserCmd build_cmd(void) {
     if (input_consume_press(ACT_FIREMODE)) c.buttons |= BTN_FIREMODE;
     if (G->flashlight) c.buttons |= BTN_FLASHLIGHT;
     if (G->phone_out) c.buttons |= BTN_PHONE;
+    nvg_fill_cmd(&c);   // night vision goggles (key 8, game_nvg.c)
     vehicles_fill_cmd(&c);
     if (G->noclip_request) { c.buttons |= BTN_NOCLIP; G->noclip_request = false; }
     wheels_filter_cmd(&c);   // E tap / hold on doors, the healing wheel's auto-use, open wheels (game_wheels.c)
@@ -792,6 +800,7 @@ static void handle_selection(void) {
     }
     if (phone_ui_blocks_game()) return;   // the gamepad drives the phone panel (phonenav held)
     vehicles_input();   // F / 1-4 / V / H while seated or looking at a vehicle
+    nvg_input_frame((float)g_engine.frame_dt, wheels_open() || spectator_controls_input());   // 8: night vision
     // The built-in phone (docs/PHONE.md): X takes it out over whatever is selected and puts it away
     // again; choosing a weapon puts it away too.
     if (input_consume_press(ACT_PHONE)) G->phone_out = !G->phone_out;
@@ -885,6 +894,7 @@ void game_frame(float dt) {
     PROF_BEGIN("focus_hud");
     update_focus();
     game_hud_tick(dt);
+    nvg_client_tick(dt);
     PROF_END();
 }
 

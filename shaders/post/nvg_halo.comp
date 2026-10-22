@@ -1,0 +1,41 @@
+#version 450
+// Night vision halo (docs/NIGHT_OPTICS.md "Bright sources"): a Gen-3 tube draws a soft disc of a
+// fixed angular size around every bright point (photoelectrons bouncing back from the MCP input
+// face), not a bloom that grows with exposure. Quarter resolution: the amplified flux above the
+// threshold gathered over a disc of the halo radius (32 / 16 Poisson taps), brighter towards the
+// centre. Its size is an angle: the radius in pixels comes from the FOV, the same on every screen.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+#include "nvg_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D flux_tex;
+layout(set = 0, binding = 8, r16f) uniform writeonly image2D dst;
+// pc.p0.x gain, p0.y threshold (screen units), p0.z radius (uv x), p0.w radius (uv y); p1.x strength; u0.x taps
+
+const vec2 POISSON[32] = vec2[](
+    vec2(-0.613, 0.617), vec2(0.170, -0.040), vec2(-0.299, 0.791), vec2(0.645, 0.493), vec2(-0.651, 0.717), vec2(0.421, 0.027),
+    vec2(-0.817, -0.271), vec2(-0.705, -0.668), vec2(0.977, -0.108), vec2(0.063, -0.548), vec2(0.428, -0.715), vec2(-0.237, -0.196),
+    vec2(-0.012, 0.358), vec2(0.257, 0.894), vec2(-0.968, 0.193), vec2(0.554, -0.384), vec2(0.858, 0.391), vec2(-0.452, -0.880),
+    vec2(-0.123, -0.912), vec2(0.312, 0.464), vec2(-0.461, 0.257), vec2(0.765, -0.598), vec2(-0.390, -0.483), vec2(0.081, 0.661),
+    vec2(-0.843, 0.468), vec2(0.637, 0.783), vec2(0.208, -0.316), vec2(-0.124, 0.084), vec2(-0.575, 0.012), vec2(0.952, 0.133),
+    vec2(0.355, -0.920), vec2(-0.243, 0.493));
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(dst);
+    if (p.x >= size.x || p.y >= size.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(size);
+    int taps = int(pc.u0.x);
+    float acc = 0.0, wsum = 0.0;
+    // the disc turned per pixel: the tap pattern becomes fine grain (in the noisy tube image) instead of blocks
+    float ang = nvg_rand3(uvec3(p, 911u)).x * 6.2831853;
+    mat2 rot = mat2(cos(ang), sin(ang), -sin(ang), cos(ang));
+    for (int i = 0; i < taps; i++) {
+        vec2 o = (rot * POISSON[i]) * pc.p0.zw;
+        float w = 1.0 - 0.6 * length(POISSON[i]);   // brighter towards the source
+        float f = textureLod(flux_tex, uv + o, 0.0).r * pc.p0.x;
+        acc += max(f - pc.p0.y, 0.0) * w;
+        wsum += w;
+    }
+    imageStore(dst, p, vec4(acc / max(wsum, 1e-4) * pc.p1.x, 0.0, 0.0, 0.0));
+}

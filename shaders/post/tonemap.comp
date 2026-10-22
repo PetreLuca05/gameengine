@@ -4,7 +4,7 @@
 //   HDR10:  Rec.2020 linear, nits / 10000 (final.frag: PQ encode)
 // Order: lens distortion + chromatic aberration -> bloom (energy conserving mix) + dirt + flare ->
 // exposure -> vignette -> white balance -> contrast / saturation -> feedback (damage, low health,
-// underwater, night vision, desaturate, tint) -> tonemapper (ACES fit, AgX, Khronos PBR Neutral)
+// underwater, desaturate, tint) -> tonemapper (ACES fit, AgX, Khronos PBR Neutral)
 // -> lift / gamma / gain -> 3D LUT -> colour-blind correction -> brightness / gamma -> flash.
 // With a Look (docs/LOOKS.md, s_look.x) the tonemapper is the look's baked LUT (binding 7: its whole
 // grade, look.glsl); the look also sets the bloom threshold / tint, halation, letterbox and the
@@ -177,16 +177,11 @@ void main() {
     float sat = U.s_tm.w * (1.0 - U.s_fb.y * 0.6 * (0.7 + 0.3 * pulse)) * (1.0 - U.s_fb2.w);
     c = max(mix(vec3(y), c, sat), vec3(0.0));
 
-    // Damage: red edge tint; underwater: blue-green absorption; night vision: green amplified mono.
+    // Damage: red edge tint; underwater: blue-green absorption. (Night vision goggles are their own
+    // profile: post_nvg.c, docs/NIGHT_OPTICS.md.)
     float edge = smoothstep(0.35, 1.0, vr);
     c = mix(c, c * U.s_look3.rgb + vec3(0.12 * U.s_look3.r / 1.3, 0.0, 0.0) * y, U.s_fb.x * (0.25 + 0.75 * edge));
     c = mix(c, c * vec3(0.35, 0.8, 0.9) + vec3(0.0, 0.02, 0.03), uw);
-    if (U.s_fb2.z > 0.0) {
-        float n = blue_noise(noise_tex, p).r - 0.5;
-        float l = luma(c) * 6.0 + n * 0.08;
-        vec3 nv = vec3(0.25, 1.0, 0.3) * l * (1.0 - 0.5 * smoothstep(0.5, 1.0, vr));
-        c = mix(c, nv, U.s_fb2.z);
-    }
     c *= U.s_fb_tint.rgb;
 
     vec3 o;

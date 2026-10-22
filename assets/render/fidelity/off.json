@@ -45,6 +45,7 @@
     "vfx_quality": {"avail": "on", "default": 0, "max": 0},
     "vfx_lighting": {"avail": "no"},
     "precip_quality": {"avail": "on", "default": 1, "allowed": [1]},
-    "water": {"avail": "on", "default": 0, "max": 0}
+    "water": {"avail": "on", "default": 0, "max": 0},
+    "night_optics": {"avail": "on", "default": 0, "max": 0}
   }
 }

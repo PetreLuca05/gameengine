@@ -931,6 +931,12 @@
    "reason": "Identity / network preferences / console.",
    "category": "network"
   },
+  "nvg_brightness_floor": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Night vision: the only player setting of the fixed intensifier look, a brightness floor for low-vision players (docs/NIGHT_OPTICS.md).",
+   "category": "rendering"
+  },
   "ow_zombies": {
    "class": "LOCKED+RULE",
    "ui": "Lobby rules",

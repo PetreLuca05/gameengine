@@ -430,6 +430,7 @@ bool post_init(void) {
     P.histogram_buf = vkr_buffer_create(256 * 4 + 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, false);
     post_textures_init();
     post_looks_init();
+    post_nvg_init();
     post_settings_default(&P.set);
     P.pending = P.set;
     P.ok = true;
@@ -450,6 +451,7 @@ void post_shutdown(void) {
     post_sights_shutdown();
     post_weather_shutdown();
     post_looks_shutdown();
+    post_nvg_shutdown();
     post_textures_shutdown();
     vkDestroySampler(R->device, P.linear, NULL);
     vkDestroySampler(R->device, P.linear_repeat, NULL);
@@ -528,7 +530,7 @@ void post_begin_frame(const PostFrameIn *in) {
     u->s_gain = v4(s->gain.x, s->gain.y, s->gain.z, (float)s->colorblind);
     u->s_out = v4(R->swap_hdr ? 1.0f : 0.0f, s->paper_white, s->max_nits, s->brightness);
     u->s_fb = v4(s->fb_damage, s->fb_lowhealth, s->fb_flash, s->fb_hitmarker);
-    u->s_fb2 = v4(s->fb_sprint, s->fb_underwater, s->fb_nightvision, s->fb_desaturate);
+    u->s_fb2 = v4(s->fb_sprint, s->fb_underwater, 0.0f, s->fb_desaturate);
     u->s_fb_tint = v4(s->fb_tint.x, s->fb_tint.y, s->fb_tint.z, s->user_gamma);
     u->s_fb3 = v4(saturate(s->fb_black), saturate(s->fb_blur), 0.0f, 0.0f);
     u->s_look = v4(s->look_lut >= 0 && s->look_lut < POST_LOOKS ? 1.0f : 0.0f, s->bloom_threshold, s->halation, s->letterbox);

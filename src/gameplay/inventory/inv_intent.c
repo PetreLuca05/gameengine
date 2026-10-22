@@ -21,7 +21,7 @@ static InvTree g_scratch[WORK_SIDES];
 
 const char *inv_intent_name(int type) {
     static const char *n[II_COUNT] = { "none", "move", "rotate", "equip", "quick_move", "split", "discard", "use",
-                                       "mount", "unmount", "fold", "unload", "hold", "take_all", "compact" };
+                                       "mount", "unmount", "fold", "unload", "hold", "take_all", "compact", "recharge" };
     return type >= 0 && type < II_COUNT ? n[type] : "?";
 }
 
@@ -401,6 +401,40 @@ static void consume_one(Work *W, InvItem *a) {
     if (--a->s.count == 0) memset(a, 0, sizeof(*a));
 }
 
+// Battery state of an instance (docs/NIGHT_OPTICS.md): items with battery_h hold their charge in
+// dur (full = durability); a weapon carrying a powered optic holds the charge used in dur (0 = full).
+int inv_battery_kind(const ItemDB *db, const InvSlot *s) {
+    const ItemDef *d = item_def(db, s->item);
+    if (d->battery_h > 0.0f && d->durability) return INV_BATTERY_ITEM;
+    if (item_weapon(db, s->item)) {
+        const AttachmentDef *a = attach_def(db, s->att[ATT_OPTIC]);
+        if (a && a->battery_h > 0.0f) return INV_BATTERY_OPTIC;
+    }
+    return INV_BATTERY_NONE;
+}
+
+float inv_battery_charge(const ItemDB *db, const InvItem *it) {
+    switch (inv_battery_kind(db, &it->s)) {
+    case INV_BATTERY_ITEM: return (float)it->dur / (float)item_def(db, it->s.item)->durability;
+    case INV_BATTERY_OPTIC: return 1.0f - DG_MIN((float)it->dur, (float)INV_BATTERY_FULL) / (float)INV_BATTERY_FULL;
+    default: return 0.0f;
+    }
+}
+
+static int recharge(Work *W, int s, InvItem *a) {
+    int kind = inv_battery_kind(W->db, &a->s);
+    if (kind == INV_BATTERY_NONE) return IIR_NOT_USABLE;
+    if (inv_battery_charge(W->db, a) >= 1.0f) return IIR_NOOP;
+    InvTree *t = W->t[s];
+    InvItem *cell = NULL;
+    for (int i = 0; i < INV_MAX_ITEMS && !cell; i++)
+        if (inv_alive(&t->items[i]) && item_def(W->db, t->items[i].s.item)->battery_cell) cell = &t->items[i];
+    if (!cell) return IIR_NOT_USABLE;
+    a->dur = kind == INV_BATTERY_ITEM ? item_def(W->db, a->s.item)->durability : 0;
+    if (--cell->s.count == 0) inv_free_subtree(t, cell->uid);
+    return IIR_OK;
+}
+
 bool inv_holdable(const ItemDef *d) {
     if (d->builtin) return false;
     return d->kind == ITEM_CONSUMABLE || d->kind == ITEM_THROWABLE || d->hands;
@@ -635,6 +669,7 @@ static int apply(Work *W, const InvCtx *ctx, const InvIntent *in) {
         W->last_side = ls;
         return top ? IIR_OK : IIR_FULL;
     }
+    case II_RECHARGE: return s == INV_SIDE_SELF ? recharge(W, s, a) : IIR_NOT_USABLE;
     case II_USE: {
         if (s != INV_SIDE_SELF) return IIR_NOT_USABLE;
         if (ad->kind != ITEM_CONSUMABLE && ad->use_type == INV_USE_NONE) return IIR_NOT_USABLE;

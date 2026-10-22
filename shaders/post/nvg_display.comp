@@ -1,0 +1,87 @@
+#version 450
+// Night vision display (docs/NIGHT_OPTICS.md "Optics and display"), output resolution: the tube image
+// through the fiber-optic plate and the eyepiece:
+//   phosphor MTF   a small Gaussian in tube pixels (the image is softer than the screen)
+//   edge           softness and slight pincushion growing outside 70 % of the radius, eyepiece vignette
+//   fiber plate    a faint honeycomb (hexagonal fiber bundles) at low output, chicken wire (bundle
+//                  boundaries) fainter still
+//   blemishes      a few black spots, static per goggles (the item instance seeds them)
+//   phosphor       monochrome: P43 green or P45 white
+//   mask           one circle per tube (figure 8 for a dual tube), black outside
+//   flip           the transition from the normal image (the housing passes in front of the eye)
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+#include "nvg_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D tube_tex;
+layout(set = 0, binding = 1) uniform sampler2D normal_tex;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
+// pc.p0: focal length (output px), tubes, circle deg, tube separation deg
+// pc.p1: phosphor rgb, brightness floor
+// pc.p2: flip (0 normal .. 1 goggles), MTF sigma (uv), pattern strength, normal image present
+// pc.p3: blemish count, honeycomb period (px), unused, unused
+// pc.u0: seed
+
+float hex_dist(vec2 p) {   // distance to the nearest hexagonal cell centre (cells of unit size)
+    const vec2 s = vec2(1.0, 1.7320508);
+    vec2 a = mod(p, s) - s * 0.5, b = mod(p - s * 0.5, s) - s * 0.5;
+    return min(dot(a, a), dot(b, b));
+}
+
+float hex_edge(vec2 p) {   // 0 on a cell boundary .. 1 in the middle
+    const vec2 s = vec2(1.0, 1.7320508);
+    vec2 a = mod(p, s) - s * 0.5, b = mod(p - s * 0.5, s) - s * 0.5;
+    vec2 g = dot(a, a) < dot(b, b) ? a : b;
+    g = abs(g);
+    float d = max(dot(g, normalize(s)), g.x);
+    return clamp((0.5 - d) * 8.0, 0.0, 1.0);
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(dst);
+    if (p.x >= size.x || p.y >= size.y) return;
+    vec2 xy = vec2(p) + 0.5 - vec2(size) * 0.5;
+    float f = pc.p0.x;
+    float mask = nvg_mask(xy, f, pc.p0.y, pc.p0.z, pc.p0.w);
+    float rad = nvg_radial(xy, f, pc.p0.y, pc.p0.z, pc.p0.w);
+    vec2 uv = (vec2(p) + 0.5) / vec2(size);
+    float edge = smoothstep(0.7, 1.0, rad);
+    // pincushion near the rim: sample slightly towards the centre
+    vec2 cuv = uv - 0.5;
+    uv = 0.5 + cuv * (1.0 - 0.025 * edge * edge);
+    float sig = pc.p2.y * (1.0 + 2.5 * edge);
+    float y = 0.0, wsum = 0.0;
+    for (int j = -1; j <= 1; j++)
+        for (int i = -1; i <= 1; i++) {
+            float w = exp(-0.5 * float(i * i + j * j));
+            y += textureLod(tube_tex, uv + vec2(i, j) * sig, 0.0).r * w;
+            wsum += w;
+        }
+    y /= wsum;
+    // the fiber-optic plate: honeycomb at low output, chicken wire along the bundle boundaries
+    float per = pc.p3.y;
+    float low = 1.0 - smoothstep(0.05, 0.45, y);
+    float hc = 1.0 - pc.p2.z * 0.10 * low * (1.0 - smoothstep(0.0, 0.18, hex_dist(xy / per)));
+    float cw = 1.0 - pc.p2.z * 0.06 * low * (1.0 - hex_edge(xy / (per * 14.0)));
+    y *= hc * cw;
+    // blemishes: small dark spots inside the field
+    for (int i = 0; i < int(pc.p3.x); i++) {
+        vec3 r = nvg_rand3(uvec3(pc.u0.x, uint(i), 77u));
+        float ang = r.x * 6.2831853, dist = sqrt(r.y) * 0.85;
+        vec2 c = vec2(cos(ang), sin(ang)) * dist * f * tan(radians(pc.p0.z * 0.5));
+        float s = (0.8 + 2.2 * r.z) * per;
+        y *= mix(0.15, 1.0, smoothstep(s * 0.4, s, length(xy - c)));
+    }
+    // eyepiece vignette + edge softness
+    y *= 1.0 - 0.35 * edge;
+    y = max(y, pc.p1.w);
+    vec3 nvg = pc.p1.rgb * y * mask;
+    // the flip: the housing swings in front of the eye (dark in the middle), then the tube
+    float a = clamp(pc.p2.x, 0.0, 1.0);
+    vec3 normal = pc.p2.w > 0.5 ? textureLod(normal_tex, (vec2(gl_GlobalInvocationID.xy) + 0.5) / vec2(imageSize(dst)), 0.0).rgb : vec3(0.0);
+    float show = smoothstep(0.45, 0.8, a);
+    float dark = 1.0 - 0.92 * exp(-pow((a - 0.55) / 0.16, 2.0));
+    vec3 c = mix(normal, nvg, show) * dark;
+    imageStore(dst, p, vec4(c, 1.0));
+}

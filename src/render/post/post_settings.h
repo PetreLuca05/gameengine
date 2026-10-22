@@ -5,6 +5,7 @@
 #define DG_POST_SETTINGS_H
 
 #include "core/dgmath.h"
+#include "render/post/nvg_model.h"
 
 typedef enum PostAA { POST_AA_OFF, POST_AA_FXAA, POST_AA_SMAA, POST_AA_TAA } PostAA;
 typedef enum PostUpscaler { POST_UP_OFF, POST_UP_TAAU, POST_UP_FSR1, POST_UP_FSR2, POST_UP_DLSS } PostUpscaler;
@@ -76,11 +77,24 @@ typedef struct PostSettings {
     bool hdr_output;
     float paper_white, max_nits;
     // gameplay feedback (0..1 weights, blended in by game_post.c)
-    float fb_damage, fb_lowhealth, fb_flash, fb_hitmarker, fb_sprint, fb_underwater, fb_nightvision;
+    float fb_damage, fb_lowhealth, fb_flash, fb_hitmarker, fb_sprint, fb_underwater;
     vec3 fb_tint;
     vec3 fb_damage_color, fb_lowhealth_color;   // the look's damage edge tint / low-health vignette colour
     float fb_desaturate;
     float fb_black, fb_blur;       // death sequence (docs/REVIVE.md): black cut, mild screen blur
+    // Night vision goggles (docs/NIGHT_OPTICS.md, post_nvg.c): while amount > 0 (the flip, 1 = down)
+    // the intensifier replaces exposure / bloom / tonemap / grade. The variant and the photocathode
+    // come from assets/nvg/nvg.json; seed = the goggles' item instance (blemishes, fixed pattern);
+    // flash = a peak flux kick (the own muzzle flash) for the whiteout.
+    struct {
+        float amount;
+        NvgVariant v;
+        float w_gaas[3], k_vis, k_nir, y_sat, overload;
+        float floor;
+        float flash;
+        u32 seed;
+        bool nir;                  // render the near-IR image (nvg_nir.comp)
+    } nvg;
     // debug
     int debug_view;                // index into post_debug_names (0 = off)
     bool compare_split;            // left half: no post (tonemap only), right half: full stack

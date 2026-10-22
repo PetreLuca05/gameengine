@@ -190,7 +190,7 @@ static bool parse_intent(int argc, const char **argv, InvIntent *in) {
 static void cmd_inv_intent(int argc, const char **argv) {
     InvIntent in;
     if (!parse_intent(argc, argv, &in)) {
-        log_info("usage: inv_intent <move|rotate|equip|quick_move|split|discard|use|mount|unmount|fold|unload|hold|take_all|compact> <self|loot> <src uid> "
+        log_info("usage: inv_intent <move|rotate|equip|quick_move|split|discard|use|mount|unmount|fold|unload|hold|take_all|compact|recharge> <self|loot> <src uid> "
                  "[<self|loot> <dst uid|auto> [loc|slot x y rot [count [aux]]]]");
         return;
     }

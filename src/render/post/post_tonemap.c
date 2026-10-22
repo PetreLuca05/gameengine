@@ -15,6 +15,7 @@ static struct {
     u32 dbg_level;
     // EXR capture
     FgRes exr_src;
+    bool nvg_direct;           // Engine Fidelity Off with the goggles down: the final pass encodes their output
     GpuBuffer exr_buf;
     u32 exr_w, exr_h;
     bool exr_armed;
@@ -120,14 +121,22 @@ FgRes post_resolve(void) {
     memset(&T, 0xff, sizeof(T));
     T.dbg_view = 0;
     T.dbg_level = 0;
+    T.nvg_direct = false;
     T.exr_armed = false;
     memset(&T.exr_buf, 0, sizeof(T.exr_buf));
     if (P.set.direct_output) {
         // Engine Fidelity Off: no post pass at all. The weapon sights (aiming) and the lens droplets
         // (rain on the camera hides the same at every level, docs/SETTINGS_AUDIT.md V11) stay; the
-        // final pass shows the lit HDR through final_direct.frag.
+        // final pass shows the lit HDR through final_direct.frag. Night vision goggles are gameplay:
+        // their image runs at every level (the simplified tube at Off).
         T.color = post_lens_build(post_sights_build(P.in.hdr));
         T.ldr = T.color;
+        if (P.set.nvg.amount >= 1.0f) {
+            T.ldr = post_nvg_build(T.color, post_nvg_nir(), FG_NONE);
+            T.nvg_direct = T.ldr != T.color;
+        } else {
+            post_nvg_idle();
+        }
         post_look_preview_build(T.color, true);
         if (P.exr_pending > 0 && P.exr_path[0]) {
             T.exr_w = P.in.render_w;
@@ -151,6 +160,11 @@ FgRes post_resolve(void) {
     T.color = c;
     post_exposure_build(c);
     post_look_preview_build(c, false);   // Settings > Look: the scene under every look (when asked)
+    // Night vision goggles fully down: the intensifier is the whole image (no bloom / tonemap / grade).
+    if (P.set.nvg.amount >= 1.0f) {
+        T.ldr = post_nvg_build(c, post_nvg_nir(), FG_NONE);
+        return T.ldr;
+    }
     T.bloom = post_bloom_build(c);
     T.flare = post_flare_build(T.bloom);
     T.compare = P.set.compare_split ? P.in.hdr : FG_NONE;
@@ -177,6 +191,9 @@ FgRes post_resolve(void) {
             fg_write(d, T.ldr, FG_STORAGE);
         }
     }
+    // Night vision goggles flipping: the intensifier blends in from this image.
+    if (P.set.nvg.amount > 0.0f) T.ldr = post_nvg_build(c, post_nvg_nir(), T.ldr);
+    else post_nvg_idle();
     // Photo mode / F-key capture: linear HDR (pre-bloom, pre-tonemap) to EXR.
     if (P.exr_pending > 0 && P.exr_path[0]) {
         bool at_render = T.color == P.in.hdr;
@@ -325,7 +342,7 @@ void post_exr_finish(void) {
 // ------------------------------------------------------------------ final
 
 void post_final_draw(VkCommandBuffer cmd, FgRes ldr) {
-    if (P.set.direct_output) {
+    if (P.set.direct_output && !T.nvg_direct) {
         VkPipeline dp = post_graphics_pipe("final_direct", R->swap_format, 0);
         if (!dp) return;
         PostBind b = { 0 };

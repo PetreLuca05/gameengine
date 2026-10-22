@@ -12,6 +12,28 @@ void game_respawn_player(World *w, int slot);
 void game_respawn_player_at(World *w, int slot, vec3 pos, float yaw, float hp);
 void game_create_player_character(World *w, int slot, vec3 feet);
 
+// game_nvg.c: night vision goggles, game side (docs/NIGHT_OPTICS.md)
+struct NvgConfig;
+struct NvgVariant;
+void nvg_register(void);
+const struct NvgConfig *nvg_config(void);
+void nvg_input_frame(float dt, bool blocked);   // key 8: tap goggles, hold illuminator
+void nvg_fill_cmd(UserCmd *c);
+void nvg_client_tick(float dt);
+void nvg_local_shutoff(const char *reason);     // tube protection / lost item: the request goes off
+bool nvg_local_want(void);
+bool nvg_local_ir(void);
+void nvg_host_tick(World *w, int slot, const UserCmd *c, float dt);
+u32 nvg_entity_flags(int slot);                 // EF_NVG / EF_NVG_IR for the player mirror
+void nvg_player_reset(int slot);
+bool nvg_blocks_ads(World *w, int slot);        // goggles down or flipping: no ADS (any sight)
+float nvg_flip_pos(World *w, int slot);         // 0 up .. 1 down
+const struct NvgVariant *nvg_player_variant(World *w, int slot);
+u16 nvg_local_item(float *charge, u16 *item);   // the local goggles' instance uid (0 none)
+float nvg_brightness_floor(void);
+float nvg_hud_amount(void);
+void nvg_post(struct PostSettings *s);          // game_post.c: the intensifier's settings this frame                     // 0..1: the viewed image is the goggles' (HUD rules)
+
 // game_events.c
 void game_add_hint(const char *text);
 void game_hud_tick(float dt);

@@ -45,7 +45,8 @@
     "vfx_quality": {"avail": "on", "default": 2, "max": 2},
     "vfx_lighting": {"avail": "on"},
     "precip_quality": {"avail": "on", "default": -1, "allowed": [-1, 1, 2, 3]},
-    "water": {"avail": "on", "default": 2, "max": 2}
+    "water": {"avail": "on", "default": 2, "max": 2},
+    "night_optics": {"avail": "on", "default": 2, "max": 2}
   },
   "eras": {
     "2010": {

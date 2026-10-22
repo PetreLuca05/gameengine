@@ -27,6 +27,8 @@ typedef enum InvIntentType {
     II_HOLD,         // src (self) into the hands (0 = put away): a consumable / throwable / hand tool
     II_TAKE_ALL,     // everything of the loot tree that fits -> self
     II_COMPACT,      // re-pack the grid of side dst (largest first, reading order kept)
+    II_RECHARGE,     // src (self): a battery-powered item (nvg) or a weapon with a powered optic gets a
+                     // fresh battery: the first battery_cell item of the self tree is used up
     II_COUNT
 } InvIntentType;
 
@@ -66,6 +68,12 @@ int inv_intent_from_name(const char *s);   // II_NONE if unknown
 // Attachment compatibility of an attachment item for a weapon instance: IIR_OK and the slot it
 // goes into, or why not (IIR_NOT_WEAPON / IIR_NO_SLOT / IIR_INCOMPATIBLE).
 int inv_attach_check(const ItemDB *db, const InvSlot *weapon, u16 att_item, int *aslot_out);
+
+// Batteries (docs/NIGHT_OPTICS.md): what kind of battery an instance has and its charge 0..1.
+typedef enum InvBatteryKind { INV_BATTERY_NONE, INV_BATTERY_ITEM, INV_BATTERY_OPTIC } InvBatteryKind;
+#define INV_BATTERY_FULL 1000   // INV_BATTERY_OPTIC: dur counts the charge used, of this
+int inv_battery_kind(const ItemDB *db, const InvSlot *s);
+float inv_battery_charge(const ItemDB *db, const InvItem *it);
 
 // What the hands may hold from the grid (II_HOLD, the wheels): consumables, throwables, the
 // "hands": true tools. Weapons are drawn from their equipment slots; never the built-in phone.

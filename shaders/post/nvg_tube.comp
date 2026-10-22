@@ -1,0 +1,58 @@
+#version 450
+// Night vision tube (docs/NIGHT_OPTICS.md "Gain", "Noise"): at the tube's internal resolution, the
+// photocathode flux becomes screen output:
+//   photoelectrons  N = (flux + ebi) x photons x dt x 60 per pixel and frame: a Poisson draw (normal
+//                   approximation above 20) times the MCP gain spread (excess noise factor F): the
+//                   relative noise sqrt(F / N) is the scintillation that sparkles as the light falls
+//   gain            G from the ABC (CPU, nvg_model.c), plus the halo (fixed angular disc)
+//   screen          Y = Ysat (1 - exp(-G flux / Ysat)): the phosphor saturates
+//   whiteout        the floor rises and the contrast collapses (W), the autogating flicker dims a frame
+//   fixed pattern   per-pixel gain spread (static per goggles)
+//   persistence     the phosphor decays with tau: out = max(Y, history x exp(-dt / tau)): bright
+//                   moving things leave short trails
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+#include "nvg_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D flux_tex;
+layout(set = 0, binding = 1) uniform sampler2D halo_tex;
+layout(set = 0, binding = 2) uniform sampler2D history_tex;
+layout(set = 0, binding = 8, r16f) uniform writeonly image2D dst;
+// pc.p0: gain, y_sat, whiteout, flicker
+// pc.p1: ebi, photons x dt x 60, noise factor F, persistence decay (exp(-dt / tau); 0 = none)
+// pc.p2: fixed-pattern amplitude, history valid, halo present, unused
+// pc.u0: frame, seed
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(dst);
+    if (p.x >= size.x || p.y >= size.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(size);
+    float flux = max(texelFetch(flux_tex, p, 0).r, 0.0);
+    float ebi = pc.p1.x;
+    float n = (flux + ebi) * pc.p1.y;
+    vec3 r1 = nvg_rand3(uvec3(p, pc.u0.x));
+    vec3 r2 = nvg_rand3(uvec3(p.yx + 7919, pc.u0.x * 3u + 1u));
+    float k;
+    if (n > 20.0) {
+        k = n + sqrt(n) * nvg_gauss(r1.xy);
+    } else {   // Poisson by inversion (n small): the sparkle of starlight
+        float l = exp(-n), cdf = l, pk = l, u = r1.z;
+        k = 0.0;
+        for (int i = 0; i < 40 && u > cdf; i++) { k += 1.0; pk *= n / k; cdf += pk; }
+    }
+    // MCP gain spread: the sum of k electrons' gains, gamma(k / (F - 1)) ~ normal
+    float shape = 1.0 / max(pc.p1.z - 1.0, 0.05);
+    float g = k > 0.0 ? max(k + sqrt(k / shape) * nvg_gauss(r2.xy), 0.0) : 0.0;
+    float sig = g / max(n, 1e-6) * (flux + ebi);
+    // fixed pattern: per-pixel gain (static for these goggles)
+    float fpn = 1.0 + pc.p2.x * (nvg_rand3(uvec3(p, pc.u0.y)).x - 0.5);
+    float lin = pc.p0.x * sig * fpn;
+    if (pc.p2.z > 0.5) lin += textureLod(halo_tex, uv, 0.0).r;
+    float ysat = pc.p0.y;
+    float y = ysat * (1.0 - exp(-lin / ysat));
+    y = y + (0.92 - y) * pc.p0.z * 0.85;   // whiteout: floor up, contrast down
+    y *= 1.0 - pc.p0.w;                    // autogating dip
+    if (pc.p1.w > 0.0 && pc.p2.y > 0.5) y = max(y, textureLod(history_tex, uv, 0.0).r * pc.p1.w);
+    imageStore(dst, p, vec4(clamp(y, 0.0, 1.0), 0.0, 0.0, 0.0));
+}

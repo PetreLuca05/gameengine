@@ -59,6 +59,8 @@ enum EntityFlags {
     EF_SWIM      = 1 << 21,   // players: swimming (MOVE_SWIM)
     EF_UNDERWATER = 1 << 22,  // players: diving (head under water)
     EF_WADE      = 1 << 23,   // players: walking in water
+    EF_NVG       = 1u << 24,  // players: night vision goggles down (docs/NIGHT_OPTICS.md)
+    EF_NVG_IR    = 1u << 25,  // players: the goggles' IR illuminator on (seen by other NVGs)
 };
 
 enum ComponentBits {

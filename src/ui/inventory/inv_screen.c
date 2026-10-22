@@ -429,7 +429,9 @@ static void tooltip_for(GuiId id, const InvItem *it) {
     char tip[320];
     int n = snprintf(tip, sizeof(tip), "%s\n%s  \xC2\xB7  %dx%d", revive_item_name(db, it->s.item, it->s.ammo), cat_name(d->category), w, h);
     if (d->max_stack > 1) n += snprintf(tip + n, sizeof(tip) - (size_t)n, "\nStack %d / %d", it->s.count, d->max_stack);
-    if (d->durability) n += snprintf(tip + n, sizeof(tip) - (size_t)n, "\nDurability %d / %d", it->dur, d->durability);
+    if (inv_battery_kind(db, &it->s) != INV_BATTERY_NONE)
+        n += snprintf(tip + n, sizeof(tip) - (size_t)n, "\nBattery %d %%", (int)lroundf(inv_battery_charge(db, it) * 100.0f));
+    else if (d->durability) n += snprintf(tip + n, sizeof(tip) - (size_t)n, "\nDurability %d / %d", it->dur, d->durability);
     if (d->plates) n += snprintf(tip + n, sizeof(tip) - (size_t)n, "\nHolds %d plates", d->plates);
     if (d->equip_slot != EQ_NONE) n += snprintf(tip + n, sizeof(tip) - (size_t)n, "\nWorn: %s", slot_name(d->equip_slot));
     gui_tooltip(id, tip);
@@ -776,7 +778,10 @@ static void item_stats(GuiCursor *c, const InvItem *it) {
         stat_line(c, "Grid", v, 0, true);
     }
     if (d->plates) { snprintf(v, sizeof(v), "%d (without: %d)", d->plates, ARMOR_BASE_PLATES); stat_line(c, "Plates", v, 0, true); }
-    if (d->durability) { snprintf(v, sizeof(v), "%d / %d", it->dur, d->durability); stat_line(c, "Durability", v, 0, true); }
+    if (inv_battery_kind(db, &it->s) != INV_BATTERY_NONE) {
+        snprintf(v, sizeof(v), "%d %%", (int)lroundf(inv_battery_charge(db, it) * 100.0f));
+        stat_line(c, "Battery", v, 0, true);
+    } else if (d->durability) { snprintf(v, sizeof(v), "%d / %d", it->dur, d->durability); stat_line(c, "Durability", v, 0, true); }
 }
 
 // The inspect window (right click > Inspect, double click): floats over the screen, dragged by its
@@ -1156,6 +1161,7 @@ static void draw_context(void) {
     e[n++] = (Entry){ "Inspect", -2, 0, 0 };
     if (d->fold_dw) e[n++] = (Entry){ (it->flags & INVF_FOLDED) ? "Unfold stock" : "Fold stock", II_FOLD, 0, 0 };
     if (wd && wd->kind != WPN_MELEE && it->s.ammo > 0) e[n++] = (Entry){ "Unload", II_UNLOAD, 0, 0 };
+    if (mine && inv_battery_kind(db, &it->s) != INV_BATTERY_NONE) e[n++] = (Entry){ "Replace battery", II_RECHARGE, 0, 0 };
     if (wd) {
         bool any = false;
         for (int k = 0; k < ATT_SLOTS; k++) any |= it->s.att[k] != 0;

@@ -24,6 +24,12 @@ enum CmdButtons {
     BTN_VEH_CAM = 1 << 15,    // vehicle third-person camera chosen (state; spectators follow it)
 };
 
+// UserCmd.gear: worn gear requests (state, every tick; docs/NIGHT_OPTICS.md).
+enum CmdGear {
+    GEAR_NVG    = 1 << 0,     // night vision goggles down (the host checks for an nvg with charge: EF_NVG)
+    GEAR_NVG_IR = 1 << 1,     // their IR illuminator on (EF_NVG_IR)
+};
+
 typedef struct UserCmd {
     u32 seq;           // client sequence number (one per client tick)
     u32 view_tick;     // server tick the client was rendering (lag compensation), *256 fixed point
@@ -43,6 +49,8 @@ typedef struct UserCmd {
     // socket) relative to the simulated eye, camera space (x right, y up, -z forward), mm; validated
     // by the host against its own copy of the pose. All zero = none (the capsule eye).
     i16 eye_cam[3];
+    u8 gear;           // GEAR_*
+    u8 pad;
 } UserCmd;
 
 #endif
