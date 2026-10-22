@@ -3209,5 +3209,27 @@
    "dveg_hall",
    "dveg_meadow"
   ]
+ },
+ "PF-0052": {
+  "title": "Deferred masked classic parts: a depth-only alpha-tested pass, then their G-buffer at EQUAL depth (r_classic_zprepass, off by default: an A/B for the target GPU)",
+  "rule": "R02",
+  "finding": "2026-10-22 (the suggestions the developer asked for: the smaller variant of a visibility buffer): with the deferred lighting (PF-0039) a masked part's G-buffer fragment shader (alpha test, surface, material and weather terms into five targets) runs for every overlapping leaf card that passes the test, late depth testing (about 12 fragments per pixel in the forests)",
+  "effort": "S",
+  "status": "implemented, off by default (r_classic_zprepass 0); verified for correctness on the Linux container (lavapipe: images); which side is faster depends on the GPU: A/B on the target machine (perf_bench with r_classic_zprepass 0 / 1)",
+  "code": [
+   "src/render/vk_classic.c draw_view (k_zpre_steps), CP_ZPRE_CLIP*, CP_GB_DEF_EQ*, cl_pipeline (colors -1)",
+   "shaders/classic_depth_clip.frag, shaders/classic_gbuffer_def_eq.frag"
+  ],
+  "description": "The deferred masked groups (one- and two-sided) are drawn first in a depth-only pass with only their alpha / dither test (the same texture, sampler and threshold as classic_gbuffer_def_clip.frag; the G-buffer targets bound with a zero write mask), then their G-buffer at EQUAL depth without the test (early depth testing: one G-buffer shading per pixel). Opaque and lit-pass groups are unchanged; the image is the same (the same coverage; coplanar cards keep the draw order's winner). The geometry and its wind are evaluated twice for those parts.",
+  "metrics": [
+   "scope:prepass",
+   "scope:classic_deferred",
+   "gpu_frame"
+  ],
+  "scenes": [
+   "dveg_pine",
+   "dveg_broadleaf",
+   "dveg_meadow"
+  ]
  }
 }

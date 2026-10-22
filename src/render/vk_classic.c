@@ -111,6 +111,7 @@ static struct {
 enum { CP_GB, CP_GB_2S, CP_GB_CLIP, CP_GB_CLIP_2S, CP_LIT, CP_LIT_2S, CP_LIT_CLIP, CP_LIT_CLIP_2S, CP_SHADOW, CP_SHADOW_MASKED, CP_IMP_GB, CP_IMP_LIT,
        CP_PIP, CP_PIP_2S, CP_PIP_CLIP, CP_PIP_CLIP_2S, CP_PIP_IMP,   // CP_PIP*: the scope PiP, forward (lit + depth write)
        CP_GB_DEF, CP_GB_DEF_2S, CP_GB_DEF_CLIP, CP_GB_DEF_CLIP_2S,   // prepass of deferred materials (PF-0039): + the deferred targets
+       CP_ZPRE_CLIP, CP_ZPRE_CLIP_2S, CP_GB_DEF_EQ, CP_GB_DEF_EQ_2S,   // PF-0052: depth-only test, then the G-buffer at EQUAL
        CP_COUNT };
 
 static struct {
@@ -164,6 +165,7 @@ static struct {
     u32 draws, tris, tris_shadow, local_instances;
     u64 gpu_bytes, cpu_bytes;      // LOD buffers + impostor textures / CPU copies of exported LODs (classic_stats)
     Cvar *impostor_px;
+    Cvar *zprepass;                 // r_classic_zprepass (PF-0052)
     bool lod_new;                   // this frame's main view / cascades use docs/LOD.md
     u32 lod_n[5], lod_fading;       // main view parts per LOD 0..3 / impostor, parts in a fade (render_classic_lod_counts)
     bool counted;                   // lod_n holds a culled main view (render_vgeo_counts)
@@ -224,8 +226,8 @@ static VkPipeline cl_pipeline(const char *vert, const char *frag, bool impostor,
     ds.depthWriteEnable = depth_write;
     ds.depthCompareOp = cmp;
     // colors 3: the G-buffer prepass (its deferred targets bound, not written); 5: a deferred material's
-    // prepass (PF-0039) writes them too; 1: HDR
-    int natt = colors >= 3 ? GB_COLORS : colors;
+    // prepass (PF-0039) writes them too; 1: HDR; -1: the G-buffer targets bound, none written (PF-0052)
+    int natt = colors >= 3 || colors < 0 ? GB_COLORS : colors;
     VkPipelineColorBlendAttachmentState cba[GB_COLORS];
     memset(cba, 0, sizeof(cba));
     for (int i = 0; i < natt; i++) cba[i].colorWriteMask = i < colors ? 0xF : 0;
@@ -422,6 +424,8 @@ static void cmd_occlusion_probe(int argc, const char **argv);
 void vkc_init(void) {
     C.impostor_px = cvar_reg_float("r_classic_impostor_px", 64.0f, 0.0f, 1024.0f, CVAR_LOCKED,
                                    "classic renderer: trees with an impostor atlas draw it below this projected size (pixels across, 0 = never)");
+    C.zprepass = cvar_reg_bool("r_classic_zprepass", false, CVAR_LOCKED,
+                               "classic renderer (PF-0052): the deferred masked parts (leaves, grass) get a depth-only alpha-tested pass, then their G-buffer at EQUAL depth without the test (one G-buffer shading per pixel); off: the alpha test in the G-buffer pass (PF-0039). Same image: an A/B for the target GPU");
     cmd_register("classic_cull_check", cmd_classic_cull_check,
                  "classic renderer: cull the next frame's views by the serial and the parallel path (PF-0040) and compare their instance streams");
     cmd_register("classic_occlusion_probe", cmd_occlusion_probe,
@@ -520,6 +524,10 @@ void vkc_init(void) {
     C.pipe[CP_GB_DEF_2S] = cl_pipeline("classic.vert", "classic_gbuffer_def.frag", false, false, true, le, true, 5);
     C.pipe[CP_GB_DEF_CLIP] = cl_pipeline("classic.vert", "classic_gbuffer_def_clip.frag", false, false, false, le, true, 5);
     C.pipe[CP_GB_DEF_CLIP_2S] = cl_pipeline("classic.vert", "classic_gbuffer_def_clip.frag", false, false, true, le, true, 5);
+    C.pipe[CP_ZPRE_CLIP] = cl_pipeline("classic.vert", "classic_depth_clip.frag", false, false, false, le, true, -1);
+    C.pipe[CP_ZPRE_CLIP_2S] = cl_pipeline("classic.vert", "classic_depth_clip.frag", false, false, true, le, true, -1);
+    C.pipe[CP_GB_DEF_EQ] = cl_pipeline("classic.vert", "classic_gbuffer_def_eq.frag", false, false, false, eq, false, 5);
+    C.pipe[CP_GB_DEF_EQ_2S] = cl_pipeline("classic.vert", "classic_gbuffer_def_eq.frag", false, false, true, eq, false, 5);
     cl_deferred_init();
     for (int i = 0; i < CP_COUNT; i++)
         if (!C.pipe[i]) { log_error("classic: renderer unavailable (pipeline %d)", i); return; }
@@ -2085,8 +2093,18 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
     // ones (their own pipelines), and the lit pass skips the deferred ones
     bool def = C.deferred && (pass == 0 || pass == 1);
     int groups = pass == 2 ? 2 : (pass == 0 && def ? 8 : 4);
-    for (int g = 0; g < groups; g++) {
+    // PF-0052 (r_classic_zprepass): the deferred masked groups (5 one-sided, 7 two-sided) first in a
+    // depth-only pass with their alpha / dither test (8 + g below), then their G-buffer at EQUAL depth
+    // without it, after the other masked groups as before.
+    bool zpre = pass == 0 && def && C.zprepass && C.zprepass->i && prof_fix_enabled(PFX_CLASSIC_ZPREPASS);
+    static const int k_zpre_steps[] = { 0, 1, 2, 3, 8 + 5, 8 + 7, 4, 5, 6, 7 };
+    int steps = zpre ? (int)ARRAY_COUNT(k_zpre_steps) : groups;
+    for (int step = 0; step < steps; step++) {
+        int g = zpre ? k_zpre_steps[step] : step;
+        bool zdepth = g >= 8;
+        if (zdepth) g -= 8;
         int pipe = pass == 0 && def ? ((g & 1) ? CP_GB_DEF : CP_GB) + (g >> 1) : base + g;
+        if (zpre && (g == 5 || g == 7)) pipe = zdepth ? (g == 5 ? CP_ZPRE_CLIP : CP_ZPRE_CLIP_2S) : (g == 5 ? CP_GB_DEF_EQ : CP_GB_DEF_EQ_2S);
         bool pipe_bound = false;
         TextureId bound_tex = ~0u;
         for (u32 b = 0; b < v->batch_count; b++) {

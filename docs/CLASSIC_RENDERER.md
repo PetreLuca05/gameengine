@@ -128,6 +128,20 @@ Classic content is now lit from its prepass instead:
   scattered card edge pixels.
 - `perf_fix_disable PF-0039` restores the lit pass for every classic material.
 
+### Depth-only prepass for masked parts (PF-0052, `r_classic_zprepass`, off by default)
+
+With the deferred lighting, a masked part's G-buffer fragment shader (the alpha test, then the surface,
+material and weather terms into five targets) runs for every leaf card that covers a pixel and passes the
+test: late depth testing, about 12 per pixel in the forests. `r_classic_zprepass 1` splits the deferred
+masked groups (one- and two-sided) in two: first a depth-only pass with only their alpha / dither test
+(`classic_depth_clip.frag`, the same texture and sampler as `classic_gbuffer_def_clip.frag`, no target
+written), then their G-buffer at EQUAL depth without the test (`classic_gbuffer_def_eq.frag`): early depth
+testing, one G-buffer shading per pixel. The geometry is drawn twice (the vertex stage, its wind, again).
+The opaque and lit-pass groups are unchanged, and so is the image (the same coverage; coplanar cards keep
+the draw order's winner as before). Which is faster depends on the GPU (vertex vs fragment / bandwidth
+bound): an A/B for the target machine, e.g. `perf_bench levels=current` with `set r_classic_zprepass 0` and
+`1`. `perf_fix_disable PF-0052` also turns it off.
+
 ### Alpha masks (PF-0014)
 
 The alpha tests of masked materials in the sun cascades, the local light shadow tiles and the prepass only
