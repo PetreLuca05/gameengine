@@ -160,6 +160,13 @@ static FgRes tex(const char *name, VkFormat f, FgSize s) {
     return fg_texture(&d);
 }
 
+// The opaque HDR copy's reader (hdr_opaque: TAA / TAA-U compare against it); PF-0047 skips the copy
+// when neither runs and no particle samples it.
+bool post_aa_reads_opaque(void) {
+    bool scaled = P.in.render_w != P.in.output_w || P.in.render_h != P.in.output_h;
+    return P.set.aa == POST_AA_TAA || (scaled && P.set.upscaler == POST_UP_TAAU);
+}
+
 FgRes post_aa_build(FgRes color) {
     memset(&A, 0, sizeof(A));
     const PostSettings *s = &P.set;

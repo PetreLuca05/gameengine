@@ -697,6 +697,8 @@ void vkx_draw_particles_pip(VkCommandBuffer cmd, VkDescriptorSet frame_set);
 void vkx_draw_decals_pip(VkCommandBuffer cmd, VkDescriptorSet frame_set, VkImageView depth_view, mat4 view_proj, mat4 view, mat4 proj, vec3 cam, u32 w, u32 h);   // inside the scope picture-in-picture pass
 void vkx_timestamp(VkCommandBuffer cmd, int slot);
 RenderTarget *vkx_scene_copy(void);           // opaque HDR copy (distortion; TAA "hdr_opaque"), SHADER_READ_ONLY
+bool vkx_draws_nothing(void);                 // PF-0047: the particle draws draw nothing this frame (at the graph's build)
+void vkx_draws_skipped(void);                 // PF-0047: the transparent pass is not recorded this frame
 void vkx_begin_frame_queries(VkCommandBuffer cmd);
 
 #endif

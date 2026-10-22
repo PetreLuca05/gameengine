@@ -63,6 +63,7 @@ FgRes post_resolve(void);                          // AA / upscale ... tonemap -
 void post_final_draw(VkCommandBuffer cmd, FgRes ldr); // inside the swapchain rendering pass
 void post_push_lit_inputs(VkCommandBuffer cmd, const PostLitInputs *in, bool froxel_fog);
 FgRes post_froxels(void);                          // integrated froxel volume (particles)
+bool post_aa_reads_opaque(void);                   // this frame's AA reads the opaque HDR copy (TAA / TAA-U; after post_begin_frame)
 bool post_froxel_image(bool use, VkDescriptorImageInfo *out);   // its view for a draw after fog_apply (false: none / !use, any 3D view)
 VkSampler post_linear_sampler(void);
 VkImageView post_white_view(void);

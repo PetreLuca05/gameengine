@@ -138,6 +138,9 @@ static struct {
     u32 inst_cap[FRAMES_IN_FLIGHT], inst_used;
     GpuBuffer inst_retired[8];      // instance buffers the culling job replaced (deleted at vkc_frame_end)
     u32 inst_retired_n;
+    GpuBuffer inst_spare;           // PF-0046: a larger instance buffer allocated ahead on a job
+    u32 inst_spare_cap;
+    JobCounter inst_spare_job;
     ClInst *tmp;                    // gathered instances of one view
     u32 *tmp_key;
     u32 tmp_n, tmp_cap;
@@ -532,6 +535,8 @@ void vkc_shutdown(void) {
     if (C.set4_pool) vkDestroyDescriptorPool(R->device, C.set4_pool, NULL);
     for (u32 f = 0; f < FRAMES_IN_FLIGHT; f++) if (C.wind_ubo[f].buffer) vkr_buffer_destroy_now(&C.wind_ubo[f]);
     for (u32 f = 0; f < FRAMES_IN_FLIGHT; f++) if (C.inst[f].buffer) vkr_buffer_destroy_now(&C.inst[f]);
+    jobs_wait(&C.inst_spare_job);
+    if (C.inst_spare.buffer) vkr_buffer_destroy_now(&C.inst_spare);
     for (u32 k = 0; k < VG_TEX_OWN; k++) if (C.modtex[k]) vkr_texture_unwrap(C.modtex[k]);   // the images are the module's
     for (u32 i = 0; i < C.mesh_cap; i++)
         if (C.mesh[i].own) { free((void *)C.mesh[i].verts); free((void *)C.mesh[i].indices); }
@@ -1202,12 +1207,43 @@ static void cull_views(const ClCull *views, ClView *const *outs, const mat4 *con
 
 // Instance buffer space of this frame slot (grows; a replaced buffer stays alive until the frames
 // using it are done).
+// docs/perf/FINDINGS.md PF-0046: growing a frame slot's instance buffer allocated a mapped buffer of
+// up to ~100 MB in the middle of the culling (vkAllocateMemory: milliseconds to tens of them on
+// Windows, a frame spike each time the visible instance count passes a power of two). vkc_frame_end
+// allocates the next one on a job once a slot is three quarters full; inst_alloc takes it when it
+// is ready and large enough (else allocates in place, as before).
+static void spare_job(void *u) {
+    (void)u;
+    C.inst_spare = vkr_buffer_create(sizeof(ClInst) * (VkDeviceSize)C.inst_spare_cap, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, true);
+}
+
+static bool spare_ready(void) { return SDL_GetAtomicInt((SDL_AtomicInt *)&C.inst_spare_job.pending) == 0 && C.inst_spare.mapped; }
+
+static void spare_frame(void) {
+    if (!prof_fix_enabled(PFX_INST_PREGROW) || jobs_worker_count() <= 0) return;
+    if (C.inst_spare.buffer || SDL_GetAtomicInt((SDL_AtomicInt *)&C.inst_spare_job.pending) > 0) return;
+    u32 cap = 0;
+    for (u32 f = 0; f < FRAMES_IN_FLIGHT; f++)
+        if ((u64)C.inst_used * 4 > (u64)C.inst_cap[f] * 3) cap = DG_MAX(cap, C.inst_cap[f] ? C.inst_cap[f] * 2 : 65536u);
+    if (!cap) return;
+    while ((u64)cap < (u64)C.inst_used * 2) cap *= 2;
+    C.inst_spare_cap = cap;
+    jobs_submit(spare_job, NULL, NULL, &C.inst_spare_job);
+}
+
 static ClInst *inst_alloc(u32 n, u32 *first) {
     u32 f = R->frame_slot;
     if (C.inst_used + n > C.inst_cap[f]) {
         u32 cap = C.inst_cap[f] ? C.inst_cap[f] : 65536;
         while (cap < C.inst_used + n) cap *= 2;
-        GpuBuffer nb = vkr_buffer_create(sizeof(ClInst) * (VkDeviceSize)cap, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, true);
+        GpuBuffer nb;
+        if (spare_ready() && C.inst_spare_cap >= cap) {   // allocated ahead (PF-0046)
+            nb = C.inst_spare;
+            cap = C.inst_spare_cap;
+            memset(&C.inst_spare, 0, sizeof(C.inst_spare));
+        } else {
+            nb = vkr_buffer_create(sizeof(ClInst) * (VkDeviceSize)cap, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, true);
+        }
         if (!nb.mapped) return NULL;
         if (C.inst[f].buffer) {
             memcpy(nb.mapped, C.inst[f].mapped, sizeof(ClInst) * C.inst_used);
@@ -1762,6 +1798,7 @@ void vkc_frame_end(void) {
     for (u32 i = 0; i < C.inst_retired_n; i++) vkr_defer_buffer(&C.inst_retired[i]);
     C.inst_retired_n = 0;
     if (!FA.cull) return;
+    spare_frame();
     prof_count(PC_CLASSIC_PARTS, (i64)C.view[0].instances);
     for (u32 k = 0; k < C.ncasc; k++) prof_count(PC_CLASSIC_PARTS_SHADOW, (i64)C.view[1 + k].instances);
     if (FA.pip_lods) build_lods(&C.view[CL_VIEW_PIP]);

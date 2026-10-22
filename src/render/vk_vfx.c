@@ -82,6 +82,7 @@ static struct {
     VkQueryPool qp;
     float ts_period;
     bool need_reset;
+    bool draws_skipped;              // PF-0047: this frame's transparent pass is not recorded
     bool depth_valid;
     mat4 prev_vp;
     u32 frame_index;
@@ -988,6 +989,8 @@ void vkx_record_compute(VkCommandBuffer cmd) {
     VfxFrameRes *f = &X.fr[R->frame_slot];
     read_back(f);
     vkx_timestamp(cmd, 0);
+    if (X.draws_skipped) vkx_timestamp(cmd, 4), vkx_timestamp(cmd, 5);
+    X.draws_skipped = false;
     if (!X.ok) { vkx_timestamp(cmd, 1); f->readback_valid = true; return; }
     if (!f->fed) { f->spawn_particles = f->spawn_records = 0; f->sprite_add = f->sprite_alpha = f->decal_count = f->decal_dynamic = 0; }
     f->fed = false;
@@ -1196,6 +1199,21 @@ void vkx_draw_decals(VkCommandBuffer cmd, bool dynamic) {
 }
 
 RenderTarget *vkx_scene_copy(void) { return X.layout && X.scene_copy.image ? &X.scene_copy : NULL; }
+
+// docs/perf/FINDINGS.md PF-0047, at the frame graph's build: the particle draws draw nothing this frame
+// (no particle alive or queued, none spawned, no CPU sprite). This slot's counters are read back only
+// when vkx_record_compute runs, so the ones seen here are a frame older than PF-0038's: one more quiet
+// frame is asked for (no spawn since, nothing alive then: nothing can be alive now).
+bool vkx_draws_nothing(void) {
+    if (!X.layout || !X.ok) return true;
+    const VfxFrameRes *f = &X.fr[R->frame_slot];
+    return !X.need_reset && !f->spawn_particles && X.frames_since_spawn > FRAMES_IN_FLIGHT + 1 && f->readback_valid && !X.stats.alive && !X.last_sub &&
+           f->sprite_add + f->sprite_alpha == 0;
+}
+
+// The transparent pass (and with it vkx_draw_particles) is not recorded this frame (PF-0047): its
+// timestamps go with the simulation's, so the slot's queries still all read back.
+void vkx_draws_skipped(void) { X.draws_skipped = true; }
 
 // Always copied: distortion particles refract it and TAA compares against it (opaque vs.
 // transparent pixels, "hdr_opaque"). Runs inside a frame graph pass that holds the HDR target

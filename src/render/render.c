@@ -1975,6 +1975,19 @@ static void exec_scene_copy(VkCommandBuffer cmd, void *u) {
     vkx_copy_scene(cmd);
 }
 
+// The transparent pass draws something besides particles: a blended item, world lines / text, rain or
+// snow (exec_transparent / draw_precip's conditions; PF-0047).
+static bool transparent_draws(void) {
+    if ((R->line_count[0] && F.line_off[0] != (VkDeviceSize)-1) || (R->text_count && F.text_off != (VkDeviceSize)-1)) return true;
+    const RenderWeather *wx = &R->weather;
+    if (wx->precip_quality > 0 && fmaxf(wx->rain, wx->snowfall) >= 0.01f && R->pipes[PIPE_PRECIP]) return true;
+    for (u32 i = 0; i < R->draw_count; i++) {
+        const DrawItem *d = &R->draws[i];
+        if (d->mat.color.w < 0.999f && !(d->mat.flags & (MAT_ALPHA_MASK | MAT_SHADOW_ONLY))) return true;
+    }
+    return false;
+}
+
 // Transparency: blended items, world lines / text, particles (depth read-only, sampled).
 static void exec_transparent(VkCommandBuffer cmd, void *u) {
     (void)u;
@@ -2581,6 +2594,10 @@ static void build_frame_graph(FrameData *fd) {
 
     vkw_build_graph(F.hdr, F.depth, F.velocity);   // water surfaces (part of the opaque scene for TAA / particles)
 
+    // docs/perf/FINDINGS.md PF-0047: the opaque copy only for a reader (TAA / TAA-U, the particles), the
+    // transparent pass only with something to draw.
+    bool no_particles = prof_fix_enabled(PFX_PASS_SKIPS) && vkx_draws_nothing();
+    if (no_particles && !post_aa_reads_opaque()) F.scene_copy = FG_NONE;
     if (F.scene_copy != FG_NONE) {
         p = fg_pass("scene_copy", exec_scene_copy, NULL);
         fg_write(p, F.hdr, FG_COLOR);
@@ -2588,12 +2605,16 @@ static void build_frame_graph(FrameData *fd) {
         if (p < 0) F.scene_copy = FG_NONE;
     }
 
-    p = fg_pass("transparent", exec_transparent, NULL);
-    fg_after(p, sky_last_pass());
-    fg_write(p, F.hdr, FG_COLOR);
-    fg_read(p, F.depth, FG_DEPTH_READ);
-    fg_read(p, F.scene_copy, FG_SAMPLED);
-    fg_read(p, post_froxels(), FG_SAMPLED);
+    if (!no_particles || transparent_draws()) {
+        p = fg_pass("transparent", exec_transparent, NULL);
+        fg_after(p, sky_last_pass());
+        fg_write(p, F.hdr, FG_COLOR);
+        fg_read(p, F.depth, FG_DEPTH_READ);
+        fg_read(p, F.scene_copy, FG_SAMPLED);
+        fg_read(p, post_froxels(), FG_SAMPLED);
+    } else {
+        vkx_draws_skipped();
+    }
     fd->post_fog = v4(post_froxels() >= 0 ? 1.0f : 0.0f, 80.0f, 0.0f, 0.0f);
 
     post_capture_scene(F.hdr);

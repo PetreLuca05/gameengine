@@ -10,6 +10,7 @@
 #include "vk_internal.h"
 #include "graph/fg.h"
 #include "post/post_internal.h"
+#include "core/profiler.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,6 +44,7 @@ static struct {
     // static meshes (lakes / rivers / pools)
     GpuBuffer vb, ib;
     u32 icount;
+    vec3 bmin, bmax;   // their bounds (flat at the body levels: exact)
     // ocean grid (one ring per clipmap level, drawn with a per-level snapped origin)
     GpuBuffer ovb, oib;
     u32 oicount;
@@ -78,6 +80,28 @@ void render_water_mesh(const RenderWaterVertex *v, u32 vcount, const u32 *idx, u
     memcpy(W.vb.mapped, v, sizeof(RenderWaterVertex) * vcount);
     memcpy(W.ib.mapped, idx, sizeof(u32) * icount);
     W.icount = icount;
+    W.bmin = W.bmax = v3(v[0].pos[0], v[0].pos[1], v[0].pos[2]);
+    for (u32 i = 1; i < vcount; i++) {
+        vec3 p = v3(v[i].pos[0], v[i].pos[1], v[i].pos[2]);
+        W.bmin = v3(fminf(W.bmin.x, p.x), fminf(W.bmin.y, p.y), fminf(W.bmin.z, p.z));
+        W.bmax = v3(fmaxf(W.bmax.x, p.x), fmaxf(W.bmax.y, p.y), fmaxf(W.bmax.z, p.z));
+    }
+}
+
+// docs/perf/FINDINGS.md PF-0047: the lake / river / pool meshes' bounds (grown by 1 m) against the
+// side and near planes of this frame's view-projection: outside one of them, the surface pass would
+// draw nothing (the meshes are not displaced; the ocean is always drawn).
+static bool meshes_in_view(mat4 vp) {
+    const float *a = vp.m;
+    vec4 r0 = v4(a[0], a[4], a[8], a[12]), r1 = v4(a[1], a[5], a[9], a[13]), r2 = v4(a[2], a[6], a[10], a[14]), r3 = v4(a[3], a[7], a[11], a[15]);
+    vec4 pl[5] = { v4(r3.x + r0.x, r3.y + r0.y, r3.z + r0.z, r3.w + r0.w), v4(r3.x - r0.x, r3.y - r0.y, r3.z - r0.z, r3.w - r0.w),
+                   v4(r3.x + r1.x, r3.y + r1.y, r3.z + r1.z, r3.w + r1.w), v4(r3.x - r1.x, r3.y - r1.y, r3.z - r1.z, r3.w - r1.w), r2 };
+    vec3 lo = v3_sub(W.bmin, v3(1, 1, 1)), hi = v3_add(W.bmax, v3(1, 1, 1));
+    for (int k = 0; k < 5; k++) {
+        vec3 q = v3(pl[k].x >= 0 ? hi.x : lo.x, pl[k].y >= 0 ? hi.y : lo.y, pl[k].z >= 0 ? hi.z : lo.z);   // the corner furthest inside
+        if (pl[k].x * q.x + pl[k].y * q.y + pl[k].z * q.z + pl[k].w < 0) return false;
+    }
+    return true;
 }
 
 void render_set_water(const RenderWater *w) { W.w = *w; }
@@ -467,16 +491,19 @@ void vkw_build_graph(int hdr, int depth, int velocity) {
     W.frame++;
     int t = tier();
     upload();
-
-    FgTexDesc dc = { "water_snap_color", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_RENDER };
-    FgTexDesc dd = { "water_snap_depth", VK_FORMAT_R32_SFLOAT, FG_SIZE_RENDER };
-    wt->snap_color = fg_texture(&dc);
-    wt->snap_depth = fg_texture(&dd);
-    int p = fg_pass("water_prep", exec_prep, wt);
-    fg_read(p, hdr, FG_SAMPLED);
-    fg_read(p, depth, FG_SAMPLED);
-    fg_write(p, wt->snap_color, FG_STORAGE);
-    fg_write(p, wt->snap_depth, FG_STORAGE);
+    int p;
+    bool seen = W.w.ocean_body >= 0 || !prof_fix_enabled(PFX_PASS_SKIPS) || meshes_in_view(R->view_proj);   // PF-0047
+    if (seen) {
+        FgTexDesc dc = { "water_snap_color", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_RENDER };
+        FgTexDesc dd = { "water_snap_depth", VK_FORMAT_R32_SFLOAT, FG_SIZE_RENDER };
+        wt->snap_color = fg_texture(&dc);
+        wt->snap_depth = fg_texture(&dd);
+        p = fg_pass("water_prep", exec_prep, wt);
+        fg_read(p, hdr, FG_SAMPLED);
+        fg_read(p, depth, FG_SAMPLED);
+        fg_write(p, wt->snap_color, FG_STORAGE);
+        fg_write(p, wt->snap_depth, FG_STORAGE);
+    }
 
     // Ripple sim: ping-pong histories, the window following the ripple centre in whole texels.
     if (t >= 2) {
@@ -498,14 +525,16 @@ void vkw_build_graph(int hdr, int depth, int velocity) {
         W.ripple_valid = false;
     }
 
-    p = fg_pass("water", exec_surface, wt);
-    fg_read(p, wt->snap_color, FG_SAMPLED);
-    fg_read(p, wt->snap_depth, FG_SAMPLED);
-    if (W.sim_next != FG_NONE) fg_read(p, W.sim_next, FG_SAMPLED);
-    if (post_froxels() >= 0) fg_read(p, post_froxels(), FG_SAMPLED);
-    fg_write(p, hdr, FG_COLOR);
-    fg_write(p, depth, FG_DEPTH);
-    if (velocity != FG_NONE) fg_write(p, velocity, FG_COLOR);
+    if (seen) {
+        p = fg_pass("water", exec_surface, wt);
+        fg_read(p, wt->snap_color, FG_SAMPLED);
+        fg_read(p, wt->snap_depth, FG_SAMPLED);
+        if (W.sim_next != FG_NONE) fg_read(p, W.sim_next, FG_SAMPLED);
+        if (post_froxels() >= 0) fg_read(p, post_froxels(), FG_SAMPLED);
+        fg_write(p, hdr, FG_COLOR);
+        fg_write(p, depth, FG_DEPTH);
+        if (velocity != FG_NONE) fg_write(p, velocity, FG_COLOR);
+    }
     W.prev_wave_time = W.w.wave_time;
 }
 
