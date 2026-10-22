@@ -75,3 +75,76 @@ Open the terminal: Ctrl+` . The default shell is PowerShell; the ".sh" scripts n
   bl <id> --from-script    throw the Blender edits away, rebuild the item from its script (backup kept)
   groundgen [--dry-run | --no-push | <recipe>...]
                            generate ground textures (needs the Higgsfield key in .env, costs money)
+
+
+8. ITEM IDS (for bl <id>)
+--------------------------
+  Every item model, from assets/items/catalog.json (bl list prints the same, live). Open one in
+  Blender with bl <id>, e.g. bl rifle, bl att_red_dot.
+
+  Weapons (10)
+    rifle                    Assault Rifle
+    pistol                   Pistol
+    dmr                      DMR
+    smg                      SMG
+    lmg                      LMG
+    sniper                   Bolt Sniper
+    shotgun                  Shotgun
+    crossbow                 Crossbow
+    bat                      Baseball Bat
+    knife                    Knife
+
+  Attachments (15)
+    att_red_dot              Red Dot Sight
+    att_scope_4x             4x Scope
+    att_scope_8x             12x Scope
+    att_suppressor           Suppressor
+    att_compensator          Compensator
+    att_flash_hider          Flash Hider
+    att_muzzle_brake         Muzzle Brake
+    att_vertical_grip        Vertical Grip
+    att_heavy_stock          Heavy Stock
+    att_extended_mag         Extended Magazine
+    att_extended_mag_smg
+    att_extended_mag_dmr
+    att_weapon_light         Weapon Light
+    att_weapon_light_pistol
+    att_laser                Laser Module
+
+  Items (36)
+    flashlight               Flashlight
+    syringe                  Syringe
+    dna_sample               DNA Sample
+    medkit                   Medkit
+    bandage                  Bandage
+    painkillers              Painkillers
+    frag_grenade             Frag Grenade
+    flare                    Road Flare
+    molotov                  Molotov
+    canned_food              Canned Food
+    water_bottle             Water Bottle
+    energy_bar               Energy Bar
+    phone                    Phone
+    fuel_can                 Fuel Can
+    tire_repair              Tire Repair Kit
+    spare_tire               Spare Tire
+    key_red                  Red Key
+    key_blue                 Blue Key
+    ammo_9mm                 9mm Rounds
+    ammo_rifle               5.56 Rounds
+    ammo_shell               12ga Shells
+    ammo_bolt                Crossbow Bolts
+    ammo_762                 7.62 Rounds
+    armor                    Armor Plate
+    scrap                    Scrap Metal
+    battery                  Battery
+    cloth                    Cloth
+    duct_tape                Duct Tape
+    mech_parts               Mechanical Parts
+    seeds                    Seed Packet
+    fishing_kit              Fishing Kit
+    backpack                 School Backpack
+    backpack_hiking          Hiking Backpack
+    sling_bag                Sling Bag
+    plate_carrier            Plate Carrier
+    helmet                   Combat Helmet
