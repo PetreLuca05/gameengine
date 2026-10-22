@@ -9,7 +9,7 @@
 #define TH (gui_theme())
 #define TOK(n) gui_s(gui_tok(n))
 
-typedef enum MmTab { MT_PLAY, MT_PLAYER, MT_COSMETICS, MT_MAPS, MT_SETTINGS, MT_CREDITS, MT_COUNT } MmTab;
+typedef enum MmTab { MT_PLAY, MT_PLAYER, MT_COSMETICS, MT_MAPS, MT_SETTINGS, MT_NEWS, MT_CREDITS, MT_COUNT } MmTab;
 typedef enum MmPlayPage { PP_MAIN, PP_BROWSER } MmPlayPage;
 
 // A screen layout (assets/ui/screens/<name>.json) solved into a rect each frame.
@@ -65,13 +65,14 @@ void mm_cosmetics_draw(GuiRect content);
 void mm_maps_draw(GuiRect content);
 void mm_maps_background(GuiRect content, float alpha);   // the globe, before the shading and the panels
 void mm_credits_draw(GuiRect content);
+void mm_news_draw(GuiRect content);     // Patch notes tab (assets/ui/news.txt)
 void mm_lobby_draw(GuiRect content);
 void mm_loading_draw(void);
-void mm_play_tick(float dt);           // quick play search
 
 // scene (mm_scene.c)
 void mm_scene_register(void);
 void mm_scene_enter(void);
+void mm_background_draw(GuiRect framed);   // the pale blue backdrop + the character (framed: last frame's preview rect)
 void mm_scene_apply_environment(void); // the selection's season / time / weather on the background world
 void mm_select_map(const char *id);    // Maps tab / lobby: selection, defaults from the map, background
 

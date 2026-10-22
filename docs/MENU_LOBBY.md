@@ -23,28 +23,32 @@ pause menu's look (thin lines, semi-transparent blurred panels, small-caps label
 
 ```
 launch ── splash (1.6 s, any key / click skips) ──▶ MAIN MENU
-  background: the dev room, your character (3rd person, idle, your cosmetics, the held item),
-              slow camera drift, lit by the selected map's season / time / weather (frozen)
-  top bar:  Play · Player · Cosmetics · Maps · Settings · Credits                  [⏻]
-            Q / E · LB / RB · 1-6 · mouse                         ⏻ ─▶ CONFIRM "Quit to desktop?"
+  background: a pale blue backdrop and your character alone on it (chars_preview, the inventory's
+              studio render: idle, your cosmetics and worn gear, the SMG in the hands; mm_scene.c
+              mm_background_draw), right of centre, a slow sway; the dev room world runs under it
+  top bar:  Play · Player · Cosmetics · Maps · Settings · Patch notes · Credits   account  [⏻]
+            Q / E · LB / RB · 1-7 · mouse                         ⏻ ─▶ CONFIRM "Quit to desktop?"
+            account: avatar · name · phone glyph + status (click: the Connect portal) · Online /
+            Offline (LAN only) / LAN build · relay ping · version
   ├─ Play ──┬─ Continue  (the last story checkpoint, docs/STORY.md; else the last session; greyed without)
   │         ├─ Story: 10th Floor (starts chapter 1, story_chapter 1)
   │         ├─ Host game ─────────────────────────────────────▶ LOBBY (host)
   │         ├─ Join ─▶ SERVER BROWSER [Steam lobbies | Friends | LAN | Direct IP] ─▶ LOBBY
-  │         ├─ Quick play (first public lobby with space and the same version, else hosts one)
   │         └─ Host on: Steam / LAN
-  ├─ Player     3D preview (the scene camera frames the real character; drag / wheel / stick),
-  │             name (LAN name field offline), stats (stubs), loadout, "Preview in map lighting",
+  ├─ Player     the character framed in the preview rect (drag turns, wheel / stick zooms),
+  │             name (LAN name field offline), stats (stubs), loadout,
   │             the Phone card (Connect ─▶ CONNECT PORTAL modal; docs/PHONE.md "Phone flow")
   ├─ Cosmetics  categories ▸ item grid (inventory slot widget, rarity strip, LOCKED) ▸ equip
-  ├─ Maps       list (thumbnail, biome, size, players; test maps toggle) ▸ details ▸ Session:
+  ├─ Maps       bottom bar (no background): Development · Chapter 1: The Beginning; a click opens
+  │             the group's maps (thumbnail, biome, size, players) in a list rising above it (fades
+  │             in, rows stagger), a click elsewhere closes it ▸ details ▸ Session:
   │             Season · Start time · Start weather · Dynamic weather ▸ Host on this map
   │             background: the globe (docs/MENU_GLOBE.md), flying to the selected map's place
   ├─ Settings   the game's settings screen (Engine Fidelity, Graphics, Controls, Crosshair,
   │             Audio, Character, Phone), applying live
+  ├─ Patch notes  assets/ui/news.txt on the credits page (# title, ## heading)
   └─ Credits    rolling credits + third-party licences
-  footer: avatar · name · phone glyph + status (click: the Connect portal) · Online / Offline (LAN
-          only) / LAN build · relay ping · version   patch notes
+  footer: key hints
 
 LOBBY (the Play tab while in a session; Maps and Credits are locked, the tab reads "Lobby")
   players (avatar, name colour, HOST, ready, phone icon (a paired real phone), mic stub, ping;
@@ -187,10 +191,10 @@ Console: `season [spring|summer|autumn|winter|off] [start preset|random] [static
      "globe": { "place": "Hârșova", "lon": 27.953, "lat": 44.685, "region": "ro_ct" } }
    ```
    `level` is what `game_host` loads (`data/levels/<level>.json`, or `streaming` / `flat`);
-   `weather` "" = the season's pick; `"dev": true` marks a test map ("Show test maps", on by default,
-   hides them when turned off); `"globe"` is where the Maps tab globe flies (docs/MENU_GLOBE.md;
-   `region` names an `assets/globe/regions.json` entry); `"scene": "handpose"` opens that dev scene once the level is up (the
-   Hand Pose Editor entry); `size_m` 0 = unbounded. The console's `map` (no argument) lists every level,
+   `weather` "" = the season's pick; `"dev": true` marks a test map; the Maps tab lists a map with a `chapter`
+   under Chapter 1, every other one under Development; `"globe"` is where the Maps tab globe flies (docs/MENU_GLOBE.md;
+   `region` names an `assets/globe/regions.json` entry); `"scene": "<name>"` opens that dev scene once the level is up (no entry
+   uses it now: the hand-pose editor is `scene handpose`); `size_m` 0 = unbounded. The console's `map` (no argument) lists every level,
    menu entry and scene; `map <menu id>` resolves an entry to its level / scene.
 2. A 384 × 216 thumbnail: `python tools/gen_map_thumbs.py` (brush levels are drawn top-down;
    open-world levels: `mapgen_preview data/levels/<level>.json x.png 8` then
@@ -201,7 +205,7 @@ The map catalogue is part of the build hash: both sides must have the same maps.
 
 The dev maps: Dev Room (`devroom`), Dev Room Vegetation (`devroom_vegetation`: the dev room in the
 vegetation valley, docs/ZOMBIE_MAP.md "Dev room in the vegetation valley"), Water Yard, the terrain
-yards and the Hand Pose Editor.
+yards.
 
 Note: there is no 4 × 4 km map in the repository. The open world (`zombieland`) is 2 × 2 km and the
 "Streaming Test Terrain" (`streaming`) is unbounded noise terrain.

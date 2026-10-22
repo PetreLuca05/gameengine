@@ -30,7 +30,7 @@ static MainMenu g_mm;
 MainMenu *mm(void) { return &g_mm; }
 #define M (&g_mm)
 
-static const char *const k_tab_names[MT_COUNT] = { "Play", "Player", "Cosmetics", "Maps", "Settings", "Credits" };
+static const char *const k_tab_names[MT_COUNT] = { "Play", "Player", "Cosmetics", "Maps", "Settings", "Patch notes", "Credits" };
 
 // ------------------------------------------------------------------ layouts
 
@@ -133,7 +133,7 @@ void mm_thumb(GuiRect r, const char *path) {
     gd_round_outline(r, rad, 1.0f, TH->panel_border);
 }
 
-// Key hints: centred in the footer (between the status and the patch notes).
+// Key hints: centred in the footer.
 void mm_footer_hint(GuiRect r, const char *text) {
     (void)r;
     GuiRect f = mm_node(&M->shell, "footer_mid");
@@ -182,26 +182,6 @@ static void draw_status(GuiRect r) {
     gd_circle(x + dr, dy + gd_line_height(gui_s(TH->t_small)) * 0.5f, dr, dot);
     GuiText st = { gui_s(TH->t_small), GW_REGULAR, TH->text_dim, GUI_LEFT, 0, false, true, r.w - av - dr * 4 };
     gd_text(&st, x + dr * 3, dy, line);
-}
-
-static void draw_news(GuiRect r) {
-    static char news[1024];
-    static bool loaded;
-    if (!loaded) {
-        loaded = true;
-        char buf[512];
-        char *t = platform_read_file(platform_data_path("assets/ui/news.txt", buf, sizeof(buf)), NULL);
-        dg_strcpy(news, sizeof(news), t ? t : "");
-        free(t);
-    }
-    if (!news[0]) return;
-    GuiText h = { gui_s(TH->t_label), GW_SEMIBOLD, TH->text_faint, GUI_RIGHT, TH->tracking_caps * 1.4f, true, true, 0 };
-    gd_text(&h, r.x + r.w, r.y, "Patch notes");
-    GuiText b = { gui_s(TH->t_small), GW_REGULAR, TH->text_dim, GUI_LEFT, 0, false, true, 0 };
-    float y = r.y + gd_line_height(h.size) + gui_s(TH->gap * 0.5f);
-    gd_clip_push(gui_rect(r.x, y, r.w, r.y + r.h - y));
-    gd_text_wrap(&b, r.x, y, r.w, news, true);
-    gd_clip_pop();
 }
 
 // ------------------------------------------------------------------ splash / notices
@@ -330,6 +310,7 @@ static void tab_keys(void) {
 bool mainmenu_draw(bool top) {
     if (!M->active) return false;
     if (M->env_dirty) mm_scene_apply_environment();
+    GuiRect framed = M->preview_rect;   // set by the Player / Cosmetics tabs (last frame's)
     M->preview_rect = gui_rect(0, 0, 0, 0);
     gui_push_input(top && !M->splash);
     LobbyState st = lobby_state();
@@ -340,8 +321,10 @@ bool mainmenu_draw(bool top) {
         return false;
     }
     float a = gui_ease_out(gui_anim_t(gui_id("mm_open")) / fmaxf(0.01f, TH->menu_in * 2));
-    // The Maps tab's globe replaces the background world (docs/MENU_GLOBE.md).
-    if (M->tab == MT_MAPS && tab_allowed(MT_MAPS, NULL) && st != LS_CLOSED) {
+    // The Maps tab's globe takes the character's place (docs/MENU_GLOBE.md).
+    bool globe = M->tab == MT_MAPS && tab_allowed(MT_MAPS, NULL) && st != LS_CLOSED;
+    mm_background_draw(globe ? gui_rect(-1, -1, 0, 0) : framed);
+    if (globe) {
         mm_layout_solve(&M->shell, gui_rect(0, 0, gui_w(), gui_h()));
         mm_maps_background(mm_node(&M->shell, "content"), a * gui_ease_out(gui_anim_t(gui_id("mm_tab_in")) / TH->modal_in));
     }
@@ -370,13 +353,13 @@ bool mainmenu_draw(bool top) {
         settings_draw(mm_node(&M->settings, "settings"));
         break;
     }
+    case MT_NEWS: mm_news_draw(content); break;
     case MT_CREDITS: mm_credits_draw(content); break;
     default: break;
     }
     gd_alpha_pop();
     draw_tabbar(bar);   // after the content: the keyboard / pad focus starts in the page, not on the power icon
     draw_status(mm_node(&M->shell, "status"));
-    draw_news(mm_node(&M->shell, "news"));
     draw_notice(content);
     gd_alpha_pop();
     if (top && !M->splash && !closed) {
@@ -399,8 +382,7 @@ bool mainmenu_draw(bool top) {
 
 void mainmenu_tick(float dt) {
     globe_tick();   // a release asked for by a session start (the menu closed)
-    if (!M->active) return;
-    mm_play_tick(dt);
+    (void)dt;
 }
 
 // ------------------------------------------------------------------ lifecycle

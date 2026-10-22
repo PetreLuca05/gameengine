@@ -1,5 +1,5 @@
 // Play tab (docs/MENU_LOBBY.md): Host game, Join (server browser: Steam lobbies, friends' games, LAN
-// discovery, direct IP), Continue (stub), Quick play. Steam-only parts are greyed with the reason
+// discovery, direct IP), Continue (stub). Steam-only parts are greyed with the reason
 // when Steam isn't running (offline / LAN mode).
 #include "mm_internal.h"
 #include "ui/screens/screens.h"
@@ -23,10 +23,6 @@ static struct {
     double refreshed[BS_COUNT];
     GuiScroll scroll;
     char direct[64];
-    // quick play
-    bool qp;
-    double qp_until;
-    int qp_source;
 } P = { .host_kind = 0, .source = BS_LAN, .filter_region = 1, .selected = -1, .direct = "127.0.0.1:27015" };
 
 static bool steam(void) { return lobby_steam_running(); }
@@ -41,43 +37,6 @@ static void refresh(int source) {
     lobby_browser_refresh(source, &f);
     P.refreshed[source] = gui_time();
     P.selected = -1;
-}
-
-// ------------------------------------------------------------------ quick play
-
-static void quick_play(void) {
-    P.qp = true;
-    P.qp_source = steam() ? BS_STEAM : BS_LAN;
-    P.qp_until = gui_time() + 4.0;
-    BrowserFilter f;
-    memset(&f, 0, sizeof(f));
-    f.players = 1;
-    f.region = 1;
-    lobby_browser_refresh(P.qp_source, &f);
-}
-
-// Stub rules: the first public lobby (not started, same version, with space); none within 4 s: host one.
-void mm_play_tick(float dt) {
-    (void)dt;
-    if (!P.qp) return;
-    if (lobby_active()) { P.qp = false; return; }
-    BrowserFilter f;
-    memset(&f, 0, sizeof(f));
-    f.players = 1;
-    BrowserEntry e[32];
-    int n = lobby_browser_busy(P.qp_source) ? 0 : lobby_browser_entries(P.qp_source, &f, e, 32);
-    for (int i = 0; i < n; i++) {
-        if (!e[i].version_ok || e[i].in_game) continue;
-        P.qp = false;
-        lobby_join(e[i].kind, e[i].address);
-        return;
-    }
-    if (gui_time() > P.qp_until) {
-        P.qp = false;
-        LobbySettings *s = &lobby_profile()->lobby;
-        s->privacy = LP_PUBLIC;
-        lobby_host(P.qp_source == BS_STEAM ? TRANSPORT_STEAM : TRANSPORT_LAN);
-    }
 }
 
 // ------------------------------------------------------------------ main page
@@ -154,15 +113,13 @@ static void draw_main(GuiRect content) {
         static char story_chapter[48];
         if (gui_time() - story_checked > 2.0) { story_checked = gui_time(); story_save = story_continue_available(story_chapter, sizeof(story_chapter)); }
         if (!strcmp(n->action, "continue")) { enabled = story_save || prof->last_session[0] != 0; tip = "No saved session yet"; }
-        if (!strcmp(n->action, "quick") && P.qp) { enabled = false; tip = "Searching..."; }
         GuiId id = gui_id(n->id);
-        if (gw_menu_item(id, n->rect, P.qp && !strcmp(n->action, "quick") ? "Searching..." : n->label, false, appear, enabled)) {
+        if (gw_menu_item(id, n->rect, n->label, false, appear, enabled)) {
             if (!strcmp(n->action, "host")) host_game();
             else if (!strcmp(n->action, "join")) { mm()->play_page = PP_BROWSER; P.source = steam() ? BS_STEAM : BS_LAN; refresh(P.source); gui_set_focus(0); }
             else if (!strcmp(n->action, "continue") && story_save) story_start(story_chapter, "auto");
             else if (!strcmp(n->action, "continue")) lobby_host(steam() && P.host_kind == 0 ? TRANSPORT_STEAM : TRANSPORT_LAN);
             else if (!strcmp(n->action, "story")) story_start("01_tenth_floor", NULL);
-            else if (!strcmp(n->action, "quick")) quick_play();
         }
         if (!enabled && tip && gui_rect_contains(n->rect, gui_mouse().x, gui_mouse().y)) gui_tooltip(id, tip);
         if (!gui_focus() && !strcmp(n->action, "host") && gui_nav_mode()) gui_set_focus(id);

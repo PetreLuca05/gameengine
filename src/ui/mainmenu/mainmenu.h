@@ -4,7 +4,7 @@
 // UI (src/ui/gui, assets/ui/screens/mainmenu*.json) on the screen stack as SCR_MAINMENU.
 //
 //   top tab bar: Play | Player | Cosmetics | Maps | Settings | Credits      [power: quit]
-//   Play: Host game, Join (server browser), Continue (stub), Quick play
+//   Play: Host game, Join (server browser), Continue (stub)
 //   while in a lobby the content is the lobby screen; the game's loading screen follows
 #ifndef DG_MAINMENU_H
 #define DG_MAINMENU_H

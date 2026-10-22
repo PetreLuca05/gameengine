@@ -43,13 +43,9 @@ void mm_player_draw(GuiRect content) {
     GuiRect area = mm_node(L, "preview_area");
     M->preview_rect = area;
     orbit_input(area);
-    // Preview bar: the lighting toggle + a hint.
-    GuiRect bar = mm_node(L, "preview_bar"), a, b;
-    gui_split_h(bar, 0.5f, TOK("mm_gap"), &a, &b);
-    bool tod = M->preview_tod;
-    if (gw_toggle(gui_id("mm_preview_tod"), gui_rect(a.x, a.y, gui_s(TH->button_h * 3), a.h), &tod)) { M->preview_tod = tod; M->env_dirty = true; }
-    gw_label(gui_rect(a.x + gui_s(TH->button_h * 3.2f), a.y, a.w, a.h), "Preview in map lighting", gui_s(TH->t_small), GW_REGULAR, TH->text_dim, GUI_LEFT);
-    gw_label(b, "Drag to rotate  ·  wheel to zoom", gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_RIGHT);
+    // Preview bar: a hint.
+    GuiRect bar = mm_node(L, "preview_bar");
+    gw_label(bar, "Drag to rotate  ·  wheel to zoom", gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_RIGHT);
 
     GuiRect info = mm_node(L, "info");
     mm_panel(info);

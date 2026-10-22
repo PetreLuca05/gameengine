@@ -1,5 +1,6 @@
 // Maps tab (docs/MENU_LOBBY.md "Maps", "Time, season and weather"): every assets/maps/*.json with its
-// thumbnail and facts. Selecting a map sets the next lobby's map and the background; the session
+// thumbnail and facts, in two groups on a bar at the bottom (Development, Chapter 1): a click on a
+// group opens its maps in a list rising above it. Selecting a map sets the next lobby's map and the background; the session
 // look is picked here too: the season (calendar day, temperature and which weather it brings:
 // autumn rain, winter snow), the start time and the start weather (one of the season's presets or
 // a pick), and whether the weather changes during the game (the season-biased scheduler).
@@ -15,6 +16,13 @@
 #include <string.h>
 
 static GuiScroll g_scroll;
+
+// The bottom bar's groups: the story chapter's maps, every other map under Development.
+enum { MG_DEV, MG_CHAPTER1, MG_COUNT };
+static const char *const k_group_names[MG_COUNT] = { "Development", "Chapter 1: The Beginning" };
+static int g_open = -1;   // the group whose list is open
+
+static int map_group(const MapInfo *m) { return m->chapter[0] ? MG_CHAPTER1 : MG_DEV; }
 
 // A season in a few words, from its weights: "mostly rain", "mostly snow", "mostly fair" ...
 // Story chapter maps start their chapter (docs/STORY.md); every other map hosts a lobby.
@@ -134,25 +142,69 @@ void mm_maps_draw(GuiRect content) {
     MmLayout *L = &M->maps;
     mm_layout_solve(L, content);
     const MapList *ml = lobby_maps();
-    // Filters: test maps on / off.
-    GuiRect fr = mm_node(L, "filters");
-    gw_toggle(gui_id("mm_maps_dev"), gui_rect(fr.x, fr.y, gui_s(TH->button_h * 3), fr.h), &M->show_dev_maps);
-    gw_label(gui_rect(fr.x + gui_s(TH->button_h * 3.2f), fr.y, fr.w, fr.h), "Show test maps", gui_s(TH->t_small), GW_REGULAR, TH->text_dim, GUI_LEFT);
-    // List.
-    GuiRect lr = mm_node(L, "list");
-    mm_panel(lr);
-    GuiRect view = gui_rect_inset(lr, TOK("mm_gap"));
-    view.w -= TOK("mm_gap");
-    gw_scroll_begin(&g_scroll, gui_id("mm_maps_scroll"), view);
-    float y = gw_scroll_y(&g_scroll), rh = TOK("mm_map_row_h");
-    int shown = 0;
-    for (int i = 0; i < ml->count; i++) {
-        const MapInfo *m = &ml->maps[i];
-        if (m->dev && !M->show_dev_maps && strcmp(m->id, M->map)) continue;
-        map_row(i, m, gui_rect(view.x, y + (float)shown * rh, view.w, rh - TOK("mm_gap_sm")));
-        shown++;
+    const MapInfo *cur = lobby_map_info(M->map);
+    // The group bar: no background, the group holding the selected map lit, the open one underlined.
+    GuiRect gr[MG_COUNT];
+    for (int g = 0; g < MG_COUNT; g++) {
+        char node[8];
+        snprintf(node, sizeof(node), "group%d", g);
+        gr[g] = mm_node(L, node);
+        GuiInteract in = gui_interact(gui_idi("mm_map_group", g), gr[g], GUI_FOCUSABLE);
+        bool lit = cur && map_group(cur) == g, open = g_open == g;
+        int count = 0;
+        for (int i = 0; i < ml->count; i++) count += map_group(&ml->maps[i]) == g;
+        u32 col = open || lit ? TH->text : (in.hot ? TH->text_dim : TH->text_faint);
+        float lh = gd_line_height(gui_s(TH->t_body));
+        float y = gr[g].y + (gr[g].h - lh * 2.2f) * 0.5f;
+        GuiText t = { gui_s(TH->t_body), GW_SEMIBOLD, col, GUI_LEFT, TH->tracking_caps, true, true, gr[g].w };
+        gd_text(&t, gr[g].x, y, k_group_names[g]);
+        char sub[96];
+        if (lit) snprintf(sub, sizeof(sub), "%s  ·  %d map%s", cur->name, count, count == 1 ? "" : "s");
+        else snprintf(sub, sizeof(sub), "%d map%s", count, count == 1 ? "" : "s");
+        gw_label(gui_rect(gr[g].x, y + lh * 1.1f, gr[g].w, lh), sub, gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_LEFT);
+        float ul = open ? gr[g].w : (lit ? gui_s(28) : 0);
+        if (ul > 0) gd_rect(gui_rect(gr[g].x, gr[g].y + gr[g].h - gui_s(TH->accent_bar), ul, gui_s(TH->accent_bar)), TH->accent);
+        if (in.focused) gw_focus_ring(gr[g], gui_s(TH->radius), 1.0f);
+        if (in.clicked) {
+            g_open = open ? -1 : g;
+            if (g_open >= 0) { gui_anim_restart(gui_id("mm_maps_pop")); g_scroll.target = g_scroll.offset = 0; }
+            gui_sound(TH->snd_click);
+        }
     }
-    gw_scroll_end(&g_scroll, (float)shown * rh);
+    // The open group's maps: a list rising above its entry (fades in, the rows stagger up).
+    if (g_open >= 0) {
+        int n = 0;
+        for (int i = 0; i < ml->count; i++) n += map_group(&ml->maps[i]) == g_open;
+        float rh = TOK("mm_map_row_h"), pad = TOK("mm_gap");
+        GuiRect at = gr[g_open];
+        float h = fminf((float)n * rh + pad * 2, at.y - content.y - pad);
+        float at_t = gui_anim_t(gui_id("mm_maps_pop"));
+        float t = gui_ease_out(saturate(at_t / fmaxf(0.01f, TH->modal_in)));
+        GuiRect lr = { at.x, at.y - pad - h + (1.0f - t) * gui_s(24), fmaxf(at.w, TOK("mm_list_w")), h };
+        gd_alpha_push(t);
+        mm_panel(lr);
+        gui_block_rect(lr);
+        GuiRect view = gui_rect_inset(lr, pad);
+        view.w -= pad;
+        gw_scroll_begin(&g_scroll, gui_id("mm_maps_scroll"), view);
+        float y = gw_scroll_y(&g_scroll);
+        int shown = 0;
+        for (int i = 0; i < ml->count; i++) {
+            const MapInfo *m = &ml->maps[i];
+            if (map_group(m) != g_open) continue;
+            float a = gui_ease_out(saturate((at_t - (float)shown * TH->menu_stagger) / fmaxf(0.01f, TH->menu_in)));
+            gd_alpha_push(a);
+            map_row(i, m, gui_rect(view.x, y + (float)shown * rh + (1.0f - a) * gui_s(12), view.w, rh - TOK("mm_gap_sm")));
+            gd_alpha_pop();
+            shown++;
+        }
+        gw_scroll_end(&g_scroll, (float)shown * rh);
+        gd_alpha_pop();
+        // A click anywhere else closes it.
+        vec2 mp = gui_mouse();
+        bool on_bar = gui_rect_contains(gr[0], mp.x, mp.y) || gui_rect_contains(gr[1], mp.x, mp.y);
+        if (gui_mouse_pressed(0) && !gui_rect_contains(lr, mp.x, mp.y) && !on_bar) g_open = -1;
+    }
 
     // Details + session look.
     const MapInfo *mi = lobby_map_info(M->map);

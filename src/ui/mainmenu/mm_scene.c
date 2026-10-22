@@ -1,8 +1,8 @@
-// Main menu background (docs/MENU_LOBBY.md "Main menu shell"): a dev scene (src/game/scene.h) on a
-// local world - the player's character in the dev room, drawn whole by the normal pipeline. The
-// camera drifts slowly in front of the character; on the Player and Cosmetics tabs it frames the
-// character inside the preview rect and the mouse orbits / zooms it. The selected map's season,
-// time and weather light it (frozen time, fixed weather).
+// Main menu background (docs/MENU_LOBBY.md "Main menu shell"): a pale blue backdrop and the player's
+// character alone on it (chars_preview: the inventory's studio render, own idle pose) holding the
+// SMG, right of centre; on the Player and Cosmetics tabs inside the preview rect, where the mouse
+// turns / zooms it. The local dev room world still runs under it (a dev scene, src/game/scene.h:
+// the lobby hosts from it) but is covered; the selected map's season / time / weather still go to it.
 #include "mm_internal.h"
 #include "game/game.h"
 #include "game/game_internal.h"
@@ -11,6 +11,13 @@
 #include "core/engine.h"
 #include "core/log.h"
 #include "world/season.h"
+#include "gameplay/characters.h"
+#include "gameplay/items.h"
+#include "gameplay/inventory/inv_tree.h"
+#include "render/char_preview_view.h"
+
+#define WHITE UI_RGBA(255, 255, 255, 255)   // lint:ok image tint (no colour change)
+#define CHAR_PREVIEW_MENU (CHAR_PREVIEW_HUD + MAX_PLAYERS)   // its own preview target, after the HUD cards
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -74,11 +81,47 @@ static bool scene_enter_fn(void) { return game_world() != NULL; }
 static void scene_leave_fn(void) {}
 
 static const GameScene k_scene = {
-    "mainmenu", "main menu background (the player in the dev room, slow camera drift)",
+    "mainmenu", "main menu background world (covered by the menu's backdrop + character render)",
     scene_enter_fn, scene_leave_fn, scene_camera_fn, NULL, true, true,
 };
 
 void mm_scene_register(void) { scene_register(&k_scene); }
+
+// framed.w > 0: the tab's preview rect; framed.w < 0 (the Maps tab's globe): the backdrop only.
+void mm_background_draw(GuiRect framed) {
+    MainMenu *M = mm();
+    float W = gui_w(), H = gui_h();
+    gd_rect_grad(gui_rect(0, 0, W, H), UI_RGBA(214, 230, 242, 255), UI_RGBA(178, 203, 224, 255));
+    Game *g = game();
+    World *w = game_world();
+    Player *p = game_local_player();
+    if (framed.w < 0 || !g || !w || !p) return;
+    GuiRect r;
+    CharPreviewIn in;
+    memset(&in, 0, sizeof(in));
+    in.target = CHAR_PREVIEW_MENU;
+    if (framed.w > 0) {
+        // The preview rect, zoomed about its centre; the drag turns the character.
+        float z = M->orbit_zoom, h = framed.h * z, cw = h * 0.85f;
+        r = gui_rect(framed.x + framed.w * 0.5f - cw * 0.5f, framed.y + framed.h * 0.5f - h * 0.5f, cw, h);
+        in.yaw = -M->orbit_yaw;
+    } else {
+        // Screen high, bottom-aligned right of centre (the menu is on the left), a slow sway.
+        float h = H, cw = h * 0.85f;
+        r = gui_rect(W * 0.64f - cw * 0.5f, 0, cw, h);
+        in.yaw = -0.35f + 0.12f * sinf((float)gui_time() * 0.09f);
+    }
+    in.w = (int)lrintf(fminf(r.w, CHAR_PREVIEW_MAX_SIZE));
+    in.h = (int)lrintf(fminf(r.h, CHAR_PREVIEW_MAX_SIZE));
+    in.held_item = w->items ? item_find(w->items, "smg") : 0;   // the idle pose with the SMG in the hands
+    static const int worn[CWORN_COUNT] = { EQ_HEADWEAR, EQ_BODY_ARMOR, EQ_BACKPACK };
+    for (int k = 0; k < CWORN_COUNT; k++) {
+        const InvItem *it = inv_equipped_c(&p->inv.t, worn[k]);
+        in.worn[k] = it ? it->s.item : 0;
+    }
+    TextureId tex = chars_preview(w, g->local_slot, &in);
+    if (tex) gd_image(r, tex, v4(0, 0, 1, 1), WHITE);
+}
 
 void mm_scene_enter(void) {
     if (!scene_active() || strcmp(scene_active()->name, "mainmenu")) scene_enter("mainmenu");

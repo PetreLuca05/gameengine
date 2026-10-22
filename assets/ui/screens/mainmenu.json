@@ -4,11 +4,10 @@
     { "id": "root", "safe": true, "dir": "column", "align": "stretch" },
     { "id": "tabbar", "parent": "root", "h": "@mm_tabbar_h", "dir": "row", "align": "stretch", "gap": "@mm_gap_lg" },
     { "id": "tabs", "parent": "tabbar", "flex": 1 },
+    { "id": "status", "parent": "tabbar", "w": "@mm_status_w" },
     { "id": "power", "parent": "tabbar", "w": "@mm_power" },
     { "id": "content", "parent": "root", "flex": 1, "pad": ["@zero", "@mm_content_gap", "@zero", "@mm_content_gap"] },
     { "id": "footer", "parent": "root", "h": "@mm_footer_h", "dir": "row", "align": "stretch", "gap": "@mm_gap_lg" },
-    { "id": "status", "parent": "footer", "w": "@mm_status_w" },
-    { "id": "footer_mid", "parent": "footer", "flex": 1 },
-    { "id": "news", "parent": "footer", "w": "@mm_news_w" }
+    { "id": "footer_mid", "parent": "footer", "flex": 1 }
   ]
 }
