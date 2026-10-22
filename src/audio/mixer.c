@@ -4,12 +4,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { CMD_START, CMD_PARAMS, CMD_ENV, CMD_VOLUME, CMD_STOP, CMD_VIRTUAL, CMD_BUS, CMD_MASTER, CMD_LISTENER, CMD_REVERB, CMD_DEGRADE };
+enum { CMD_START, CMD_PARAMS, CMD_ENV, CMD_VOLUME, CMD_STOP, CMD_VIRTUAL, CMD_BUS, CMD_MASTER, CMD_LISTENER, CMD_REVERB, CMD_DEGRADE, CMD_STREAM_ENV };
 
 typedef struct MixCmd {
     u8 type, slot, layer, count;
     u32 gen;
     int dop;
+    float aux;                   // CMD_STREAM_ENV: the radio amount
     union {
         MixStart start;
         float params[SYN_MAX_PARAMS];
@@ -37,6 +38,18 @@ typedef struct AVoice {
 
 typedef struct GSlot { bool used; u32 gen; int dop; float score; double started; } GSlot;
 
+typedef struct AStream {
+    float ring[MIX_STREAM_LEN];
+    mix_atomic w, r;             // w: the game thread, r: the audio thread
+    bool playing;
+    EnvChain chain;
+    SynSmooth radio;
+    SynBiquad hp[2], lp[2];
+    u32 noise;
+    int burst;                   // squelch samples left
+    float hiss;                  // 0..1: follows playing
+} AStream;
+
 struct Mixer {
     float sr;
     double (*clock)(void);
@@ -63,6 +76,8 @@ struct Mixer {
     SynBiquad f_lp[2], f_low[2], f_high[2], f_death[2];
     float f_applied[4];
     float scratch[SYN_MAX_NODES * SYN_BLOCK];
+    AStream stream[MIX_STREAMS];
+    volatile float stream_peak[MIX_STREAMS];
     int degrade, force_degrade;
     float avg_us;
 };
@@ -102,6 +117,18 @@ Mixer *mixer_create(float sr, double (*clock)(void)) {
     }
     m->f_applied[0] = m->f_applied[3] = 20000.0f;
     m->force_degrade = -1;
+    EnvParams np;
+    env_params_neutral(&np);
+    for (int s = 0; s < MIX_STREAMS; s++) {
+        AStream *st = &m->stream[s];
+        env_chain_init(&st->chain, sr, NULL, 0, &np);
+        syn_smooth_init(&st->radio, 0.0f, 0.1f, sr);
+        for (int k = 0; k < 2; k++) {
+            syn_biquad_design(&st->hp[k], SYN_HP, 350.0f, 0.707f, 0, sr);
+            syn_biquad_design(&st->lp[k], SYN_LP, 3200.0f, 0.707f, 0, sr);
+        }
+        st->noise = 0x9E3779B9u * (u32)(s + 1);
+    }
     return m;
 }
 
@@ -397,6 +424,12 @@ static void drain(Mixer *m) {
             break;
         case CMD_REVERB: env_reverb_set(&m->reverb[c->layer], &c->u.rev); break;
         case CMD_DEGRADE: m->force_degrade = (int)c->u.f; break;
+        case CMD_STREAM_ENV:
+            if (c->slot < MIX_STREAMS) {
+                env_chain_set(&m->stream[c->slot].chain, &c->u.env);
+                m->stream[c->slot].radio.target = c->aux;
+            }
+            break;
         }
         t = (t + 1) % MIX_CMDS;
     }
@@ -471,6 +504,88 @@ static bool render_voice(Mixer *m, int s, Bufs *b, int n, int *layers) {
     return true;
 }
 
+// ------------------------------------------------------------------ streams (voice chat)
+
+int mixer_stream_push(Mixer *m, int s, const float *pcm, int n) {
+    if (s < 0 || s >= MIX_STREAMS || n <= 0) return 0;
+    AStream *st = &m->stream[s];
+    long w = mix_load(&st->w), r = mix_load(&st->r);
+    long used = (w - r + MIX_STREAM_LEN) % MIX_STREAM_LEN;
+    if (used + n >= MIX_STREAM_LEN - 1) return 0;
+    for (int i = 0; i < n; i++) st->ring[(w + i) % MIX_STREAM_LEN] = pcm[i];
+    mix_store(&st->w, (w + n) % MIX_STREAM_LEN);
+    return n;
+}
+
+void mixer_stream_env(Mixer *m, int s, const EnvParams *p, float radio) {
+    if (s < 0 || s >= MIX_STREAMS) return;
+    MixCmd c;
+    memset(&c, 0, sizeof(c));
+    c.type = CMD_STREAM_ENV;
+    c.slot = (u8)s;
+    c.aux = radio < 0 ? 0 : (radio > 1 ? 1 : radio);
+    c.u.env = *p;
+    push(m, &c);
+}
+
+float mixer_stream_level(const Mixer *m, int s) { return s >= 0 && s < MIX_STREAMS ? m->stream_peak[s] : 0.0f; }
+
+DG_INLINE float stream_noise(AStream *st) {
+    st->noise = st->noise * 1664525u + 1013904223u;
+    return (float)(st->noise >> 8) * (2.0f / 16777216.0f) - 1.0f;
+}
+
+static void render_stream(Mixer *m, int s, Bufs *b, int n) {
+    AStream *st = &m->stream[s];
+    long w = mix_load(&st->w), r = mix_load(&st->r);
+    long avail = (w - r + MIX_STREAM_LEN) % MIX_STREAM_LEN;
+    long pre = (long)(0.08f * m->sr), most = (long)(0.4f * m->sr);
+    if (!st->playing && avail >= pre) { st->playing = true; st->burst = (int)(0.05f * m->sr); }   // squelch open
+    if (!st->playing && st->burst <= 0 && st->hiss <= 0.0f) { m->stream_peak[s] *= 0.9f; return; }
+    if (avail > most) { r = (w - pre + MIX_STREAM_LEN) % MIX_STREAM_LEN; avail = pre; }   // too far behind: catch up
+    float mono[SYN_BLOCK];
+    int got = 0;
+    if (st->playing) {
+        got = (int)(avail < n ? avail : n);
+        for (int i = 0; i < got; i++) mono[i] = st->ring[(r + i) % MIX_STREAM_LEN];
+        mix_store(&st->r, (r + got) % MIX_STREAM_LEN);
+        if (got < n) { st->playing = false; st->burst = (int)(0.12f * m->sr); }   // ran dry: the talk ended, squelch tail
+    }
+    for (int i = got; i < n; i++) mono[i] = 0.0f;
+    float peak = 0.0f;
+    for (int i = 0; i < n; i++) peak = fmaxf(peak, fabsf(mono[i]));
+    m->stream_peak[s] = fmaxf(peak, m->stream_peak[s] * 0.9f);
+    float r0, r1;
+    syn_smooth_block(&st->radio, &r0, &r1);
+    float inv = 1.0f / (float)n;
+    // Proximity: the voice in the world (its environment chain), the part not on the radio.
+    float prox[SYN_BLOCK];
+    for (int i = 0; i < n; i++) prox[i] = mono[i] * (1.0f - (r0 + (r1 - r0) * (float)(i + 1) * inv));
+    float *l = b->bus[SYN_BUS_VOICE][0], *rr = b->bus[SYN_BUS_VOICE][1];
+    float *sends[ENV_ZONES] = { b->send[0], b->send[1], b->send[2] };
+    env_chain_process(&st->chain, prox, n, l, rr, sends);
+    // Radio: hiss while it plays, a squelch burst at the start / end, band-passed and driven, centred.
+    if (r0 <= 0.001f && r1 <= 0.001f) { st->burst = 0; st->hiss = st->playing ? 1.0f : 0.0f; return; }
+    float rad[SYN_BLOCK];
+    for (int i = 0; i < n; i++) {
+        st->hiss += ((st->playing ? 1.0f : 0.0f) - st->hiss) * 0.002f;
+        if (st->hiss < 1e-4f && !st->playing) st->hiss = 0.0f;
+        float nz = stream_noise(st) * (0.02f * st->hiss + (st->burst > 0 ? 0.25f : 0.0f));
+        if (st->burst > 0) st->burst--;
+        rad[i] = mono[i] * 2.2f + nz;
+    }
+    for (int k = 0; k < 2; k++) {
+        syn_biquad_run(&st->hp[k], rad, rad, n);
+        syn_biquad_run(&st->lp[k], rad, rad, n);
+    }
+    for (int i = 0; i < n; i++) {
+        float g = r0 + (r1 - r0) * (float)(i + 1) * inv;
+        float y = tanhf(rad[i] * 1.6f) * 0.55f * g;
+        l[i] += y;
+        rr[i] += y;
+    }
+}
+
 static void listener_filters(Mixer *m) {
     float a, lp, low, high, dlp;
     syn_smooth_block(&m->lis_lp, &a, &lp);
@@ -517,6 +632,7 @@ void mixer_render(Mixer *m, float *out, int frames) {
             if (!m->voice[s].active) continue;
             if (render_voice(m, s, &b, n, &layers) && off == 0) rendered++;
         }
+        for (int s = 0; s < MIX_STREAMS; s++) render_stream(m, s, &b, n);
         // Late reverbs into the effects bus.
         for (int z = 0; z < ENV_ZONES; z++) env_reverb_process(&m->reverb[z], b.send[z], n, b.bus[SYN_BUS_SFX][0], b.bus[SYN_BUS_SFX][1]);
         listener_filters(m);

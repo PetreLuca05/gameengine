@@ -312,6 +312,38 @@ The listener state (`game_audio_frame`) feeds the world-bus filter:
   time (`snd_offline`). Script tests therefore play voices for real, and `audio_record` captures
   them.
 
+## Voice chat
+
+Push to talk (`Talk`, **Y** by default; Controls tab). Close by you hear a player's voice in the
+world; far away it comes over the radio.
+
+- **Capture** (`src/audio/voice_capture.c`): the default microphone through miniaudio at 16 kHz mono
+  16-bit, into a lock-free ring. It opens on the first push to talk and stays open.
+- **Codec** (`src/audio/voice_codec.c`, pure): IMA ADPCM, 20 ms frames of 163 bytes (65 kbit/s, about
+  33 dB SNR on a voice-like signal). Every frame carries its own decoder state, so a lost packet costs
+  only its own 20 ms. Two frames make one packet (40 ms, 25 packets a second).
+- **Network** (`MSG_VOICE`, unreliable, protocol 37): a client sends its packets to the host. The host
+  plays them and relays them, with the slot, to every other welcomed client. The host's own voice
+  goes straight to every client.
+- **Playback** (`mixer_stream_*`): one stream per player slot. Packets are decoded, upsampled to
+  48 kHz and pushed into the stream's ring. The mixer starts it after an 80 ms jitter buffer and skips
+  ahead when more than 0.4 s is queued. The voice is split by `radio` (0..1) between two paths:
+  - **proximity:** the stream's environment chain, from the talker's head (`chars_head_world`), the
+    same model as every other sound: distance, walls, panning, room reverb sends.
+  - **radio:** band-passed 350 Hz .. 3.2 kHz (two biquads each side), driven (tanh), a low hiss while it
+    plays, a squelch burst at the start (50 ms) and at the end (120 ms), centred, at a steady level.
+- **Distance** (`src/game/game_voice.c`): `radio` is a smoothstep from `voice_radio_dist` (30 m) over
+  `voice_radio_fade` (10 m). A player this machine no longer replicates (far away) is on the radio.
+- **Settings:** Audio tab: Voice chat on / off (`voice_chat`), Microphone gain (`voice_mic_gain`),
+  Voice volume (`snd_voice`, the voice bus).
+- **HUD:** the talkers on the left, a green dot (in the world) or amber with RADIO; "You" while the
+  key is held.
+- **Tests and tools:** `test_voice` (the codec, the upsampler, the stream's jitter buffer, the radio
+  band). `voice_info` logs the microphone, the packets sent / received and each talker's distance,
+  level and radio amount. `voice_test_tone 1` replaces the microphone with a test voice, and `2` also
+  talks without the key. `voice_loopback 1` plays your own voice `voice_loopback_dist` metres in front
+  of you (past 30 m: the radio).
+
 ## Tools
 
 | Command | What it does |
@@ -349,6 +381,8 @@ The listener state (`game_audio_frame`) feeds the world-bus filter:
 - an open field at (−700, 0, 300), nothing within 450 m.
 
 ## Tests
+
+`test_voice`: see "Voice chat".
 
 `test_synth`:
 - the compiler orders out-of-order nodes and rejects cycles, self-feeds, modulation cycles, bad

@@ -2,6 +2,7 @@
 #include "gameplay/attachments.h"
 #include "game.h"
 #include "ui/mainmenu/mainmenu.h"
+#include "game_voice.h"
 #include "game_internal.h"
 #include "core/profiler.h"
 #include "game_water.h"
@@ -883,6 +884,7 @@ void game_frame(float dt) {
         net_client_interpolate(G->world, dt);
         daynight_client_frame(G->world);   // the time-of-day clock follows the interpolated server tick, slewed
     }
+    game_voice_tick(G->world);   // voice chat: push to talk, the microphone, packets out
     PROF_BEGIN("focus_hud");
     update_focus();
     game_hud_tick(dt);

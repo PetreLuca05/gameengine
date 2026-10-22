@@ -2695,6 +2695,48 @@
    "reason": "Dev logging of the viewmodel sway layers.",
    "category": "weapons"
   },
+  "voice_chat": {
+   "class": "EDITABLE",
+   "ui": "Audio",
+   "reason": "A player's choice: voice chat on / off.",
+   "category": "audio"
+  },
+  "voice_loopback": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Dev test tool.",
+   "category": "audio"
+  },
+  "voice_loopback_dist": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Dev test tool.",
+   "category": "audio"
+  },
+  "voice_mic_gain": {
+   "class": "EDITABLE",
+   "ui": "Audio",
+   "reason": "The player's microphone level.",
+   "category": "audio"
+  },
+  "voice_radio_dist": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Game design: where voices switch to the radio is the same for everyone.",
+   "category": "audio"
+  },
+  "voice_radio_fade": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Game design: the proximity / radio crossfade.",
+   "category": "audio"
+  },
+  "voice_test_tone": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Dev test tool.",
+   "category": "audio"
+  },
   "water_debug": {
    "class": "LOCKED",
    "ui": "—",

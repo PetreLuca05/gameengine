@@ -24,6 +24,7 @@
 #include "world/chunks.h"
 #include "gameplay/entities.h"
 #include "gameplay/inventory/inv_wire.h"
+#include "game/game_voice.h"
 #include <enet/enet.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -408,6 +409,13 @@ static void host_handle(const NetEvent *e) {
     }
     case MSG_BYE: N->t->disconnect(N->t, e->peer); break;
     case MSG_LOBBY: lobby_on_host_msg(e->peer, &r); break;
+    case MSG_VOICE: {
+        // A player's voice: played here, relayed to the others.
+        if (!c || !c->welcomed || e->size < 2 || e->size > 1 + VOICE_PACKET_MAX) break;
+        game_voice_receive(c->slot, e->data + 1, (int)e->size - 1);
+        net_host_send_voice(c->slot, e->data + 1, (int)e->size - 1);
+        break;
+    }
     default: break;
     }
 }
@@ -736,6 +744,11 @@ static void client_handle(const NetEvent *e) {
         else spectator_cl_inventory(w, slot, rev, hands, &tree);                            // the spectated player's (HUD)
         break;
     }
+    case MSG_VOICE: {
+        int slot = r_u8(&r);
+        if (!r.overflow && e->size > 2 && slot < MAX_PLAYERS) game_voice_receive(slot, e->data + 2, (int)e->size - 2);
+        break;
+    }
     case MSG_LOOT: {
         EntityId e = r_u32(&r);
         u32 rev = r_u32(&r);
@@ -814,6 +827,28 @@ void net_send_inv_intent(const InvIntent *in) {
     inv_wire_write_intent(in, b);
     w_bytes(&w, b, sizeof(b));
     send_msg(N->server_peer, CH_RELIABLE, &w);
+}
+
+void net_send_voice(const u8 *pkt, int len) {
+    if (N->role != NET_CLIENT || !N->welcomed || len <= 0 || len > VOICE_PACKET_MAX) return;
+    Writer w = writer_make(N->buf, NET_BUF);
+    w_u8(&w, MSG_VOICE);
+    w_bytes(&w, pkt, (u32)len);
+    send_msg(N->server_peer, CH_UNRELIABLE, &w);
+}
+
+void net_host_send_voice(int from_slot, const u8 *pkt, int len) {
+    if (N->role != NET_HOST || !N->t || len <= 0 || len > VOICE_PACKET_MAX) return;
+    for (int s = 0; s < MAX_PLAYERS; s++) {
+        RemoteClient *c = &N->clients[s];
+        if (s == from_slot || !c->active || !c->welcomed) continue;
+        Writer w = writer_make(N->buf, NET_BUF);
+        w_u8(&w, MSG_VOICE);
+        w_u8(&w, (u8)from_slot);
+        w_bytes(&w, pkt, (u32)len);
+        c->bytes_sent += w.len;
+        send_msg(c->peer, CH_UNRELIABLE, &w);
+    }
 }
 
 void net_send_rpc(int type, int a, int b, int c) {

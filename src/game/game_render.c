@@ -1,3 +1,4 @@
+#include "game_voice.h"
 #include "gameplay/phone/phone.h"
 #include "stb_image.h"
 // Presentation: builds draw lists for the world, local view, hands, effects, HUD and menus.
@@ -254,6 +255,7 @@ void game_render_init(void) {
     ledge_register();
     wind_game_register();
     game_audio_register();
+    game_voice_register();
     foliage_register();
     vehicles_register();
     flesh_range_register();
@@ -1221,8 +1223,9 @@ void game_render(void) {
     dbg_submit((float)g_engine.frame_dt, cam.pos, right, up);
     game_audio_frame(w, &cam, p, ads);   // listener state + the world the environment chain listens to
     audio_update(cam.pos, fwd, up);
+    game_voice_frame(w, &cam);   // voice chat: each talker's proximity / radio
 
-    if (!game_post_photo_mode() && !scene_hides_hud()) { peek_draw(); lean_draw(); hud_draw(); if (!menus_open()) wheels_draw(); vehicles_draw_hud(); phone_draw(); }
+    if (!game_post_photo_mode() && !scene_hides_hud()) { peek_draw(); lean_draw(); hud_draw(); game_voice_draw(); if (!menus_open()) wheels_draw(); vehicles_draw_hud(); phone_draw(); }
     vehicles_draw();
     sights_draw();
     daynight_draw();

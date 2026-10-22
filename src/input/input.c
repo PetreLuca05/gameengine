@@ -37,7 +37,7 @@ static const char *k_action_names[ACT_COUNT] = {
     "slot1", "slot2", "slot3", "slot4", "slot5", "slot6", "slot7", "slot8", "slot9",
     "nextitem", "previtem", "firemode", "flashlight", "vehiclecam", "headlights", "horn",
     "phoneui", "phonegallery", "phone", "phoneselfie", "phonenav",
-    "healwheel", "ping", "plate",
+    "healwheel", "ping", "plate", "talk",
 };
 
 static const char *k_action_labels[ACT_COUNT] = {
@@ -47,7 +47,7 @@ static const char *k_action_labels[ACT_COUNT] = {
     "Wheel Option / Seat 7", "Wheel Option / Seat 8", "Wheel Option / Seat 9",
     "Next Item", "Previous Item", "Fire Mode", "Flashlight / Enter Vehicle", "Vehicle Camera", "Headlights", "Horn",
     "Phone: Use Screen (cursor)", "Phone: Gallery", "Phone: Take Out / Put Away", "Phone: Front / Back Camera", "Phone: Navigate Screen (hold)",
-    "Healing Wheel (hold) / Quick Heal (tap)", "Ping (tap) / Ping Wheel (hold)", "Insert Armor Plate",
+    "Healing Wheel (hold) / Quick Heal (tap)", "Ping (tap) / Ping Wheel (hold)", "Insert Armor Plate", "Push to Talk",
 };
 
 const char *action_name(Action a) { return (a >= 0 && a < ACT_COUNT) ? k_action_names[a] : "?"; }
@@ -107,6 +107,7 @@ void input_reset_bindings(void) {
     IN->binds[ACT_PING][0] = mouse(SDL_BUTTON_MIDDLE);
     IN->binds[ACT_PING][1] = key(SDL_SCANCODE_Z);
     IN->binds[ACT_PLATE][0] = key(SDL_SCANCODE_V);   // shared with the vehicle camera: no plating in a seat
+    IN->binds[ACT_TALK][0] = key(SDL_SCANCODE_Y);
 }
 
 static bool binding_eq(Binding a, Binding b) { return a.type == b.type && a.code == b.code; }

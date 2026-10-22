@@ -5,6 +5,7 @@
 #include "core/log.h"
 #include "core/platform.h"
 #include "miniaudio.h"
+#include "voice_capture.h"
 #include "mixer.h"
 #include "audio/synth/syn_material.h"
 #include "audio/env/env_world.h"
@@ -360,6 +361,7 @@ bool audio_init(void) {
 
 void audio_shutdown(void) {
     if (!A) return;
+    voice_capture_close();
     if (A->ok) {
         if (A->node_ok) ma_node_uninit(&A->node.base, NULL);
         if (A->music_loaded) ma_sound_uninit(&A->music);

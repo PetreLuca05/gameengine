@@ -532,6 +532,9 @@ static void tab_audio(GuiCursor *c) {
     row_slider_cvar(c, "Effects", "snd_sfx", 0, 1, 0.01f, "%.2f", NULL);
     row_slider_cvar(c, "Voice", "snd_voice", 0, 1, 0.01f, "%.2f", NULL);
     row_slider_cvar(c, "Interface", "snd_ui", 0, 1, 0.01f, "%.2f", NULL);
+    section(c, "Voice chat");
+    row_toggle_cvar(c, "Voice chat", "voice_chat", "Push to talk (Talk, Y by default; Controls). Close by: their voice in the world; far away: over the radio.");
+    row_slider_cvar(c, "Microphone gain", "voice_mic_gain", 0, 4, 0.05f, "%.2fx", NULL);
 }
 
 // Phone companion (docs/PHONE.md): server, stream, orientation, capture.

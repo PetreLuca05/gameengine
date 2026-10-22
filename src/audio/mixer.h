@@ -18,6 +18,8 @@
 #define MIX_DOPPLER_LINES 16
 #define MIX_DOPPLER_LEN 65536          // 1.36 s at 48 kHz: the farthest doppler source
 #define MIX_CMDS 2048
+#define MIX_STREAMS 8                  // voice chat: one per player slot
+#define MIX_STREAM_LEN 32768           // ring per stream (0.68 s at 48 kHz)
 
 typedef u32 MixHandle;                 // slot | generation << 8; 0 = none
 
@@ -78,6 +80,14 @@ void mixer_set_listener(Mixer *m, const MixListener *l);
 void mixer_set_reverb(Mixer *m, int zone, const EnvReverbParams *p);
 void mixer_force_degrade(Mixer *m, int level);          // -1 automatic (default), 0..2 fixed (tests, snd_degrade)
 void mixer_update(Mixer *m);                            // reclaims finished slots
+// Streams (voice chat, docs/AUDIO_PROCEDURAL.md "Voice chat"): mono 48 kHz audio pushed by the game
+// thread into a ring, played after a jitter buffer (80 ms) on the voice bus. Each one is split between
+// the proximity path (its environment chain: distance, occlusion, panning, reverb sends) and the radio
+// path (band-passed 350 Hz .. 3.2 kHz, driven, hiss, a squelch burst at the start and the end) by
+// `radio` 0..1.
+int mixer_stream_push(Mixer *m, int stream, const float *pcm, int n);   // samples taken (0: the ring is full)
+void mixer_stream_env(Mixer *m, int stream, const EnvParams *p, float radio);
+float mixer_stream_level(const Mixer *m, int stream);                   // recent peak (talking indicator)
 MixStats mixer_stats(const Mixer *m);
 float mixer_voice_peak(const Mixer *m, MixHandle h);
 double mixer_voice_age(const Mixer *m, MixHandle h);    // s since it was started

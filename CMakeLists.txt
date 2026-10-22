@@ -843,12 +843,13 @@ add_test(NAME kit COMMAND test_kit WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 # (air absorption, occlusion, room estimate in the dev room corridor, cliff echoes). Every source is
 # force-included with the allocator hook.
 file(GLOB DG_AUDIO_DSP_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/audio/synth/*.c ${CMAKE_SOURCE_DIR}/src/audio/env/env_chain.c
-     ${CMAKE_SOURCE_DIR}/src/audio/env/env_model.c ${CMAKE_SOURCE_DIR}/src/audio/env/env_world.c ${CMAKE_SOURCE_DIR}/src/audio/mixer.c)
+     ${CMAKE_SOURCE_DIR}/src/audio/env/env_model.c ${CMAKE_SOURCE_DIR}/src/audio/env/env_world.c ${CMAKE_SOURCE_DIR}/src/audio/mixer.c
+     ${CMAKE_SOURCE_DIR}/src/audio/voice_codec.c)
 if(NOT MSVC)
   # The DSP loops vectorize at -O3 (GCC's -O2 cost model leaves them scalar; MSVC /O2 vectorizes).
   set_source_files_properties(${DG_AUDIO_DSP_SOURCES} PROPERTIES COMPILE_OPTIONS "-O3")
 endif()
-foreach(t synth audio_env)
+foreach(t synth audio_env voice)
   add_executable(test_${t} tests/test_${t}.c tests/audio_alloc_hook.c ${DG_AUDIO_DSP_SOURCES} third_party/cjson/cJSON.c)
   set_target_properties(test_${t} PROPERTIES C_STANDARD 11)
   target_include_directories(test_${t} PRIVATE src third_party/cjson tests)

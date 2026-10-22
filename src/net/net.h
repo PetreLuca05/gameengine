@@ -63,6 +63,10 @@ void net_host_send_anim_events(struct World *w);
 void net_send_rpc(int type, int a, int b, int c);
 struct InvIntent;
 void net_send_inv_intent(const struct InvIntent *in);   // client -> host: MSG_INV_INTENT (docs/INVENTORY.md)
+// Voice chat (docs/AUDIO_PROCEDURAL.md "Voice chat"): a client's packet to the host; the host sends a
+// slot's packet to every other welcomed client (its own and the ones it relays).
+void net_send_voice(const u8 *pkt, int len);
+void net_host_send_voice(int from_slot, const u8 *pkt, int len);
 u16 net_player_owd_ms(int slot);         // host: one-way delay estimate of a remote player (RTT / 2), 0 = local / none
 NetStats net_stats(void);
 
