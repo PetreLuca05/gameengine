@@ -376,7 +376,7 @@ void arms_layer_eval(const ArmsLayerDef *d, ArmsLayerState *st, const ArmsLayerI
     // Viewmodel sway: its own rigid move about the pivot (the sight aimed: its ADS multipliers keep the
     // sight near the centre).
     mat4 W = mat4_identity();
-    if (in->vm_on) W = about(pivot, hp_euler_deg(in->vm_rot), 1.0f, in->vm_pos);
+    if (in->vm_on) W = about(v3_add(pivot, in->vm_pivot), hp_euler_deg(in->vm_rot), 1.0f, in->vm_pos);
     // Cosmetic kick: the pose's kick shown smaller (Weapon kick < 1), plus the screen kick towards the eye.
     // Aimed, only the push: the hold point turns the gun about the sight there (and clamps irons), so
     // countering the raw rotation would move the reticle.

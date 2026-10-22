@@ -1,50 +1,72 @@
 {
-  "_comment": "Viewmodel sway (docs/FIRE_ANIM.md 'Viewmodel sway', src/player/weapon_sway.c): the first-person weapon's look lag, movement sway, walk / sprint bob and sprint pose, drawn by the arms layer only (cosmetic, never networked, never the aim). Resolved per held item: built-in defaults < 'default' < 'classes'[the weapon's fire_anim class] < 'weapons'[item id]; every block lists only the keys it changes. Rotations in deg (pitch up, yaw left, roll counter-clockwise), positions in m (camera space: x right, y up, z back). Look: deg / m per deg/s of view rotation. ads: [rotation, position] multipliers per layer. viewmodel_sway_reload re-reads it.",
+  "_comment": "Viewmodel sway (docs/FIRE_ANIM.md 'Viewmodel sway', src/player/weapon_sway.c): the first-person weapon's look lag, movement sway, walk / sprint bob + sprint pose, jump / fall / land / stance, idle breathing and the ADS settle, drawn by the arms layer only (cosmetic, never networked, never the aim). weight 0 light .. 0.5 as written .. 1 heavy scales every stiffness / amplitude; max_rot / max_pos clamp the total; layers switch one off (debug); viewmodel_sway_tuner edits and saves it live. Resolved per held item: built-in defaults < 'default' < 'classes'[the weapon's fire_anim class] < 'weapons'[item id]; every block lists only the keys it changes. Rotations in deg (pitch up, yaw left, roll counter-clockwise), positions in m (camera space: x right, y up, z back). Look: deg / m per deg/s of view rotation. ads: [rotation, position] multipliers per layer. viewmodel_sway_reload re-reads it.",
   "default": {
     "look": { "filter_hz": 20, "yaw": 0.018, "pitch": 0.014, "roll": 0.012, "pos": 0.00007, "max_rot": 5.0, "max_pos": 0.025, "stiffness": 160, "damping_ratio": 0.68 },
     "move": { "roll": 2.5, "strafe_pos": 0.012, "fwd_pitch": 0.8, "fwd_pos": 0.007, "max_speed": 1.7, "stiffness": 110, "damping_ratio": 0.72, "accel_threshold": 6.0, "accel_impulse": 0.03 },
     "bob": { "walk_speed": 4.2, "freq": 0.3, "x": 0.006, "y": 0.008, "roll": 1.2, "pitch": 0.8, "yaw": 0.6, "attack": 0.12, "decay": 0.25, "crouch": 0.5,
              "sprint_mult": 1.8, "sprint_freq_mult": 0.8, "sprint_roll": 2.0, "sprint_yaw": 1.4 },
     "sprint_pose": { "rot": [-12, 24, 8], "pos": [0.02, -0.035, 0.0], "tactical_rot": [-18, 34, 16], "tactical_pos": [0.03, -0.05, 0.02], "in": 0.18, "out": 0.08 },
-    "ads": { "look": [0.2, 0.1], "move": [0.2, 0.2], "bob": [0.12, 0.12] },
+    "air": { "jump_impulse": 0.35, "jump_pitch": 50, "pos": 0.0025, "pitch": 0.4, "max_pos": 0.025, "max_rot": 3.0, "land_min_speed": 2.5, "land_scale": 0.16, "land_max": 1.2,
+             "land_pitch": 140, "land_crouch": 0.5, "stiffness": 150, "damping_ratio": 0.5, "stance_down": 0.3, "stance_up": 0.15 },
+    "camera": { "land_pitch": 25, "stiffness": 120, "damping_ratio": 0.6 },
+    "idle": { "rot": 0.4, "pos": 0.0008, "f1": 0.35, "f2": 0.9, "noise": 0.15, "noise_hz": 0.25, "fade_in": 0.5, "fade_out": 0.2, "move_speed": 0.3, "crouch": 0.7, "hold_breath": 0.1 },
+    "ads_transition": { "settle_pitch": 20, "settle_pos": 0.04, "fov_delta": 0, "ease": true },
+    "ads": { "look": [0.2, 0.1], "move": [0.2, 0.2], "bob": [0.12, 0.12], "air": [0.35, 0.3], "idle": [0.25, 0.25] },
+    "layers": { "look": true, "move": true, "bob": true, "air": true, "idle": true },
+    "weight": 0.5,
+    "pivot_offset": [0, 0, 0],
+    "max_rot": [40, 40, 30],
+    "max_pos": [0.08, 0.08, 0.08],
     "scale": 1.0
   },
   "classes": {
     "_comment": "Lighter guns: stiffer, snappier, a little more look rotation; heavier ones: softer springs, more drag and bob, a deeper sprint pose.",
     "pistol": {
+      "weight": 0.25,
+      "air": { "land_pitch": 170 },
+      "idle": { "rot": 0.45 },
       "look": { "yaw": 0.022, "roll": 0.016, "stiffness": 210, "damping_ratio": 0.62 },
       "move": { "roll": 3.0, "stiffness": 140 },
       "bob": { "roll": 1.5, "x": 0.007 },
       "sprint_pose": { "rot": [-8, 16, 12], "pos": [0.01, -0.03, 0.0], "in": 0.15, "out": 0.07 }
     },
     "smg": {
+      "weight": 0.35,
       "look": { "stiffness": 185, "damping_ratio": 0.65 },
       "move": { "stiffness": 125 },
       "sprint_pose": { "in": 0.16 }
     },
-    "rifle": {},
+    "rifle": { "weight": 0.5 },
     "shotgun": {
+      "weight": 0.55,
       "look": { "stiffness": 150, "pos": 0.00008 },
       "bob": { "y": 0.009 }
     },
     "dmr": {
+      "weight": 0.6,
       "look": { "stiffness": 140, "damping_ratio": 0.7, "pos": 0.00008 },
       "move": { "stiffness": 100 }
     },
     "lmg": {
+      "weight": 0.85,
+      "air": { "land_max": 1.4, "damping_ratio": 0.45 },
+      "idle": { "rot": 0.35, "f1": 0.3 },
       "look": { "yaw": 0.02, "pos": 0.0001, "max_pos": 0.03, "stiffness": 115, "damping_ratio": 0.74 },
       "move": { "roll": 2.0, "strafe_pos": 0.015, "fwd_pos": 0.009, "stiffness": 85, "damping_ratio": 0.75 },
       "bob": { "y": 0.011, "x": 0.008, "roll": 1.0, "sprint_mult": 1.6 },
       "sprint_pose": { "rot": [-15, 28, 6], "pos": [0.025, -0.045, 0.01], "in": 0.2, "out": 0.1 }
     },
     "sniper": {
+      "weight": 0.75,
+      "idle": { "rot": 0.45, "noise": 0.2 },
       "look": { "yaw": 0.02, "pos": 0.00009, "stiffness": 125, "damping_ratio": 0.72 },
       "move": { "stiffness": 95, "damping_ratio": 0.74 },
       "bob": { "y": 0.009 },
       "sprint_pose": { "rot": [-14, 27, 6], "in": 0.2, "out": 0.1 },
-      "ads": { "look": [0.15, 0.08], "bob": [0.1, 0.1] }
+      "ads": { "look": [0.15, 0.08], "bob": [0.1, 0.1], "idle": [0.2, 0.2] }
     },
     "crossbow": {
+      "weight": 0.5,
       "look": { "stiffness": 170 },
       "move": { "stiffness": 115 }
     }

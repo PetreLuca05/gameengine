@@ -267,6 +267,15 @@ bool game_arms_last(struct ArmsLayerIn *in, struct ArmsLayerOut *out);
 float game_arms_hip_fov(void);
 struct CharsFpArms;
 bool game_arms_last_fp(struct CharsFpArms *fa);   // the first-person arms the last layer was built from
+float game_arms_camera_dip(void);                  // the viewmodel sway's landing camera dip (deg pitch; 0 unless enabled)
+// The viewmodel sway's live config / output / state (the tuner, src/ui/vm_sway_tuner.c), the held
+// item and its fire class, and the save into assets/weapons/viewmodel_sway.json (0 default, 1 class, 2 weapon).
+struct WeaponSwayConfig *game_vms_config(void);
+const struct SwayOutput *game_vms_output(void);
+const struct WeaponSwayState *game_vms_state(void);
+const char *game_vms_item(void);
+const char *game_vms_class(void);
+bool game_vms_save(int level, char *msg, int msg_size);
 // First-person framing against a reference (game_fp_framing.c, docs/CAMERA_HOLDPOINT.md "Framing").
 void fp_framing_register(void);
 void fp_framing_draw(void);                       // the reference overlay + markers (and per-frame tracking)

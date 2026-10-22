@@ -1055,6 +1055,8 @@ void game_render(void) {
             }
             // The optional movement shake (cl_move_shake, Comfort): head bob + landing dip, never animation.
             eye = v3_add(eye, G->view.shake);
+            // The viewmodel sway's landing dip (cl_viewmodel_land_camera, off by default; x cl_move_shake).
+            cam.pitch += game_arms_camera_dip() * DG_DEG2RAD;
             // Never inside walls / ledges (mantle, vault, crouch under geometry): cast from the capsule.
             vec3 safe = v3(interp.pos.x, interp.pos.y + fminf(player_eye_height(&interp) * 0.6f, 1.0f), interp.pos.z);
             eye = camera_fp_collide(&G->cam_stab, safe, eye, cam_sphere_cast, w->phys, fdt);

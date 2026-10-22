@@ -104,6 +104,7 @@ typedef struct ArmsLayerIn {
     // pose's look lag + bob (lb_*: cancelled here, the body keeps them).
     bool vm_on;
     vec3 vm_pos, vm_rot;
+    vec3 vm_pivot;                    // added to its rotation pivot (camera space m; the hip share, 0 aimed)
     vec3 lb_hip_rot, lb_hip_pos, lb_ads_rot;
     float screen_kick;                // first-person screen kick (m towards the eye)
     float lateral_scale;              // Weapon Field of View: the sight's x / y scale by this at the hip so it keeps its
