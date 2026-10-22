@@ -240,6 +240,7 @@ typedef struct CharsFpArms {
     int hp_state;               // the presentation hold point's state
     vec3 kick_pos, kick_rot;    // the pose's gun kick, interpolated (camera space m / deg)
     vec3 sway_hip_rot, sway_hip_pos, sway_ads_rot;   // the hold points' sway, interpolated
+    vec3 lb_hip_rot, lb_hip_pos, lb_ads_rot;         // its look lag + bob share
     vec3 shoulder[2];           // the upper-arm joints (world): the seam
 } CharsFpArms;
 bool chars_fp_arms(CharsFpArms *o);

@@ -1,7 +1,8 @@
 // First-person arms layer (docs/CAMERA_HOLDPOINT.md "Rule 3"): assets/player/arms_layer.json, the
 // per-frame evaluation (src/render/arms_layer.c) handed to the renderer, and the dev commands
 // (arms_layer_reload / _save / _set / _info). The arms tuner panel (src/ui/arms_tuner.c) edits the
-// same definition.
+// same definition. The viewmodel sway (src/player/weapon_sway.c, docs/FIRE_ANIM.md "Viewmodel sway")
+// is evaluated here every frame for the viewed player and handed to the layer.
 #include "game_internal.h"
 #include "core/engine.h"
 #include "core/cvar.h"
@@ -9,7 +10,9 @@
 #include "core/platform.h"
 #include "gameplay/characters.h"
 #include "gameplay/weapons.h"
+#include "anim/fire_anim.h"
 #include "player/camera.h"
+#include "player/weapon_sway.h"
 #include "render/arms_layer.h"
 #include "render/render.h"
 #include "player/spectator.h"
@@ -22,6 +25,7 @@
 
 #define G (g_engine.game)
 #define ARMS_JSON "assets/player/arms_layer.json"
+#define VMS_JSON "assets/weapons/viewmodel_sway.json"
 
 static struct {
     ArmsLayerDef def;
@@ -32,6 +36,21 @@ static struct {
     bool have;                // the layer was set this frame
     Cvar *enable, *debug;
 } AL;
+
+// Viewmodel sway: the config file (defaults, per fire class, per weapon id), the resolved config of
+// the held item, the state and the view / movement history it reads.
+static struct {
+    cJSON *root;
+    WeaponSwayConfig cfg;
+    u32 cfg_hash;             // the item the config was resolved for (0: none yet)
+    WeaponSwayState st;
+    SwayOutput out;
+    int slot;                 // the viewed player (a switch resets the state)
+    float yaw, pitch;         // last frame's view angles (rad)
+    bool have_view, was_grounded;
+    u32 land_tick;
+    Cvar *on, *debug;
+} VS;
 
 ArmsLayerDef *game_arms_def(void) { return &AL.def; }
 bool game_arms_last(ArmsLayerIn *in, ArmsLayerOut *out) {
@@ -88,6 +107,120 @@ static void cmd_reload(int argc, const char **argv) {
     (void)argv;
     log_info("arms_layer_reload: %s", game_arms_load() ? "ok" : "defaults");
 }
+
+static bool vms_load(void) {
+    char path[600];
+    size_t size = 0;
+    char *txt = platform_read_file(platform_data_path(VMS_JSON, path, sizeof(path)), &size);
+    cJSON_Delete(VS.root);
+    VS.root = txt ? cJSON_Parse(txt) : NULL;
+    free(txt);
+    VS.cfg_hash = 0;   // re-resolved on the next frame
+    if (!VS.root) log_warn("viewmodel sway: cannot read %s (built-in defaults)", path);
+    return VS.root != NULL;
+}
+
+// The held item's config: built-in defaults < "default" < "classes"[fire class] < "weapons"[item id].
+static void vms_resolve(const char *item_id, const WeaponDef *wd) {
+    weapon_sway_defaults(&VS.cfg);
+    if (!VS.root) return;
+    weapon_sway_parse(&VS.cfg, cJSON_GetObjectItemCaseSensitive(VS.root, "default"));
+    const char *cls = wd && wd->fire.cls >= 0 ? fire_class_name(wd->fire.cls) : NULL;
+    if (cls) weapon_sway_parse(&VS.cfg, cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(VS.root, "classes"), cls));
+    if (item_id) weapon_sway_parse(&VS.cfg, cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(VS.root, "weapons"), item_id));
+}
+
+static void cmd_vms_reload(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    log_info("viewmodel_sway_reload: %s", vms_load() ? "ok" : "defaults");
+}
+
+static void vms_info(void) {
+    const SwayOutput *o = &VS.out;
+    static const char *names[WSW_LAYERS] = { "look", "move", "bob" };
+    log_info("viewmodel_sway_info: %s, total rot %.2f %.2f %.2f deg pos %.1f %.1f %.1f mm, sprint %.2f, bob amp %.2f phase %.2f", VS.on && VS.on->i ? "on" : "off",
+             o->rot_deg.x, o->rot_deg.y, o->rot_deg.z, o->pos_offset.x * 1000, o->pos_offset.y * 1000, o->pos_offset.z * 1000, o->sprint_w, VS.st.bob_amt,
+             VS.st.bob_phase);
+    for (int i = 0; i < WSW_LAYERS; i++)
+        log_info("viewmodel_sway_info:   %-4s rot %.2f %.2f %.2f deg pos %.1f %.1f %.1f mm", names[i], o->layer_rot[i].x, o->layer_rot[i].y, o->layer_rot[i].z,
+                 o->layer_pos[i].x * 1000, o->layer_pos[i].y * 1000, o->layer_pos[i].z * 1000);
+}
+
+static void cmd_vms_info(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    vms_info();
+}
+
+static u32 id_hash(const char *s) {
+    u32 h = 2166136261u;
+    for (; s && *s; s++) h = (h ^ (u8)*s) * 16777619u;
+    return h ? h : 1u;
+}
+
+static float wrap_pi(float a) {
+    while (a > DG_PI) a -= 2.0f * DG_PI;
+    while (a < -DG_PI) a += 2.0f * DG_PI;
+    return a;
+}
+
+// This frame's viewmodel sway for the viewed player (false: off, nothing held, the hand pose editor's
+// still pose). Cosmetic: read from the view and the movement state, never written back.
+static bool vms_frame(const CharsFpArms *fa, Player *p, float dt) {
+    Cvar *hs = cvar_find("holdpoint_static");
+    if (!VS.on || !VS.on->i || !p || !fa->has_item || (hs && hs->i)) {
+        weapon_sway_reset(&VS.st);
+        VS.have_view = false;
+        memset(&VS.out, 0, sizeof(VS.out));
+        return false;
+    }
+    int slot = game_view_slot();
+    if (slot != VS.slot) {
+        weapon_sway_reset(&VS.st);
+        VS.have_view = false;
+        VS.slot = slot;
+    }
+    u32 h = id_hash(fa->item_id);
+    if (h != VS.cfg_hash) {
+        const WeaponDef *wd = weapon_equipped_def(G->world, slot);
+        vms_resolve(fa->item_id, wd && !strcmp(wd->id, fa->item_id ? fa->item_id : "") ? wd : NULL);
+        VS.cfg_hash = h;
+    }
+    const PlayerMove *m = &p->sim.move;
+    WeaponSwayInput in;
+    memset(&in, 0, sizeof(in));
+    // The view's rotation this frame (deg, right / up): the player's view angles, never the camera
+    // kick (the recoil stays the fire animation's own).
+    float yaw = G->view.yaw, pitch = G->view.pitch;
+    if (VS.have_view) {
+        in.mouse_dx = -wrap_pi(yaw - VS.yaw) * DG_RAD2DEG;
+        in.mouse_dy = (pitch - VS.pitch) * DG_RAD2DEG;
+    }
+    VS.yaw = yaw;
+    VS.pitch = pitch;
+    VS.have_view = true;
+    in.aim_yaw = yaw;
+    in.aim_pitch = pitch;
+    in.velocity = m->vel;
+    vec3 right = v3(cosf(yaw), 0, -sinf(yaw)), fwd = v3(-sinf(yaw), 0, -cosf(yaw));
+    in.velocity_local = v3(v3_dot(m->vel, right), m->vel.y, v3_dot(m->vel, fwd));
+    in.speed = sqrtf(m->vel.x * m->vel.x + m->vel.z * m->vel.z);
+    in.grounded = m->on_ground && m->mode == MOVE_WALK;
+    in.just_landed = m->land_tick != VS.land_tick;
+    in.land_impact_speed = m->land_speed;
+    in.just_jumped = VS.was_grounded && !in.grounded && m->vel.y > 0.5f;
+    VS.land_tick = m->land_tick;
+    VS.was_grounded = in.grounded;
+    in.crouching = m->crouched || m->crouch_amount > 0.5f;
+    in.sprinting = m->sprinting != 0;
+    in.ads_blend = saturate(fa->ads_w);
+    in.is_mantle = m->mode == MOVE_MANTLE || m->mode == MOVE_VAULT;
+    in.bob_scale = 1.0f - saturate(fa->clip_w);   // a weapon's own run clip carries the gun: no second bob
+    weapon_sway_update(&VS.st, &VS.cfg, &in, dt, &VS.out);
+    if (VS.debug && VS.debug->i && (g_engine.frame_index % 30) == 0) vms_info();
+    return true;
+}
 static void cmd_save(int argc, const char **argv) {
     if (cvar_release_locks()) { log_info("arms_layer_save: dev builds only"); return; }
     game_arms_save(argc > 1 ? argv[1] : NULL);
@@ -133,6 +266,13 @@ void game_arms_init(void) {
     cmd_register("arms_layer_save", cmd_save, "write the arms layer definition [path] (the source tree's assets/player/arms_layer.json)");
     cmd_register("arms_layer_set", cmd_set, "arms_layer_set <state> <offset|rotation|scale|fov_add|camera|camera_rot|blend> <x> [y z] [item]: edit the arms layer live");
     cmd_register("arms_layer_info", cmd_info, "print this frame's arms layer (state, raise, FOVs, the layer move)");
+    VS.on = cvar_reg_bool("cl_viewmodel_sway", true, CVAR_LOCKED,
+                          "viewmodel sway (cosmetic, first person only): look lag, movement sway, walk / sprint bob and the sprint pose of the drawn weapon (assets/weapons/viewmodel_sway.json); 0 = the hold point's look lag + bob");
+    VS.debug = cvar_reg_int("viewmodel_sway_debug", 0, 0, 1, CVAR_LOCKED, "1: log the viewmodel sway layers every 30 frames");
+    cmd_register("viewmodel_sway_reload", cmd_vms_reload, "re-read assets/weapons/viewmodel_sway.json (the viewmodel sway config)");
+    cmd_register("viewmodel_sway_info", cmd_vms_info, "print this frame's viewmodel sway: the total and each layer");
+    VS.slot = -1;
+    vms_load();
     arms_tuner_init();
     game_arms_load();
 }
@@ -199,6 +339,12 @@ void game_arms_frame(const RenderCamera *cam, vec2 aim_deg, float aim_pitch, flo
     in->sway_hip_pos = fa.sway_hip_pos;
     in->sway_ads_rot = fa.sway_ads_rot;
     in->sway_scale = wc && wc->sway_cosmetic ? wc->sway_cosmetic->f : 1.0f;
+    in->lb_hip_rot = fa.lb_hip_rot;
+    in->lb_hip_pos = fa.lb_hip_pos;
+    in->lb_ads_rot = fa.lb_ads_rot;
+    in->vm_on = vms_frame(&fa, p, (float)g_engine.frame_dt);
+    in->vm_pos = VS.out.pos_offset;
+    in->vm_rot = VS.out.rot_deg;
     in->screen_kick = screen_kick;
     // Weapon Field of View: sideways with the preset so the sight keeps its place (against Default).
     in->lateral_scale = fov_lateral_scale(game_arms_hip_fov(), camera_fov_v(AL.def.weapon_fov[WEAPON_FOV_DEFAULT]));

@@ -517,6 +517,12 @@
    "reason": "Visibility: changes what you can see relative to other players. Wireframe / hitboxes / collision / CPU skinning / third person: wallhack-class views, dev only.",
    "category": "camera"
   },
+  "cl_viewmodel_sway": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Viewmodel sway (cosmetic, first person only: look lag, movement sway, walk / sprint bob, sprint pose of the drawn weapon): a designed system, dev switch only.",
+   "category": "weapons"
+  },
   "cl_weapon_fov": {
    "class": "EDITABLE",
    "ui": "Graphics > Comfort",
@@ -2676,6 +2682,12 @@
    "ui": "—",
    "reason": "Shutter preview / VFX time scale / sky disc zoom / dev night: dev views.",
    "category": "vfx"
+  },
+  "viewmodel_sway_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Dev logging of the viewmodel sway layers.",
+   "category": "weapons"
   },
   "water_debug": {
    "class": "LOCKED",

@@ -13,6 +13,8 @@
 //   preset   Weapon Field of View: the layer moves sideways with the preset's FOV so the sight keeps
 //            its place on screen (the item looks larger with Narrow, smaller with Wide)
 //   sway     the player's cosmetic "Weapon sway" (the pose's own sway shown smaller)
+//   viewmodel the viewmodel sway (src/player/weapon_sway.c: look / move / bob + sprint pose) about the
+//            pivot; it replaces the pose's look lag + bob on the drawn weapon (vm_on)
 //   kick     the player's cosmetic "Weapon kick" (the pose's own kick shown smaller) + the first-person
 //            screen kick towards the eye
 //   camera   the arms camera's own position against the pose eye, per state / item (the hip framing:
@@ -97,6 +99,12 @@ typedef struct ArmsLayerIn {
     vec3 sway_hip_rot, sway_hip_pos;  // the hold point's sway this frame (deg about the pivot / camera space m) ...
     vec3 sway_ads_rot;                // ... and aimed (deg about the sight)
     float sway_scale;                 // the player's cosmetic Weapon sway (1 = the pose's sway as it is)
+    // Viewmodel sway (src/player/weapon_sway.c): the arms + item moved by vm_pos (camera space m, z back)
+    // / vm_rot (deg: pitch up, yaw left, roll) about the pivot (the sight aimed). On, it replaces the
+    // pose's look lag + bob (lb_*: cancelled here, the body keeps them).
+    bool vm_on;
+    vec3 vm_pos, vm_rot;
+    vec3 lb_hip_rot, lb_hip_pos, lb_ads_rot;
     float screen_kick;                // first-person screen kick (m towards the eye)
     float lateral_scale;              // Weapon Field of View: the sight's x / y scale by this at the hip so it keeps its
                                       // place on screen (fov_lateral_scale against the Default preset; 0 / 1 = none)
