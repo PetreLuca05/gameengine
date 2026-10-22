@@ -1,12 +1,10 @@
 {
-  "_doc": "Play > Story > Chapter select: the globe in 'spacer', the bar at the bottom (group0: the chapter entry, its maps in a list above it; group1: Back), the details (thumbnail, facts, description), the session look and Play this chapter.",
+  "_doc": "Play > Enroll (the Trials maps) / Story > Chapter select (the story maps): the globe in 'spacer', the maps as big cards in a horizontal row ('cards': the thumbnail, the name under it), the details (thumbnail, facts, description), the session look and Start / Play this chapter. Back is the tab bar's.",
   "nodes": [
     { "id": "root", "dir": "row", "align": "stretch", "gap": "@mm_gap_lg" },
     { "id": "main", "parent": "root", "flex": 1, "dir": "column", "align": "stretch", "gap": "@mm_gap" },
     { "id": "spacer", "parent": "main", "flex": 1 },
-    { "id": "bar", "parent": "main", "h": "@mm_map_row_h", "dir": "row", "align": "stretch", "gap": "@mm_gap_lg" },
-    { "id": "group0", "parent": "bar", "w": "@mm_list_w" },
-    { "id": "group1", "parent": "bar", "w": "@mm_list_w" },
+    { "id": "cards", "parent": "main", "h": "@mm_map_card_h" },
     { "id": "detail", "parent": "root", "w": "@mm_detail_wide" }
   ]
 }

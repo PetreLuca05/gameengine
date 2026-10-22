@@ -28,7 +28,8 @@ GuiRect screens_modal_rect(void);          // the centred sub-menu rect (pause l
 GuiRect screens_dialog_rect(void);
 // A modal frame: panel with a title and an optional tab bar; returns the content rect.
 GuiRect screens_modal_frame(GuiRect r, const char *title, const char *subtitle);
-void screens_modal_untitled(void);   // the next screens_modal_frame draws no title (a tab page)
+void screens_modal_untitled(void);   // the next screens_modal_frame draws no title and no panel (a tab page)
+bool screens_modal_bare(void);       // the last screens_modal_frame was such a tab page
 void screens_footer_hint(GuiRect r, const char *text);   // bottom-right key hints
 
 // Settings (scr_settings.c)

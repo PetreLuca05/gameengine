@@ -165,6 +165,16 @@ bool mainmenu_lobby_page_draw(GuiRect r) {
     const Lobby *L = lobby_get();
     snprintf(sub, sizeof(sub), "%d / %d players", lobby_count(L), L->settings.max_players);
     GuiRect c = screens_modal_frame(r, "Lobby", sub);
+    // The lock (private / public): the host changes it in game too.
+    {
+        bool locked = L->settings.privacy != LP_PUBLIC;
+        float ls = TOK("mm_row_h");
+        GuiRect lr = { c.x, c.y, ls, ls };
+        if (mm_lock_button(lr, locked, lobby_is_host())) mm_toggle_privacy();
+        gw_label(gui_rect(lr.x + ls + TOK("mm_gap"), lr.y, c.w * 0.5f, ls), locked ? "Private: invite only" : "Public: anyone can join", gui_s(TH->t_small + 1), GW_MEDIUM, locked ? TH->accent : TH->text_dim, GUI_LEFT);
+        c.y += ls + TOK("mm_gap");
+        c.h -= ls + TOK("mm_gap");
+    }
     GuiRect a, b;
     gui_split_h(c, 0.48f, TOK("mm_gap_lg"), &a, &b);
     a.h -= TOK("mm_button_h") + TOK("mm_gap");

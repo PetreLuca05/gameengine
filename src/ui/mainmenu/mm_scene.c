@@ -109,9 +109,13 @@ void mm_background_draw(bool globe) {
     CharPreviewIn in;
     memset(&in, 0, sizeof(in));
     in.target = CHAR_PREVIEW_MENU;
-    float k = fminf(1.0f, 2560.0f / W);   // the render size (the image is stretched over the screen)
+    // The render size (the image is stretched over the screen). Text pages (Settings, Patch notes,
+    // Credits): a tenth of it into its own target - stretched, it reads as a blur behind the text.
+    bool soft = M->tab == MT_SETTINGS || M->tab == MT_NEWS || M->tab == MT_CREDITS;
+    float k = soft ? 0.1f : fminf(1.0f, 2560.0f / W);
     in.w = (int)lrintf(W * k);
     in.h = (int)lrintf(H * k);
+    if (soft) in.target = CHAR_PREVIEW_MENU + 1;
     in.yaw = lerpf(MM_TURN, MM_SIDE, e) + M->orbit_yaw;
     in.hold = 1;   // the hip-fire hold, as standing still in game
     in.item_focus = e;

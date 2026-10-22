@@ -63,7 +63,7 @@ static void start_pending(void) {
 }
 
 // A padlock: closed = private (friends / invite only), open = public. Returns true on a click.
-static bool lock_button(GuiRect r, bool locked, bool enabled) {
+bool mm_lock_button(GuiRect r, bool locked, bool enabled) {
     GuiId id = gui_id("mm_party_lock");
     GuiInteract in = gui_interact(id, r, enabled ? GUI_FOCUSABLE : GUI_DISABLED);
     if (in.hot && enabled) gd_round(r, gui_s(TH->radius), TH->hover);
@@ -122,7 +122,7 @@ static void draw_invites(GuiRect anchor) {
 }
 
 // A crown (the party's host): three points over a band.
-static void crown(float cx, float cy, float s, u32 c) {
+void mm_crown(float cx, float cy, float s, u32 c) {
     float w = s, h = s * 0.72f, x0 = cx - w * 0.5f, y1 = cy + h * 0.5f, y0 = cy - h * 0.5f;
     vec2 p[8] = {
         { x0, y1 }, { x0, y0 + h * 0.25f }, { x0 + w * 0.27f, y0 + h * 0.55f }, { cx, y0 },
@@ -146,10 +146,24 @@ static void dotted_outline(GuiRect r, float dash, float gap, float t, u32 c) {
     }
 }
 
-// The party (right, under the tab bar's divider): "Party n / max" + the lock, the players (a crown left
-// of the host's icon; the host kicks on hover), Invite players +, the countdown.
+// The host flips the party between private (Invite only) and public; the next party starts the same.
+void mm_toggle_privacy(void) {
+    const Lobby *L = lobby_get();
+    if (!lobby_is_host()) return;
+    LobbySettings s = L->settings;
+    s.privacy = s.privacy != LP_PUBLIC ? LP_PUBLIC : LP_INVITE;
+    lobby_set_settings(&s);
+    lobby_profile()->lobby.privacy = s.privacy;
+    lobby_profile_changed();
+}
+
+// The party (right, under the tab bar's divider, the account block's width): "Party n / max" + the
+// lock, the other players (you are the account block; a crown left of the host's icon, the host kicks
+// on hover), Invite players +, the countdown.
 static void draw_party(GuiRect r) {
     const Lobby *L = lobby_get();
+    MainMenu *M = mm();
+    if (M->status_rect.w > 0) { r.x = M->status_rect.x; r.w = M->status_rect.w; }   // the account block's width
     bool host = lobby_is_host() && in_lobby_phase();
     float ph = TOK("lb_player_h"), av = TOK("mm_avatar_sm"), gap = TOK("mm_gap");
     float y = r.y;
@@ -161,18 +175,12 @@ static void draw_party(GuiRect r) {
     bool locked = L->settings.privacy != LP_PUBLIC;
     float ls = head.h;
     gw_label(gui_rect(head.x, head.y, head.w - ls - gap, head.h), lobby_privacy_name(L->settings.privacy), gui_s(TH->t_small), GW_REGULAR, locked ? TH->accent : TH->text_dim, GUI_RIGHT);
-    if (lock_button(gui_rect(head.x + head.w - ls, head.y, ls, ls), locked, host)) {
-        LobbySettings s = L->settings;
-        s.privacy = locked ? LP_PUBLIC : LP_INVITE;
-        lobby_set_settings(&s);
-        lobby_profile()->lobby.privacy = s.privacy;   // the next party starts the same
-        lobby_profile_changed();
-    }
+    if (mm_lock_button(gui_rect(head.x + head.w - ls, head.y, ls, ls), locked, host)) mm_toggle_privacy();
     y += head.h + gap;
     // The players.
     for (int i = 0; i < LOBBY_MAX_MEMBERS; i++) {
         const LobbyMember *m = &L->members[i];
-        if (!m->active) continue;
+        if (!m->active || m->id == L->local_id) continue;   // you: the account block above
         GuiRect row = { r.x, y, r.w, ph };
         y += ph + TOK("mm_gap_sm");
         GuiId id = gui_idi("pt_member", m->id);
@@ -181,7 +189,7 @@ static void draw_party(GuiRect r) {
         gd_backdrop(row, UI_RGBA(20, 22, 26, 150));
         if (hi.hot) gd_round(row, gui_s(TH->radius), TH->hover);
         float cs = av * 0.62f, x = row.x + gap;
-        if (m->host) crown(x + cs * 0.5f, row.y + row.h * 0.5f, cs, TH->accent);
+        if (m->host) mm_crown(x + cs * 0.5f, row.y + row.h * 0.5f, cs, TH->accent);
         x += cs + gap;
         gw_avatar(gui_rect(x, row.y + (row.h - av) * 0.5f, av, av), 0, m->name, mm_name_color(m->id));
         x += av + gap;

@@ -286,6 +286,7 @@ bool lobby_host(TransportKind kind) {
     if (!maplist_find(&S->maps, s.map) && S->maps.count) dg_strcpy(s.map, sizeof(s.map), S->maps.maps[0].id);
     if (kind == TRANSPORT_LAN && s.privacy == LP_FRIENDS) s.privacy = LP_INVITE;   // no friends on a LAN: private
     if (!settings_weather_ok(&s)) s.weather[0] = 0;
+    s.late_join = true;   // players may always join a running game (no setting)
     S->kind = kind;
     set_state(LE_HOST);
     char ident[64], addr[64];

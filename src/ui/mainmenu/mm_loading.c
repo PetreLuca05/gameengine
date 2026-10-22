@@ -54,8 +54,7 @@ static void text_page(GuiRect content, GuiScroll *sc, GuiId id, const char *text
     MmLayout *Ly = &mm()->credits;
     mm_layout_solve(Ly, content);
     GuiRect r = mm_node(Ly, "credits");
-    mm_panel(r);
-    GuiRect view = gui_rect_inset(r, gui_s(TH->pad));
+    GuiRect view = r;   // the whole page (no panel, no padding): the menu blurs its background
     view.w -= TOK("mm_gap");
     if (gui_nav(NAV_DOWN)) { sc->target += TOK("mm_row_h") * 3; gui_nav_consume(NAV_DOWN); }
     if (gui_nav(NAV_UP)) { sc->target -= TOK("mm_row_h") * 3; gui_nav_consume(NAV_UP); }

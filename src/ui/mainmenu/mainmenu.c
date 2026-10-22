@@ -133,12 +133,14 @@ void mm_thumb(GuiRect r, const char *path) {
     gd_round_outline(r, rad, 1.0f, TH->panel_border);
 }
 
-// Key hints: centred in the footer.
+// Key hints: centred in the bottom margin, under the content (no footer band: the bottom margin
+// matches the top's).
 void mm_footer_hint(GuiRect r, const char *text) {
     (void)r;
     GuiRect f = mm_node(&M->shell, "footer_mid");
     GuiText t = { gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_CENTER, 0, false, true, f.w };
-    gd_text(&t, f.x + f.w * 0.5f, f.y + (f.h - gd_line_height(t.size)) * 0.5f, text);
+    float margin = gui_h() - f.y;
+    gd_text(&t, f.x + f.w * 0.5f, f.y + (margin - gd_line_height(t.size)) * 0.5f, text);
 }
 
 u32 mm_name_color(int member_id) { return TH->chat_name[(member_id < 0 ? 0 : member_id) % 8]; }
@@ -168,8 +170,15 @@ static void draw_status(GuiRect r) {
         mm_phone_status_text(ph, sizeof(ph));
         float pad = gui_s(TH->gap * 0.75f), chip = gd_line_height(sm.size) + pad * 3 + gd_text_width(&sm, ph);
         float w1 = gd_text_width(&nm, name) + TOK("mm_gap") + chip, w2 = gui_s(TH->radius) * 3 + gd_text_width(&sl, line);
-        float total = av + TOK("mm_gap") * 1.5f + fmaxf(w1, w2);
+        float total = av + TOK("mm_gap") * 1.5f + fmaxf(w1, w2) + (lobby_is_host() ? av * 0.62f + TOK("mm_gap") : 0);
         if (total < r.w) { r.x += r.w - total; r.w = total; }
+    }
+    M->status_rect = r;
+    if (lobby_is_host()) {   // the party's host: the crown left of the avatar
+        float cs = av * 0.62f;
+        mm_crown(r.x + cs * 0.5f, r.y + r.h * 0.5f, cs, TH->accent);
+        r.x += cs + TOK("mm_gap");
+        r.w -= cs + TOK("mm_gap");
     }
     GuiRect a = { r.x, r.y + (r.h - av) * 0.5f, av, av };
     // Steam avatar (Steam downloads it on demand: retried every 2 s until it arrives).
@@ -310,8 +319,34 @@ static void set_tab(int tab) {
     M->env_dirty = true;   // the Player tab's studio light <-> the map's look
 }
 
+// A page inside Play (Enroll's Trials maps, Chapter select): no tabs, Back in the quit button's place.
+static bool in_subpage(void) { return M->tab == MT_PLAY && (M->play_page == PP_TRIALS || M->play_page == PP_CHAPTERS); }
+
+static bool back_button(GuiRect r) {
+    GuiId id = gui_id("mm_back");
+    GuiInteract in = gui_interact(id, r, GUI_FOCUSABLE);
+    float h = gui_tween(id, in.hot ? 1.0f : 0.0f, TH->hover_t);
+    float cx = r.x + r.w * 0.5f, cy = r.y + r.h * 0.5f, rad = fminf(r.w, r.h) * 0.5f;
+    if (h > 0.01f) gd_circle(cx, cy, rad, gui_rgba_mul(TH->accent, h * 0.18f));
+    u32 c = gui_rgba_lerp(TH->text_dim, TH->text, h);
+    float a = rad * 0.38f, t = fmaxf(1.4f, gui_s(gui_tok("power_stroke")));
+    gd_line(cx + a * 0.4f, cy - a, cx - a * 0.6f, cy, t, c);
+    gd_line(cx - a * 0.6f, cy, cx + a * 0.4f, cy + a, t, c);
+    GuiText lt = { gui_s(TH->t_small + 1), GW_SEMIBOLD, c, GUI_LEFT, TH->tracking_caps, true, false, 0 };
+    gd_text(&lt, r.x + r.w + gui_s(8), cy - gd_line_height(lt.size) * 0.5f, "Back");
+    if (in.focused) gw_focus_ring(r, rad, 1.0f);
+    return in.clicked;
+}
+
 static void draw_tabbar(GuiRect bar) {
     GuiRect tabs = mm_node(&M->shell, "tabs"), power = mm_node(&M->shell, "power");
+    float ps = TOK("mm_power");
+    GuiRect pr = { power.x, bar.y + (bar.h - ps) * 0.5f, ps, ps };
+    if (in_subpage()) {
+        gd_rect(gui_rect(bar.x, tabs.y + tabs.h - 1, bar.w, 1), TH->panel_border);
+        if (back_button(pr)) { M->play_page = PP_MAIN; gui_sound(TH->snd_back); gui_anim_restart(gui_id("mm_tab_in")); gui_set_focus(0); }
+        return;
+    }
     // The tabs centred on the screen (gw_tabbar lays them out from its rect's left): their width
     // measured like the widget does; the baseline across the whole bar.
     {
@@ -332,13 +367,12 @@ static void draw_tabbar(GuiRect bar) {
     int t = gw_tabbar(gui_id("mm_tabbar"), tabs, labels, en, why, MT_COUNT, M->tab, false);
     if (t != M->tab) set_tab(t);
     // Power: quit to desktop (confirm). Centred vertically in its column.
-    float ps = TOK("mm_power");
-    GuiRect pr = { power.x, bar.y + (bar.h - ps) * 0.5f, ps, ps };
     if (gw_power(gui_id("mm_power"), pr, "Quit to desktop")) screens_confirm(CONFIRM_QUIT, "Quit to desktop?", lobby_active() && lobby_count(lobby_get()) > 1 ? "You will leave the party." : "Your settings and profile are saved.", 0);
 }
 
 static void tab_keys(void) {
-    // 1-6, Q / E, LB / RB (the settings tab's own LB / RB go first: it consumes them).
+    // 1-6, Q / E, LB / RB (the settings tab's own LB / RB go first: it consumes them); none in a sub page.
+    if (in_subpage()) return;
     for (int i = 0; i < MT_COUNT; i++) if (gui_key_pressed(SDL_SCANCODE_1 + i)) { set_tab(i); gui_sound(TH->snd_tab); }
     int dir = gui_nav(NAV_TAB_NEXT) ? 1 : (gui_nav(NAV_TAB_PREV) ? -1 : 0);
     if (!dir) return;
@@ -385,6 +419,11 @@ bool mainmenu_draw(bool top) {
     gui_push_input(!closed);
     gd_alpha_push(a);
     float tin = gui_ease_out(gui_anim_t(gui_id("mm_tab_in")) / TH->modal_in);
+    if (M->tab == MT_SETTINGS || M->tab == MT_NEWS || M->tab == MT_CREDITS) {
+        // Text pages: one blurred, black-tinted background under the content (no panels), for reading.
+        float y0 = bar.y + bar.h;
+        gd_backdrop(gui_rect(0, y0, gui_w(), gui_h() - y0), gui_rgba_mul(UI_RGBA(0, 0, 0, 175), tin));
+    }
     gd_alpha_push(tin);
     switch (M->tab) {
     case MT_PLAY:

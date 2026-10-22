@@ -53,6 +53,7 @@ typedef struct MainMenu {
     // player preview (scene camera)
     float orbit_yaw, orbit_pitch, orbit_zoom;
     bool preview_tod;              // Player tab: "Preview in map lighting" (else neutral studio-ish noon)
+    GuiRect status_rect;           // the account block (top right), last frame: the party list takes its width
     GuiRect preview_rect;          // where the character should be framed this frame (0 = background drift)
     // cosmetics
     int cos_slot;
@@ -75,6 +76,9 @@ void mm_maps_draw(GuiRect content, bool trials);   // the maps view: Trials > En
 void mm_maps_background(GuiRect content, float alpha);   // the globe, before the shading and the panels
 void mm_credits_draw(GuiRect content);
 void mm_play_start(void);
+bool mm_lock_button(GuiRect r, bool locked, bool enabled);   // the padlock (closed: private); true on a click
+void mm_toggle_privacy(void);
+void mm_crown(float cx, float cy, float s, u32 c);   // the host's crown (mm_play.c)          // host: Invite only <-> Public (saved in the profile)
 void mm_play_story(const char *chapter, const char *slot);   // a story chapter for the party (host)
 void mm_set_play_mode(int mode);       // Trials / Story (the selection follows: a development map / a chapter)
 void mm_party_sync(void);              // the host's party takes the menu's map / season / time / weather (mm_scene.c)              // the party's game (host): ready, then start / the countdown

@@ -16,12 +16,10 @@
 #include <stdio.h>
 #include <string.h>
 
-static GuiScroll g_scroll;
 
 // The bottom bar's groups: the story chapter's maps, every other map under Development.
 enum { MG_DEV, MG_CHAPTER1, MG_COUNT };
 static const char *const k_group_names[MG_COUNT] = { "Development", "Chapter 1: The Beginning" };
-static int g_open = -1;   // the group whose list is open
 
 static int map_group(const MapInfo *m) { return m->chapter[0] ? MG_CHAPTER1 : MG_DEV; }
 
@@ -105,28 +103,6 @@ bool mm_environment_rows(GuiCursor *c, LobbySettings *s, bool enabled) {
     return changed;
 }
 
-static void map_row(int i, const MapInfo *m, GuiRect row) {
-    MainMenu *M = mm();
-    GuiId id = gui_idi("mm_map_row", i);
-    GuiInteract in = gui_interact(id, row, GUI_FOCUSABLE);
-    bool sel = !strcmp(M->map, m->id);
-    if (sel) gd_round(row, gui_s(TH->radius), TH->press);
-    else if (in.hot) gd_round(row, gui_s(TH->radius), TH->hover);
-    if (sel) gd_rect(gui_rect(row.x, row.y + row.h * 0.2f, gui_s(TH->accent_bar), row.h * 0.6f), TH->accent);
-    if (in.focused) gw_focus_ring(row, gui_s(TH->radius), 1.0f);
-    float pad = TOK("mm_gap");
-    float th = row.h - pad * 2;
-    mm_thumb(gui_rect(row.x + pad * 1.5f, row.y + pad, th * 1.7778f, th), m->thumbnail);
-    float x = row.x + pad * 3 + th * 1.7778f;
-    gw_label(gui_rect(x, row.y + pad * 0.5f, row.x + row.w - x - pad, row.h * 0.5f), m->name, gui_s(TH->t_body), GW_MEDIUM, TH->text, GUI_LEFT);
-    char sub[96], size[32];
-    maplist_size_text(m, size, sizeof(size));
-    snprintf(sub, sizeof(sub), "%s  ·  %s  ·  %d-%d players%s", m->biome, size, m->players_min, m->players_max, m->dev ? "  ·  test" : "");
-    gw_label(gui_rect(x, row.y + row.h * 0.5f, row.x + row.w - x - pad, row.h * 0.4f), sub, gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_LEFT);
-    if (in.clicked && !sel) { mm_select_map(m->id); gui_sound(TH->snd_click); }
-    if (in.double_clicked) host_map(m);
-}
-
 // The globe fills the screen behind the tab (drawn before the menu's shading and the panels, which
 // blur it); centred between the list and the details, dragged there.
 void mm_maps_background(GuiRect content, float alpha) {
@@ -138,72 +114,63 @@ void mm_maps_background(GuiRect content, float alpha) {
     globe_draw(sp.x + sp.w * 0.5f, content.y + content.h * 0.5f, sp, alpha);
 }
 
-// Group entries (no background: the group holding the selected map lit, the open one underlined);
-// a click opens the group's maps in a list rising above its entry (fades in, the rows stagger up).
-static void group_bar(GuiRect content, const int *groups, const GuiRect *rects, int n) {
+// One map card: the big thumbnail, the name under it; selected: an accent frame. A click selects,
+// a double click starts.
+static void map_card(int i, const MapInfo *m, GuiRect r) {
     MainMenu *M = mm();
+    GuiId id = gui_idi("mm_map_card", i);
+    GuiInteract in = gui_interact(id, r, GUI_FOCUSABLE);
+    bool sel = !strcmp(M->map, m->id);
+    float h = gui_tween(id, in.hot || sel ? 1.0f : 0.0f, TH->hover_t);
+    GuiRect th = { r.x, r.y, r.w, r.w / 1.7778f };
+    gd_backdrop(r, UI_RGBA(16, 18, 22, 140));
+    mm_thumb(th, m->thumbnail);
+    if (!sel && h < 1.0f) gd_rect(th, gui_rgba_mul(UI_RGBA(0, 0, 0, 255), 0.35f * (1.0f - h)));   // the others dimmed
+    GuiText t = { gui_s(TH->t_body), GW_SEMIBOLD, sel ? TH->text : gui_rgba_lerp(TH->text_dim, TH->text, h), GUI_LEFT, 0, false, true, r.w - gui_s(12) };
+    float ny = th.y + th.h + gui_s(8);
+    gd_text(&t, r.x + gui_s(8), ny, m->name);
+    char sub[64], size[32];
+    maplist_size_text(m, size, sizeof(size));
+    snprintf(sub, sizeof(sub), "%s  ·  %s", m->biome, size);
+    GuiText st = { gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_LEFT, 0, false, true, r.w - gui_s(12) };
+    gd_text(&st, r.x + gui_s(8), ny + gd_line_height(t.size) + gui_s(2), sub);
+    if (sel) gd_round_outline(r, gui_s(TH->radius), fmaxf(1.0f, gui_s(2.0f)), TH->accent);
+    else if (h > 0.01f) gd_round_outline(r, gui_s(TH->radius), 1.0f, gui_rgba_mul(TH->accent, h * 0.6f));
+    if (in.focused) gw_focus_ring(r, gui_s(TH->radius), 1.0f);
+    if (in.clicked && !sel) { mm_select_map(m->id); gui_sound(TH->snd_click); }
+    if (in.double_clicked) host_map(m);
+}
+
+// The group's maps as cards in a row across `r`, scrolled sideways by the wheel when they overflow.
+static void map_cards(GuiRect r, int group) {
+    static float scroll[MG_COUNT], target[MG_COUNT];
     const MapList *ml = lobby_maps();
-    const MapInfo *cur = lobby_map_info(M->map);
-    int open_k = -1;
-    for (int k = 0; k < n; k++) {
-        int g = groups[k];
-        GuiRect gr = rects[k];
-        GuiInteract in = gui_interact(gui_idi("mm_map_group", g), gr, GUI_FOCUSABLE);
-        bool lit = cur && map_group(cur) == g, open = g_open == g;
-        int count = 0;
-        for (int i = 0; i < ml->count; i++) count += map_group(&ml->maps[i]) == g;
-        u32 col = open || lit ? TH->text : (in.hot ? TH->text_dim : TH->text_faint);
-        float lh = gd_line_height(gui_s(TH->t_body));
-        float y = gr.y + (gr.h - lh * 2.2f) * 0.5f;
-        GuiText t = { gui_s(TH->t_body), GW_SEMIBOLD, col, GUI_LEFT, TH->tracking_caps, true, true, gr.w };
-        gd_text(&t, gr.x, y, k_group_names[g]);
-        char sub[96];
-        if (lit) snprintf(sub, sizeof(sub), "%s  ·  %d map%s", cur->name, count, count == 1 ? "" : "s");
-        else snprintf(sub, sizeof(sub), "%d map%s", count, count == 1 ? "" : "s");
-        gw_label(gui_rect(gr.x, y + lh * 1.1f, gr.w, lh), sub, gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_LEFT);
-        float ul = open ? gr.w : (lit ? gui_s(28) : 0);
-        if (ul > 0) gd_rect(gui_rect(gr.x, gr.y + gr.h - gui_s(TH->accent_bar), ul, gui_s(TH->accent_bar)), TH->accent);
-        if (in.focused) gw_focus_ring(gr, gui_s(TH->radius), 1.0f);
-        if (in.clicked) {
-            g_open = open ? -1 : g;
-            if (g_open >= 0) { gui_anim_restart(gui_id("mm_maps_pop")); g_scroll.target = g_scroll.offset = 0; }
-            gui_sound(TH->snd_click);
-        }
-        if (g_open == g) open_k = k;
+    float cw = TOK("mm_map_card_w"), gap = TOK("mm_gap_lg");
+    int n = 0;
+    for (int i = 0; i < ml->count; i++) n += map_group(&ml->maps[i]) == group;
+    float total = (float)n * cw + (float)(n > 0 ? n - 1 : 0) * gap;
+    float most = fmaxf(0.0f, total - r.w);
+    if (gui_rect_contains(r, gui_mouse().x, gui_mouse().y) && gui_wheel() != 0) {
+        target[group] = clampf(target[group] - gui_wheel() * (cw + gap), 0.0f, most);
+        gui_wheel_consume();
     }
-    if (open_k < 0) { g_open = -1; return; }
-    int cnt = 0;
-    for (int i = 0; i < ml->count; i++) cnt += map_group(&ml->maps[i]) == g_open;
-    float rh = TOK("mm_map_row_h"), pad = TOK("mm_gap");
-    GuiRect at = rects[open_k];
-    float h = fminf((float)cnt * rh + pad * 2, at.y - content.y - pad);
-    float at_t = gui_anim_t(gui_id("mm_maps_pop"));
-    float t = gui_ease_out(saturate(at_t / fmaxf(0.01f, TH->modal_in)));
-    GuiRect lr = { at.x, at.y - pad - h + (1.0f - t) * gui_s(24), fmaxf(at.w, TOK("mm_list_w")), h };
-    gd_alpha_push(t);
-    mm_panel(lr);
-    gui_block_rect(lr);
-    GuiRect view = gui_rect_inset(lr, pad);
-    view.w -= pad;
-    gw_scroll_begin(&g_scroll, gui_id("mm_maps_scroll"), view);
-    float y = gw_scroll_y(&g_scroll);
-    int shown = 0;
+    target[group] = clampf(target[group], 0.0f, most);
+    scroll[group] += (target[group] - scroll[group]) * saturate(gui_dt() * 12.0f);
+    float t = gui_anim_t(gui_id("mm_tab_in"));
+    gd_clip_push(gui_rect(r.x, r.y - gui_s(4), r.w, r.h + gui_s(8)));
+    int k = 0;
     for (int i = 0; i < ml->count; i++) {
         const MapInfo *m = &ml->maps[i];
-        if (map_group(m) != g_open) continue;
-        float a = gui_ease_out(saturate((at_t - (float)shown * TH->menu_stagger) / fmaxf(0.01f, TH->menu_in)));
+        if (map_group(m) != group) continue;
+        float a = gui_ease_out(saturate((t - (float)k * TH->menu_stagger) / fmaxf(0.01f, TH->menu_in)));
+        GuiRect c = { r.x + (float)k * (cw + gap) - scroll[group], r.y + (1.0f - a) * gui_s(16), cw, r.h };
+        k++;
+        if (c.x + c.w < r.x || c.x > r.x + r.w) continue;
         gd_alpha_push(a);
-        map_row(i, m, gui_rect(view.x, y + (float)shown * rh + (1.0f - a) * gui_s(12), view.w, rh - TOK("mm_gap_sm")));
+        map_card(i, m, c);
         gd_alpha_pop();
-        shown++;
     }
-    gw_scroll_end(&g_scroll, (float)shown * rh);
-    gd_alpha_pop();
-    // A click anywhere else closes it.
-    vec2 mp = gui_mouse();
-    bool on_bar = false;
-    for (int k = 0; k < n; k++) on_bar = on_bar || gui_rect_contains(rects[k], mp.x, mp.y);
-    if (gui_mouse_pressed(0) && !gui_rect_contains(lr, mp.x, mp.y) && !on_bar) g_open = -1;
+    gd_clip_pop();
 }
 
 // Play > Enroll (trials: the development maps, Start = the party's game) / Story > Chapter select (the
@@ -212,11 +179,7 @@ void mm_maps_draw(GuiRect content, bool trials) {
     MainMenu *M = mm();
     MmLayout *L = &M->maps;
     mm_layout_solve(L, content);
-    const int group = trials ? MG_DEV : MG_CHAPTER1;
-    GuiRect g0 = mm_node(L, "group0"), g1 = mm_node(L, "group1");
-    group_bar(content, &group, &g0, 1);
-    GuiRect back = { g1.x, g1.y + (g1.h - TOK("mm_button_h")) * 0.5f, TOK("mm_button_w"), TOK("mm_button_h") };
-    if (gw_button(gui_id("mm_chapters_back"), back, "Back", GB_SECONDARY, true)) { M->play_page = PP_MAIN; g_open = -1; }
+    map_cards(mm_node(L, "cards"), trials ? MG_DEV : MG_CHAPTER1);   // Back: the tab bar's (the quit button's place)
 
     // Details + session look.
     const MapInfo *mi = lobby_map_info(M->map);
@@ -272,9 +235,6 @@ void mm_maps_draw(GuiRect content, bool trials) {
         float mp = (float)ls.max_players;
         rr = gw_setting_row(&c, "Max players", NULL, gui_id("mp_max"));
         if (gw_slider(gui_id("mp_max_s"), rr, &mp, 1, LOBBY_MAX_MEMBERS, 1, "%.0f")) { ls.max_players = (u8)mp; ch = true; }
-        bool late = ls.late_join;
-        rr = gw_setting_row(&c, "Join a running game", "Players may join after the start (they load in and spawn).", gui_id("mp_late"));
-        if (gw_toggle(gui_id("mp_late_t"), rr, &late)) { ls.late_join = late; ch = true; }
         gw_disabled(false);
         if (ch && host) lobby_set_settings(&ls);
     }

@@ -185,18 +185,21 @@ bool menus_can_pause(void) { return net_role() == NET_OFF || (net_role() == NET_
 
 // ------------------------------------------------------------------ shared drawing
 
-static bool g_frame_untitled;
+static bool g_frame_untitled, g_frame_bare;
 void screens_modal_untitled(void) { g_frame_untitled = true; }
+bool screens_modal_bare(void) { return g_frame_bare; }
 
 GuiRect screens_modal_frame(GuiRect r, const char *title, const char *subtitle) {
+    float pad = gui_s(TH->pad + 6);
+    g_frame_bare = g_frame_untitled;
+    if (g_frame_untitled) {
+        // A tab page (the main menu's Settings): no panel (the menu blurs the page's background), the
+        // tab bar names it, the content starts at the top.
+        g_frame_untitled = false;
+        return gui_rect(r.x, r.y + gui_s(16), r.w, r.h - gui_s(16));   // the whole page: no panel padding
+    }
     gw_panel(r, true);
     gui_block_rect(r);
-    float pad = gui_s(TH->pad + 6);
-    if (g_frame_untitled) {
-        // A tab page (the main menu's Settings): the tab bar names it, the content starts at the top.
-        g_frame_untitled = false;
-        return gui_rect(r.x + pad, r.y + pad + gui_s(8), r.w - pad * 2, r.h - pad * 1.75f - gui_s(8));
-    }
     GuiText t = { gui_s(TH->t_title), GW_SEMIBOLD, TH->text, GUI_LEFT, 0.02f, true, false, 0 };
     gd_text(&t, r.x + pad, r.y + gui_s(18), title);
     if (subtitle && subtitle[0]) {

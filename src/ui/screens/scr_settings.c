@@ -608,6 +608,14 @@ bool settings_draw(GuiRect r) {
     S.tab = tab_shown(S.tab);
     for (int i = 0; i < TAB_SHOWN; i++) { labels[i] = k_tabs[k_order[i]]; if (k_order[i] == S.tab) cur = i; }
     GuiRect tr = { content.x, content.y - gui_s(8), content.w, gui_s(34) };
+    if (screens_modal_bare()) {
+        // The main menu's Settings tab: its tabs centred (gw_tabs lays out from the left: measured the same).
+        GuiText tt = { gui_s(TH->t_small + 1), GW_SEMIBOLD, TH->text_dim, GUI_LEFT, TH->tracking_caps, true, false, 0 };
+        float w = 0;
+        for (int i = 0; i < TAB_SHOWN; i++) w += gd_text_width(&tt, labels[i]) + (i ? gui_s(26) : 0);
+        gd_rect(gui_rect(tr.x, tr.y + tr.h - 1, tr.w, 1), TH->panel_border);
+        tr = gui_rect(content.x + (content.w - w) * 0.5f, tr.y, w, tr.h);
+    }
     int ni = gw_tabs(gui_id("settings_tabs"), tr, labels, TAB_SHOWN, cur);
     if (gui_nav(NAV_TAB_NEXT)) { ni = (cur + 1) % TAB_SHOWN; gui_nav_consume(NAV_TAB_NEXT); gui_sound(TH->snd_tab); }
     if (gui_nav(NAV_TAB_PREV)) { ni = (cur + TAB_SHOWN - 1) % TAB_SHOWN; gui_nav_consume(NAV_TAB_PREV); gui_sound(TH->snd_tab); }
