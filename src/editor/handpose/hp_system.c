@@ -3,6 +3,7 @@
 #include "anim/anim_library.h"
 #include "core/cvar.h"
 #include "core/engine.h"
+#include "core/filewatch.h"
 #include "core/log.h"
 #include "core/platform.h"
 #include "game/game.h"
@@ -20,7 +21,7 @@ static struct {
     char src_dir[600], rt_dir[600];
     bool has_src;
     u64 signature;             // file count + mtimes of the hand pose files (external edit detection)
-    double next_poll;
+    FileWatch fw;              // the signature taken once a second on a job (PF-0045)
     Cvar *autoreg, *watch;
     u32 preview_case;          // editor: a seat / ledge case previewed at preview_t
     float preview_t;
@@ -63,7 +64,10 @@ static u64 dir_signature(const char *dir) {
 }
 // Reads go through platform_data_path (the runtime copy first): that's the directory to watch.
 static u64 signature(void) { dirs(); return dir_signature(HS.rt_dir) ^ (HS.has_src ? dir_signature(HS.src_dir) * 31u : 0); }
-void handpose_system_note_own_write(void) { HS.signature = signature(); }
+static u64 watch_sig(void *u) { (void)u; return signature(); }
+// A look in flight may predate the write / reload: dropped.
+static void own_signature(void) { filewatch_cancel(&HS.fw); HS.signature = signature(); }
+void handpose_system_note_own_write(void) { own_signature(); }
 
 static void collect(HandPoseSourceList *l, World *w) {
     const AnimLibrary *lib = g_engine.anim;
@@ -125,7 +129,7 @@ bool handpose_system_reload(void) {
     anim_lib_reload_handposes(g_engine.anim);
     Game *g = game();
     handpose_system_scan(g ? g->world : NULL, true);
-    HS.signature = signature();
+    own_signature();
     if (net_role() != NET_OFF && net_host_client_count() > 0)
         log_warn("handpose_reload: asset hashes changed in a live session - clients desync until they reload the same files");
     return true;
@@ -257,11 +261,8 @@ Xform handpose_seat_anchor(const char *vehicle, bool driver) {
 
 void handpose_system_poll(void) {
     if (!HS.init || !g_engine.anim || (HS.watch && !HS.watch->i)) return;
-    double now = platform_time();
-    if (now < HS.next_poll) return;
-    HS.next_poll = now + 1.0;
-    u64 s = signature();
-    if (s == HS.signature) return;
+    u64 s;
+    if (!filewatch_poll(&HS.fw, platform_time(), watch_sig, NULL, &s) || s == HS.signature) return;
     log_info("handpose: assets/handposes changed on disk, reloading");
     handpose_system_reload();
 }
@@ -338,5 +339,5 @@ void handpose_system_init(void) {
 void handpose_system_startup(void) {
     if (!HS.init) handpose_system_init();
     handpose_system_scan(NULL, true);
-    HS.signature = signature();
+    own_signature();
 }

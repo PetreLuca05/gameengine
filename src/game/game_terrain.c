@@ -8,6 +8,7 @@
 #include "core/log.h"
 #include "core/engine.h"
 #include "core/cvar.h"
+#include "core/filewatch.h"
 #include "stb_image_write.h"
 #include <math.h>
 #include <stdio.h>
@@ -17,13 +18,16 @@
 static struct {
     Cvar *quality, *debug, *watch;
     i64 mtime;
-    double next_poll;
+    FileWatch fw;   // assets/terrain's newest mtime once a second on a job (PF-0045)
     vec3 cam;
 } TG;
+
+static u64 watch_mtime(void *u) { (void)u; return (u64)terrain_world_mtime(); }
 
 static void cmd_reload(int argc, const char **argv) {
     (void)argc, (void)argv;
     if (!terrain_world_reload()) log_info("terrain_reload: no terrain loaded (open-world maps) or a parse error");
+    filewatch_cancel(&TG.fw);   // a look from before the reload is stale
     TG.mtime = terrain_world_mtime();
 }
 
@@ -133,9 +137,9 @@ void terrain_game_frame(vec3 cam) {
     float gs = 45.0f, ge = 70.0f;
     render_grass_fade(level, &gs, &ge);
     terrain_world_frame(level, TG.debug ? TG.debug->i : 0, gs, ge);
-    if (TG.watch && TG.watch->i && g_engine.real_time >= TG.next_poll) {
-        TG.next_poll = g_engine.real_time + 1.0;
-        i64 t = terrain_world_mtime();
+    u64 tw;
+    if (TG.watch && TG.watch->i && filewatch_poll(&TG.fw, g_engine.real_time, watch_mtime, NULL, &tw)) {
+        i64 t = (i64)tw;
         if (!TG.mtime) TG.mtime = t;
         else if (t && t != TG.mtime) {
             TG.mtime = t;

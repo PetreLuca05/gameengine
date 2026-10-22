@@ -11,6 +11,7 @@
 #include "gameplay/events.h"
 #include "core/cvar.h"
 #include "core/engine.h"
+#include "core/filewatch.h"
 #include "core/log.h"
 #include "core/platform.h"
 #include "render/debug_draw.h"
@@ -51,7 +52,7 @@ static struct {
     struct { int cart, model; float speed, zero, ang; } zero[ZERO_CACHE];
     int zero_count, zero_next;
     i64 mtime_sig;
-    double next_poll;
+    FileWatch fw;
     vec3 listener;
     int listener_slot;            // whose bullets make no crack here (the local shooter)
     bool have_listener;
@@ -87,6 +88,7 @@ static i64 files_signature(void) {
     SDL_free(files);
     return sig;
 }
+static u64 watch_sig(void *u) { (void)u; return (u64)files_signature(); }
 
 bool bal_world_load(void) {
     bal_data_init(&B.data);
@@ -103,6 +105,7 @@ bool bal_world_load(void) {
     SDL_free(files);
     B.zero_count = 0;
     B.loaded = ok;
+    filewatch_cancel(&B.fw);   // a look from before the load is stale
     B.mtime_sig = files_signature();
     log_info("ballistics: %d cartridges, %d muzzle devices (hash %08x)", B.data.cart_count, B.data.dev_count, B.data.hash);
     return ok;
@@ -786,15 +789,11 @@ void bal_world_frame(World *w, vec3 listener, float dt) {
         B.sound_speed = bal_sound_speed(wp.v[WP_TEMPERATURE]);
         audio_set_sound_speed(B.sound_speed);
     }
-    // Hot reload: poll the data files once a second.
-    double now = platform_time();
-    if (B.watch && B.watch->i && now >= B.next_poll) {
-        B.next_poll = now + 1.0;
-        i64 sig = files_signature();
-        if (sig != B.mtime_sig) {
-            log_info("ballistics: data changed, reloading");
-            bal_world_load();
-        }
+    // Hot reload: the data files' signature once a second (on a job, PF-0045).
+    u64 sig;
+    if (B.watch && B.watch->i && filewatch_poll(&B.fw, platform_time(), watch_sig, NULL, &sig) && (i64)sig != B.mtime_sig) {
+        log_info("ballistics: data changed, reloading");
+        bal_world_load();
     }
 }
 

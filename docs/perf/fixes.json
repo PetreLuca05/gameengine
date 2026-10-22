@@ -3039,5 +3039,27 @@
    "veg_forest_pine",
    "veg_meadow"
   ]
+ },
+ "PF-0045": {
+  "title": "Hot reload polls of the ballistics, hand pose and terrain data (file stats, directory listings) on a job",
+  "rule": "R27",
+  "finding": "300 fps plan (2026-10-22, pacing): three data watchers looked at their files once a second on the main thread, each in its own frame: ballistics (bal_watch, on by default: a listing of assets/attachments and a stat per file), hand poses (handpose_watch: 8 directory listings, the runtime and the source copy, a stat per file) and terrain (r_terrain_watch: 2 listings and a stat per layer / transition). The forest scenes' focus_hud zone (where the ballistics poll runs) reached 0.97 ms in the audit's sampled frames against 0.5 ms on average; at 300 fps a once-a-second hitch is the p99",
+  "effort": "S",
+  "status": "implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify)",
+  "code": [
+   "src/core/filewatch.c filewatch_poll / filewatch_cancel",
+   "src/gameplay/ballistics/bal_world.c bal_world_frame, src/editor/handpose/hp_system.c handpose_system_poll, src/game/game_terrain.c terrain_game_frame"
+  ],
+  "description": "filewatch_poll: once a second a job computes the watch's signature (the same function as before); a later frame takes it and the owner compares and reloads exactly as before. A reload or the owner's own write (the hand pose editor's save) drops a look still in flight, so a signature from before it cannot trigger a second reload.",
+  "neutral": "The same signatures, compared the same way, one or a few frames later; nothing else reads them. Checked on the Linux container: touching assets/ballistics/cartridges.json and a hand pose file reloads each once.",
+  "metrics": [
+   "zone:focus_hud",
+   "zone:game_frame",
+   "cpu_work"
+  ],
+  "scenes": [
+   "devroom",
+   "veg_forest_pine"
+  ]
  }
 }
