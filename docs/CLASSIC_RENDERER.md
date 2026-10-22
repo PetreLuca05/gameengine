@@ -138,7 +138,10 @@ masked groups (one- and two-sided) in two: first a depth-only pass with only the
 written), then their G-buffer (`classic_gbuffer_def_clip.frag`) at EQUAL depth with no depth writes: the
 depth test runs early, about one G-buffer shading per pixel. The alpha test runs again in that pass:
 distant cards of neighbouring trees can share a depth value, and a transparent texel of one would
-otherwise take the pixel (without it, 0.8 % of a pine forest frame's pixels changed). The geometry is drawn twice (the vertex stage, its wind, again).
+otherwise take the pixel (without it, 0.8 % of a pine forest frame's pixels changed). With it the frame is
+bit-identical to the zprepass-off one. On the Linux container (lavapipe, pine forest at Low) it is slower:
+the prepass pass +19 %, fragment invocations 1.13 M -> 1.58 M, vertex invocations doubled: at ~1.8
+G-buffer fragments per pixel there is little overdraw to save. The geometry is drawn twice (the vertex stage, its wind, again).
 The opaque and lit-pass groups are unchanged, and so is the image (the same coverage; coplanar cards keep
 the draw order's winner as before). Which is faster depends on the GPU (vertex vs fragment / bandwidth
 bound): an A/B for the target machine, e.g. `perf_bench levels=current` with `set r_classic_zprepass 0` and
