@@ -100,10 +100,19 @@ void camera_fp_nominal_in(CamNominalIn *ni, const PlayerMove *m, bool downed, in
     ni->pitch = pitch;
 }
 
+// The eye is the standing one at any speed: the walk / run clips lean the head forward and down (a
+// rifle's jog 21 cm ahead, 7 cm lower than its idle), which moved the camera back and up on every stop.
+// The body may lean ahead of the camera; the first-person body draw pushes what comes too close
+// (MAT_FP_PUSH, docs/CAMERA_HOLDPOINT.md "Rule 2").
+void camera_fp_eye_still(CamNominalIn *ni) {
+    ni->speed = 0.0f;
+}
+
 bool camera_fp_nominal_eye(const PlayerMove *m, bool downed, int style, float yaw, float pitch, vec3 *out) {
     if (!g_eye.valid) return false;
     CamNominalIn ni;
     camera_fp_nominal_in(&ni, m, downed, style, pitch);
+    camera_fp_eye_still(&ni);
     int p = ni.posture;
     vec3 o;
     if (p < 0) o = v3_lerp(eye_table_sample(&g_eye, EYE_STAND, style, ni.speed, pitch), eye_table_sample(&g_eye, EYE_CROUCH, style, ni.speed, pitch), ni.crouch);

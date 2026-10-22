@@ -121,6 +121,8 @@ struct PlayerMove;
 void camera_fp_nominal_in(CamNominalIn *ni, const struct PlayerMove *m, bool downed, int style, float pitch);
 // The tick's nominal eye (no glide): the camera ray's origin every machine computes alike (docs/AIM.md).
 bool camera_fp_nominal_eye(const struct PlayerMove *m, bool downed, int style, float yaw, float pitch, vec3 *out);
+// The table input the eye is sampled with: speed 0 (the standing eye while moving; the glide step keeps the real speed).
+void camera_fp_eye_still(CamNominalIn *ni);
 EyeNominalTable *camera_fp_eye_table_mut(void);
 bool camera_fp_eye_table_load(void);
 bool camera_fp_eye_table_save(const char *path_override);

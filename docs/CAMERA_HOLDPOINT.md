@@ -77,6 +77,19 @@ What stays different on remote clients is only data they don't have:
   hash.
 - When the animations change, the game measures its own copy again at startup, and `test_anim` fails
   until `cam_calibrate` updates the source file.
+- **The camera samples the standing eye at any speed** (`camera_fp_eye_still`: the table's speed input
+  is 0; the shots' eye `camera_fp_nominal_eye` alike). The walk / run clips lean the head forward and
+  down (a rifle's jog: 21 cm ahead, 7 cm lower than its idle), which moved the camera back and up on
+  every stop. The speed samples stay in the table; the glide step keeps the real speed. The anchor
+  check counts standing frames only (moving, the head leans ahead of the eye by design).
+- **The near push** (`MAT_FP_PUSH`, `cl_fp_push`, `cl_fp_push_radius` 0.2 m): with the body leaning
+  ahead of the camera, the shoulders / spine / neck can come closer than the near plane, which cut
+  them open (the view saw through them). The visible first-person body draw moves every vertex within
+  the radius of the world camera 1 m behind it in `skin.vert`, and the fragment shaders discard every
+  triangle touching one, so nothing is cut open or stretched across the view. Render only: the pose,
+  the shadow (the body's own unpushed `MAT_SHADOW_ONLY` copy), phone cameras and the scope PiP
+  (`fp_push` off in its frame) are untouched. Bit 24 is `MAT_TERRAIN_MORPH` on static draws; on
+  skinned draws it is this flag, stripped before shading.
 
 The weights glide through a critically damped spring (`cam_glide_stiffness` 150, `cam_glide_damping`
 24.5, about 0.4 s to settle). These are weights for posture (crouch amount, mode), speed and hold

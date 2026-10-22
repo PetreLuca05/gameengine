@@ -216,8 +216,8 @@
   ],
 
   "procedural": {
-    "spine": { "_doc": "docs/ANIMATION.md 'Spine look': spine, spine1, spine2, neck, head (down / up). A gun held: weights; empty hands: weights_empty (mostly the neck and head); a base clip owning the arms (sprint, a weapon's run clip, mantle): weights_run (the neck and head only).",
-               "weights": [0.18, 0.22, 0.25, 0.15, 0.20], "weights_up": [0.0, 0.02, 0.05, 0.38, 0.55],
+    "spine": { "_doc": "docs/ANIMATION.md 'Spine look': spine, spine1, spine2, neck, head (down / up). A gun held: weights (the bend summed from the pelvis: 0 there, 1 at spine2 with the shoulders, rising as (e^(2t) - 1) / (e^2 - 1); the neck and head follow the chest, so the shoulders keep their place under the first-person eye at any pitch); empty hands: weights_empty (mostly the neck and head); a base clip owning the arms (sprint, a weapon's run clip, mantle): weights_run (the neck and head only).",
+               "weights": [0.148, 0.289, 0.563, 0.0, 0.0], "weights_up": [0.0, 0.02, 0.05, 0.38, 0.55],
                "weights_empty": [0.03, 0.05, 0.07, 0.38, 0.47], "weights_empty_up": [0.0, 0.0, 0.03, 0.40, 0.57],
                "weights_run": [0.0, 0.0, 0.0, 0.45, 0.55], "weights_run_up": [0.0, 0.0, 0.0, 0.45, 0.55],
                "yaw_limit": 100, "pitch_limit": 80, "pitch_limit_up": 89 },

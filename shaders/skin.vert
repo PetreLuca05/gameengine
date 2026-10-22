@@ -20,6 +20,7 @@ layout(location = 7) out vec4 v_cur_clip;
 layout(location = 8) out vec4 v_prev_clip;
 layout(location = 9) flat out vec4 v_recon;
 layout(location = 10) flat out uint v_normal_scale;   // float bits (PBR maps, shaders/pbr_maps.glsl)
+layout(location = 11) out float v_fp_cut;              // MAT_FP_PUSH: 1 on a pushed vertex (its triangles are discarded)
 
 invariant gl_Position;
 out float gl_ClipDistance[1];
@@ -39,6 +40,17 @@ vec4 arms_seam_mix(vec4 a, vec4 b, float w) {
     return vec4(n * b.w, b.z, b.w);
 }
 
+// MAT_FP_PUSH (the local player's first-person body): a vertex closer than fp_push.x to the world camera
+// moves 1 m behind it, and every triangle touching it is discarded (v_fp_cut): the near plane never cuts
+// the shoulders / spine open, and nothing is stretched across the view.
+bool fp_push(inout vec3 w) {
+    vec3 v = (frame.view * vec4(w, 1.0)).xyz;
+    if (dot(v, v) >= frame.fp_push.x * frame.fp_push.x) return false;
+    v = vec3(v.xy, 1.0);
+    w = transpose(mat3(frame.view)) * (v - frame.view[3].xyz);
+    return true;
+}
+
 void main() {
     SkinInstance si = skin_inst.inst[gl_InstanceIndex];
     // Palettes are bone_world * inverse_bind: the skinned vertex is already in world space.
@@ -53,13 +65,23 @@ void main() {
     vec4 world = m * vec4(in_pos, 1.0);
     // Previous frame's palette (velocity of skinned characters): info.z = its first bone + 1.
     if ((si.info.z & SKIN_ROOTED) == 0u) prev_world = si.info.z != 0u ? skin_matrix(si.info.z - 1u, in_joints, in_weights) * vec4(in_pos, 1.0) : world;
+    v_fp_cut = 0.0;
+    if ((si.info.y & MAT_FP_PUSH) != 0u && frame.fp_push.y > 0.5) {
+        vec3 w = world.xyz, pw = prev_world.xyz;
+        if (fp_push(w)) {
+            v_fp_cut = 1.0;
+            world.xyz = w;
+            fp_push(pw);
+            prev_world.xyz = pw;
+        }
+    }
     v_world = world.xyz;
     v_normal = normalize(mat3(m) * in_normal);
     v_uv = in_uv;
     v_color = in_color;
     v_mat_color = si.color;
     v_mat_params = si.params;
-    v_mat_flags = si.info.y;
+    v_mat_flags = si.info.y & ~MAT_FP_PUSH;
     v_recon = si.recon;
     v_normal_scale = si.info.w;
     // First-person arms from the body model are drawn in the viewmodel pass (own projection).

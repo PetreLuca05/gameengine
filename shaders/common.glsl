@@ -31,6 +31,7 @@
 // Terrain geomorph (render.h, shaders/lod_fade.glsl lod_terrain_vertex): classic draw materials only; the
 // same bit is VGM_MASKED in vgeo material tables, which never carry it (vk_vgeo.c masks the flags).
 #define MAT_TERRAIN_MORPH 16777216u
+#define MAT_FP_PUSH       16777216u   // skinned draws only (render.h): the first-person body's near push
 // Shadow flags (docs/SHADOWS_UNITY_MODEL.md) on bits 25 / 26: the vgeo material bits VGM_* there are
 // stripped before shading (vg_resolve, vk_classic), so runtime / draw flags may reuse them.
 #define MAT_NO_RECEIVE       33554432u   // Receive Shadows off
@@ -159,6 +160,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 arms_shoulder_prev[2];
     vec4 arms_seam;
     vec4 arms_eye;        // the arms camera's eye in pose space (view vectors of the arms layer)
+    vec4 fp_push;         // MAT_FP_PUSH (skin.vert): x radius (m), y on
 } frame;
 
 // Where a world point lies in the screen-space inputs (AO, contact, SSR, SSGI, froxels): this

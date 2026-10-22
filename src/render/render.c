@@ -105,6 +105,9 @@ void render_register_cvars(void) {
     r->r_shadowmask_distance = cvar_reg_float("r_shadowmask_distance", dq.shadowmask_distance, 0.0f, 2000.0f, CVAR_TIER, "Distance Shadowmask cut-over (m; stub)");
     r->r_shadow_debug = cvar_reg_int("r_shadow_debug", 0, 0, 8, CVAR_LOCKED,
                                      "shadow views: 1 readout (sky, cascades, bias, filter, jitter), 2 penumbra width, 3 blocker distance, 4 cascade / mode, 5 cloud shadow, 6 texel size, 7 viewmodel tile coverage, 8 fitting spheres + light frustums");
+    r->fp_push = cvar_reg_bool("cl_fp_push", true, CVAR_LOCKED,
+                               "first person: your body's vertices closer than cl_fp_push_radius to the camera move behind it (no shoulder / spine seen from inside; the shadow stays whole)");
+    r->fp_push_radius = cvar_reg_float("cl_fp_push_radius", 0.2f, 0.0f, 1.0f, CVAR_LOCKED, "first person: cl_fp_push's radius around the camera (m)");
     r->r_vm_shadow = cvar_reg_bool("r_vm_shadow", true, CVAR_TIER, "first-person rig (arms, held item) in its own high-resolution shadow tile (docs/SHADOWS.md)");
     r->r_stretch = cvar_reg_float("r_stretch", 0.0f, 0.0f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE,
                                   "stretched resolution simulator: 0 normal .. 1 extreme (the 3D view squeezed into a narrower aspect, stretched to the screen)");
@@ -1873,6 +1876,7 @@ static void compute_matrices(FrameData *fd) {
         // seam blends towards the world camera only while the two eyes are close (a few cm apart).
         vec3 ae = a->valid ? mat4_mul_point(mat4_inverse(R->arms_view), v3(0, 0, 0)) : R->cam.pos;
         fd->arms_eye = v4(ae.x, ae.y, ae.z, 0);
+        fd->fp_push = v4(R->fp_push_radius->f, R->fp_push->i ? 1.0f : 0.0f, 0, 0);
         bool seam = a->valid && a->seam_r1 > 0.0f && v3_dist(ae, R->cam.pos) < 0.3f;
         fd->arms_seam = v4(a->seam_r0, fmaxf(a->seam_r1, a->seam_r0 + 0.01f), seam ? 1.0f : 0.0f, a->valid ? fmaxf(a->arm_cut, 0.0f) : 0.0f);
     }
@@ -2666,6 +2670,7 @@ static bool setup_scope_pip(FrameData *fd) {
     pd->ss_view_proj = mat4_mul(R->proj_j, R->view);
     pd->ss_view = R->view;
     pd->ss_info = v4(1, 0, 0, 0);
+    pd->fp_push = v4(0, 0, 0, 0);
     pd->camera_pos = v4(s->objective_pos.x, s->objective_pos.y, s->objective_pos.z, fd->camera_pos.w);
     pd->screen = v4((float)n, (float)n, 1.0f / (float)n, 1.0f / (float)n);
     F.pip_view = view;

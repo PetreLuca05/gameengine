@@ -1029,8 +1029,10 @@ void game_render(void) {
             camera_fp_nominal_in(&ni, &interp, lp->sim.down.downed, chars_hold_style(w, lp->ent), G->view.pitch);
             bool grounded = interp.on_ground && interp.mode == MOVE_WALK;
             vec3 nominal = sock.t;
+            CamNominalIn ne = ni;   // the table's input: the standing eye at any speed
+            camera_fp_eye_still(&ne);
             if (et->valid) {
-                vec3 off = cam_glide_offset(&G->cam_glide, et, &ni, fdt, &gp);
+                vec3 off = cam_glide_offset(&G->cam_glide, et, &ne, fdt, &gp);
                 float step = cam_glide_step(&G->cam_glide, interp.pos.y, ni.speed, grounded, fdt, &gp);
                 vec3 fwd = v3(-sinf(G->view.yaw), 0, -cosf(G->view.yaw));
                 nominal = v3_add(v3(interp.pos.x, interp.pos.y + step, interp.pos.z), v3_add(v3_add(v3_scale(right_from_yaw(G->view.yaw), off.x), v3(0, off.y, 0)), v3_scale(fwd, off.z)));
@@ -1047,7 +1049,8 @@ void game_render(void) {
                     GR->land_seen = interp.land_tick;
                     GR->land_frame = g_engine.frame_index;
                 }
-                bool eligible = ni.posture < 0 && grounded && !interp.sprinting && !chars_reacting(w, lp->ent) && cam_glide_settled(&G->cam_glide, &ni) &&
+                // Standing only: moving, the clips lean the head ahead of the standing eye by design.
+                bool eligible = ni.posture < 0 && grounded && ni.speed < 0.3f && !chars_reacting(w, lp->ent) && cam_glide_settled(&G->cam_glide, &ne) &&
                                 (double)(g_engine.frame_index - GR->land_frame) * g_engine.frame_dt > 0.4;
                 GR->cam_eligible = eligible;
                 cam_anchor_add(&GR->anchor, ad, rad, GR->cam_posture, eligible);

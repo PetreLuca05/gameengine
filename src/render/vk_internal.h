@@ -248,6 +248,7 @@ typedef struct FrameData {
     vec4 arms_shoulder_prev[2];
     vec4 arms_seam;
     vec4 arms_eye;        // xyz the arms camera's eye in pose space (the arms layer's view vectors)
+    vec4 fp_push;         // MAT_FP_PUSH: x radius (m), y on (0 = off: second cameras, cl_fp_push 0)
 } FrameData;
 
 typedef struct PushLit {
@@ -539,6 +540,7 @@ typedef struct Renderer {
     Cvar *r_shadow_caster_limit;  // classic casters: grass / small plants in the near cascades only (shadow_casters.h, PF-0013)
     Cvar *r_shadow_debug;       // sky-driven shadow views (docs/SHADOWS.md)
     Cvar *r_vm_shadow;          // the viewmodel shadow tile
+    Cvar *fp_push, *fp_push_radius;   // MAT_FP_PUSH (skin.vert)
     float contact_scale;        // contact shadow ray length scale (penumbra-limited, compute_matrices)
     Cvar *r_stretch;   // stretched resolution simulator (0 normal .. 1 extreme)
     float exposure_boost;

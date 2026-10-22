@@ -89,6 +89,11 @@ enum MaterialFlags {
     MAT_WINDOWS  = 1u << 27,
     MAT_FACADE   = 1u << 11,
 };
+// The local player's first-person body (skinned draws only; static draws use bit 24 for
+// MAT_TERRAIN_MORPH): skin.vert moves the vertices closer than cl_fp_push_radius to the world camera
+// behind it, so the camera never sees the shoulders / spine / neck from inside. The shadow is the
+// body's own unpushed copy (MAT_SHADOW_ONLY). Stripped before shading (docs/CAMERA_HOLDPOINT.md).
+#define MAT_FP_PUSH (1u << 24)
 #define MAT_COVER_ID_SHIFT 29u
 #define MAT_COVER_ID(flags) (((flags) >> MAT_COVER_ID_SHIFT) & 7u)
 #define MAT_PBR_MAPS (MAT_MR_TEX | MAT_NORMAL_TEX | MAT_OCCLUSION_TEX | MAT_EMISSIVE_TEX)

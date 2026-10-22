@@ -6,6 +6,6 @@
 #define DG_SHADER_LAYOUT_H
 
 #define DG_LAYOUT_SKIN_INSTANCE 160   // GpuSkinInstance / common.glsl SkinInstance
-#define DG_LAYOUT_FRAME_DATA 12544    // FrameData / common.glsl FrameData (set 0 binding 0)
+#define DG_LAYOUT_FRAME_DATA 12560    // FrameData / common.glsl FrameData (set 0 binding 0)
 
 #endif

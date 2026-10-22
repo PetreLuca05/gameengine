@@ -303,7 +303,9 @@ The pose from the controller goes through a fixed post-pass (`proc_run`):
 2. **Pelvis.** Foot-IK pelvis drop and slope/acceleration **lean**.
 3. **Spine look.** Aim pitch and yaw distributed over Spine..Head, within `yaw_limit`/`pitch_limit`,
    with one of three profiles (`procedural.spine`, down / up), blended: a gun held (`weights`: the
-   torso turns with the aim); empty hands or a non-gun item (`weights_empty`: 85 % neck and head);
+   torso turns with the aim; the bend summed from the pelvis is 0 there and 1 at Spine2 with the
+   shoulders, rising exponentially, (e^(2t) - 1) / (e^2 - 1): 0.148 / 0.289 / 0.563, the neck and head
+   0, so the shoulders keep their place under the first-person eye at any pitch); empty hands or a non-gun item (`weights_empty`: 85 % neck and head);
    a base clip owning the arms - the sprint, a weapon's run clip, a mantle (`weights_run`: the neck
    and head only). The weights come from the controller (`look_empty` = 1 - the hold layer's share,
    `look_run` = `ctrl_base_arms_owned`), the same on every machine. Beyond the yaw limit, **turn-in-place** turns the body: procedurally,

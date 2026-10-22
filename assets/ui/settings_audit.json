@@ -409,6 +409,18 @@
    "reason": "Debug view / log: dev builds only (debug views can show geometry and entities through walls).",
    "category": "player"
   },
+  "cl_fp_push": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "First-person body render tuning (the near push hiding the shoulders / spine from inside): fixed, dev builds only.",
+   "category": "player"
+  },
+  "cl_fp_push_radius": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "First-person body render tuning (the near push hiding the shoulders / spine from inside): fixed, dev builds only.",
+   "category": "player"
+  },
   "cl_hands_fov": {
    "class": "LOCKED",
    "ui": "—",

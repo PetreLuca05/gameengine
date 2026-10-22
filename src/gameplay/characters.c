@@ -3266,7 +3266,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
     // The body without the arms and the head / neck (world camera); the arms with the item go to the
     // arms layer (MAT_VIEWMODEL: own camera, FOV and depth, never in walls).
     int layers = CG->fp_layers ? CG->fp_layers->i : 3;
-    if (layers & 1) draw_char_fp(c, &fp_si, raw ? FPD_BODY_HEAD : FPD_BODY, 0, 0, false);
+    if (layers & 1) draw_char_fp(c, &fp_si, raw ? FPD_BODY_HEAD : FPD_BODY, 0, MAT_FP_PUSH, false);
     if (layers & 1) draw_worn(w, c->worn, worn_body_mesh(c), FP.world, MAT_NO_SHADOW, 1u << CWORN_HEAD);   // chest / back gear (the shadow is the body copy's)
     bool arm = false;
     for (int sl = 0; sl < CSLOT_COUNT; sl++) if (c->part_gpu[sl] && CG->parts[c->part_gpu[sl] - 1].arm) arm = true;
