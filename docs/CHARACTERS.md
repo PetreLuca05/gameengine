@@ -124,6 +124,13 @@ Proportions:
     per bone (`SkmBone.bind_fix`). The Dummy stays baked (bound 0.00 mm, gather is a plain copy); the
     Mixamo skins (knees 57-112 deg, shoulders ~18 deg off the Dummy bind) go per bone: baking it was off by
     up to 65-97 mm in strong bends (mean 1.5-4.3 mm), now 0.01 mm against the file's own skin.
+  - **Own proportions** (`skm_gather_palette` / `skm_bone_world`, `proportioned_world`): a per-bone mesh
+    keeps the skeleton's rotations, but its joints sit at its own bone lengths (each joint placed from its
+    parent along the file's bind offset; the root raised / lowered by the hip-height difference). With the
+    Dummy's joint positions, every segment longer or shorter than the Dummy's pinched or overlapped at its
+    joint (the neck sunk into hunched shoulders, short arms). Its arms then reach the skeleton's hands by
+    two-bone IK (bending towards the skeleton's elbow; the hand keeps the skeleton's rotation), so the held
+    item, grips and hand poses stay right.
 - Weights are quantised to u8 summing to exactly 255 (`skin_quantize_weights`): the shaders never
   renormalise, so 256 scaled a vertex about the world origin (1.66 m off at 300 m).
 - Bone-length differences above the tolerance are reported as warnings.

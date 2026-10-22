@@ -1,5 +1,6 @@
 #include "skeletal_mesh.h"
 #include "core/platform.h"
+#include "anim/anim.h"
 #include "cJSON.h"
 #include <math.h>
 #include <stdarg.h>
@@ -227,21 +228,93 @@ void skm_compact_bones(SkeletalMesh *m) {
 
 // ------------------------------------------------------------------ palette
 
-static Xform mesh_only_world(const SkeletalMesh *m, const SkeletonInstance *si, const Xform *leaf_local, const Xform *mo, int j) {
+static Xform mesh_only_world(const SkeletalMesh *m, const Xform *world, const Xform *leaf_local, const Xform *mo, int j) {
     const SkmBone *b = &m->bones[j];
     int p = b->parent;
-    Xform pw = p < 0 ? si->world[0] : (m->bones[p].skel >= 0 ? si->world[m->bones[p].skel] : mo[p]);
+    Xform pw = p < 0 ? world[0] : (m->bones[p].skel >= 0 ? world[m->bones[p].skel] : mo[p]);
     return xf_mul(pw, leaf_local ? leaf_local[j] : b->local);
+}
+
+static bool per_bone(const SkeletalMesh *m) {
+    for (int j = 0; j < m->bone_count; j++) if (m->bones[j].has_fix) return true;
+    return false;
+}
+
+static Xform file_bind(const SkmBone *b) { return b->has_fix ? xf_mul(b->bind_delta, b->bind_model) : b->bind_model; }
+
+// A per-bone retarget mesh (another rig: a Mixamo skin) in its own proportions: every bone keeps the
+// skeleton's rotation, but its position follows the mesh's own bone lengths - each joint is placed
+// from its parent along the file's bind offset (in the parent's frame, which the retarget maps onto
+// the skeleton bone's frame), the root moved up / down by the leg-length difference so the feet stay on
+// the ground. With the skeleton's joint positions instead, a longer or shorter segment pinched or
+// overlapped at every joint (elbows, knees, shoulders, hips). Bones the mesh lacks use the skeleton's
+// own offsets.
+static void proportioned_world(const SkeletalMesh *m, const SkeletonInstance *si, Xform *out) {
+    const Skeleton *s = si->asset ? &si->asset->skel : NULL;
+    int n = si->count;
+    if (!s) { memcpy(out, si->world, sizeof(Xform) * (size_t)n); return; }
+    int mesh_of[ANIM_MAX_BONES];
+    for (int k = 0; k < n; k++) mesh_of[k] = -1;
+    for (int j = 0; j < m->bone_count; j++) if (m->bones[j].skel >= 0 && m->bones[j].skel < n) mesh_of[m->bones[j].skel] = j;
+    for (int k = 0; k < n; k++) {
+        Xform w = si->world[k];
+        int p = s->parent[k], mk = mesh_of[k];
+        Xform fk = mk >= 0 ? file_bind(&m->bones[mk]) : s->bind_model[k];
+        if (p < 0 || p >= n) {
+            w.t.y += (fk.t.y - s->bind_model[k].t.y) * w.s.y;   // the root: the mesh's own hip height
+        } else {
+            int mp = mesh_of[p];
+            vec3 off = mk >= 0 && mp >= 0 ? xf_point(xf_inverse(file_bind(&m->bones[mp])), fk.t) : s->bind[k].t;
+            Xform pw = si->world[p];
+            pw.t = out[p].t;
+            w.t = xf_point(pw, off);
+        }
+        out[k] = w;
+    }
+    // The arms in their own lengths reach where the skeleton's hands are (the held item, the grips, the
+    // hand poses stay right): two-bone IK from the mesh's shoulder, bending towards the skeleton's elbow;
+    // the hand keeps the skeleton's rotation, its fingers follow it.
+    static const int arms[2][3] = { { BR_L_ARM, BR_L_FOREARM, BR_L_HAND }, { BR_R_ARM, BR_R_FOREARM, BR_R_HAND } };
+    for (int side = 0; side < 2; side++) {
+        int ia = s->role[arms[side][0]], ib = s->role[arms[side][1]], ic = s->role[arms[side][2]];
+        if (ia < 0 || ib < 0 || ic < 0 || ia >= n || ib >= n || ic >= n) continue;
+        vec3 sh = out[ia].t, el = out[ib].t, wr = out[ic].t, tgt = si->world[ic].t;
+        float a = v3_dist(sh, el), b = v3_dist(el, wr);
+        if (a < 1e-4f || b < 1e-4f) continue;
+        vec3 pole = v3_sub(si->world[ib].t, v3_lerp(si->world[ia].t, tgt, 0.5f));
+        vec3 mid, end;
+        anim_ik_two_bone(sh, tgt, pole, a, b, &mid, &end);
+        quat r1 = quat_from_to(v3_norm(v3_sub(el, sh)), v3_norm(v3_sub(mid, sh)));
+        quat r2 = quat_from_to(v3_norm(quat_rotate(r1, v3_sub(wr, el))), v3_norm(v3_sub(end, mid)));
+        out[ia].r = quat_norm(quat_mul(r1, out[ia].r));
+        out[ib].r = quat_norm(quat_mul(quat_mul(r2, r1), out[ib].r));
+        out[ib].t = mid;
+        vec3 d = v3_sub(end, wr);
+        for (int k = 0; k < n; k++) {
+            int q = k;
+            while (q >= 0 && q != ic) q = s->parent[q];
+            if (q == ic) out[k].t = v3_add(out[k].t, d);   // the hand and its fingers
+        }
+    }
 }
 
 int skm_gather_palette(const SkeletalMesh *m, const SkeletonInstance *si, const Xform *leaf_local, mat4 *out) {
     Xform mo[SKM_MAX_BONES];
+    if (per_bone(m)) {
+        static DG_THREAD_LOCAL Xform pw[ANIM_MAX_BONES];
+        proportioned_world(m, si, pw);
+        for (int j = 0; j < m->bone_count; j++) {
+            const SkmBone *b = &m->bones[j];
+            mo[j] = b->skel >= 0 && b->skel < si->count ? pw[b->skel] : mesh_only_world(m, pw, leaf_local, mo, j);
+            out[j] = mat4_mul(xf_to_mat4(mo[j]), xf_to_mat4(xf_inverse(file_bind(b))));
+        }
+        return m->bone_count;
+    }
     for (int j = 0; j < m->bone_count; j++) {
         const SkmBone *b = &m->bones[j];
-        if (b->skel >= 0 && b->skel < si->count) { out[j] = b->has_fix ? mat4_mul(si->skin[b->skel], b->bind_fix) : si->skin[b->skel]; continue; }
-        mo[j] = mesh_only_world(m, si, leaf_local, mo, j);
+        if (b->skel >= 0 && b->skel < si->count) { out[j] = si->skin[b->skel]; continue; }
+        mo[j] = mesh_only_world(m, si->world, leaf_local, mo, j);
         out[j] = mat4_mul(xf_to_mat4(mo[j]), xf_to_mat4(xf_inverse(b->bind_model)));
-        if (b->has_fix) out[j] = mat4_mul(out[j], b->bind_fix);
     }
     return m->bone_count;
 }
@@ -261,9 +334,12 @@ bool skm_palette_equal(const SkeletalMesh *a, const SkeletalMesh *b) {
 
 Xform skm_bone_world(const SkeletalMesh *m, const SkeletonInstance *si, int mesh_bone) {
     Xform mo[SKM_MAX_BONES];
+    static DG_THREAD_LOCAL Xform pw[ANIM_MAX_BONES];
+    const Xform *world = si->world;
+    if (per_bone(m)) { proportioned_world(m, si, pw); world = pw; }
     for (int j = 0; j <= mesh_bone && j < m->bone_count; j++) {
-        if (m->bones[j].skel >= 0) mo[j] = si->world[m->bones[j].skel];
-        else mo[j] = mesh_only_world(m, si, NULL, mo, j);
+        if (m->bones[j].skel >= 0) mo[j] = world[m->bones[j].skel];
+        else mo[j] = mesh_only_world(m, world, NULL, mo, j);
     }
     return mo[mesh_bone];
 }
