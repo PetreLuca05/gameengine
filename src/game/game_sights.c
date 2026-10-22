@@ -197,17 +197,10 @@ void sights_frame(const RenderCamera *cam, bool first_person) {
                     rs->up = v3_cross(rs->right, f);
                 }
             }
-            // Collimated dot: converges on the optic axis at the parallax-free distance.
-            // Through the viewmodel -> world mapping like the lens, so the dot sits on the pixel the
-            // optic axis points at (and the bullets go) whatever the viewmodel FOV.
-            // Ideal parallax-free dot: on the eye -> sight line, so the gun turning about the reticle
-            // centre (recoil / sway anchored at the sight) never moves the dot off the aim.
-            if (cam) {
-                vec3 sw = render_viewmodel_to_world(chars_fp_sight_world());
-                rs->dot_point = v3_madd(cam->pos, v3_norm(v3_sub(sw, cam->pos)), fmaxf(a->parallax_m, 1.0f));
-            } else {
-                rs->dot_point = render_viewmodel_to_world(v3_madd(xf_point(opt, a->lens_pos), xf_dir(opt, v3(0, 0, -1)), fmaxf(a->parallax_m, 1.0f)));
-            }
+            // Collimated dot: converges on the optic's own axis at the parallax-free distance (through
+            // the viewmodel -> world mapping like the lens). It follows the gun: sway, bob and the kick
+            // move it on the screen, it is not pinned to the screen centre.
+            rs->dot_point = render_viewmodel_to_world(v3_madd(xf_point(opt, a->lens_pos), xf_dir(opt, v3(0, 0, -1)), fmaxf(a->parallax_m, 1.0f)));
             rs->reticle_moa = a->reticle.moa;
             rs->reticle_outer_moa = a->reticle.outer_moa;
             rs->reticle_shape = a->reticle.shape;

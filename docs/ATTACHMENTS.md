@@ -285,7 +285,9 @@ The lens is analytic, one fullscreen triangle per pass, scissored to the lens:
 | `scope.frag` | Premultiplied over: the PiP image, or the full-screen vignette |
 
 **The red dot** is aimed at the convergence point (lens + axis × `parallax_m`). Any eye position
-sees it on the same target point, which makes it parallax-free at that distance. It is sized in
+sees it on the same target point, which makes it parallax-free at that distance. The axis is the
+optic's own, so the dot moves with the gun (sway, bob, the kick) instead of staying at the screen
+centre. It is sized in
 MOA, drawn at least about 2.3 px wide with its energy spread, and emissive in exposed units. Its
 brightness is `sight_brightness`. Its glow is additive in exposed units, so it reads in the dark.
 
