@@ -70,11 +70,10 @@ static bool lock_button(GuiRect r, bool locked, bool enabled) {
     float s = fminf(r.w, r.h), cx = r.x + r.w * 0.5f, cy = r.y + r.h * 0.5f;
     float bw = s * 0.56f, bh = s * 0.40f, sr = s * 0.17f, t = fmaxf(1.5f, s * 0.08f);
     GuiRect body = { cx - bw * 0.5f, cy - bh * 0.15f, bw, bh };
-    // The shackle: a half ring over the body (open: lifted and swung right).
-    float sx = locked ? cx : cx + bw * 0.42f, sy = body.y - (locked ? 0.0f : s * 0.10f);
-    gd_ring(sx, sy, sr, t, 0.5f, c);
-    gd_rect(gui_rect(sx - sr - t * 0.5f, sy, t, (locked ? 0.0f : s * 0.10f) + t), c);
-    if (locked) gd_rect(gui_rect(sx + sr - t * 0.5f, sy, t, t), c);
+    // The shackle: a ring whose lower half the body hides (open: lifted and slid right).
+    float sx = locked ? cx : cx + bw * 0.3f, sy = body.y - (locked ? 0.0f : s * 0.14f);
+    gd_ring(sx, sy, sr, t, 1.0f, c);
+    if (!locked) gd_rect(gui_rect(sx - sr - t, sy, t * 2.0f, body.y - sy + t), TH->panel);   // the free leg's gap
     gd_round(body, gui_s(2), c);
     gd_circle(cx, body.y + bh * 0.45f, fmaxf(1.0f, s * 0.05f), TH->panel);
     if (in.hovered) gui_tooltip(id, locked ? "Private: only invited players (or by IP) can join. Click to make it public." : "Public: listed for everyone. Click to make it private.");
@@ -107,7 +106,7 @@ static void draw_party(GuiRect r) {
     // The players (the lobby screen's rows: ready, host, ping, phone; the host kicks / promotes).
     float ph = TOK("lb_player_h");
     int n = DG_MAX(1, lobby_count(L));
-    GuiRect pr = gc_row(&c, (float)(n + 1) * (ph + TOK("mm_gap_sm")) + TOK("mm_row_h"));
+    GuiRect pr = gc_row(&c, (float)n * (ph + TOK("mm_gap_sm")));
     mm_lobby_players(pr);
     // The map and the start look (the Maps tab picks them).
     const MapInfo *mi = lobby_map_info(L->settings.map[0] ? L->settings.map : mm()->map);
