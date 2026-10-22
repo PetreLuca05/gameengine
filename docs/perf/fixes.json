@@ -3159,5 +3159,32 @@
    "dveg_meadow",
    "dveg_overlook"
   ]
+ },
+ "PF-0050": {
+  "title": "Sun cascades 2 - 3 cached without wind, the moving casters drawn over them every frame (r_shadow_far_cache)",
+  "rule": "R02",
+  "finding": "2026-10-22 (the suggestions the developer asked for): the far cascades redrew every tree every frame or (PF-0028) every other frame in turn, although at 30 m and beyond the only thing that changes is the wind sway of the foliage and the moving casters (characters, vehicles)",
+  "effort": "M",
+  "status": "implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify)",
+  "tradeoff": "With 4 cascades, the trees and foliage of cascades 2 and 3 (beyond the second split, ~30 m at Modern) cast still shadows (no wind sway); characters' and vehicles' far shadows are current every frame (they lagged a frame under PF-0028). Dev room at Modern, a 100-zombie horde walking ~75 m away, against the cache off: PSNR 64.7 - 64.9 dB, 0.006 % of pixels more than 8 / 255 apart.",
+  "code": [
+   "src/render/render.c compute_matrices (shadow_cache, the refresh decision, streamed-chunk regions), the sun shadow pass (copy in, refresh + copy out, the moving casters), shadow_cache_copy, shadow_tile_begin, draw_sun_casters (parts)",
+   "src/render/vk_classic.c vkc_draw_shadow_ex (SHADOW_PASS_FROZEN), vkc_shadow_cache_key; shaders/classic_vert.glsl",
+   "src/render/vgeo/vgeo_scene.c vgeo_scene_placements_changed; vk_vgeo.c vkg_placements_changed",
+   "fidelity feature shadow_far_cache, Graphics: Cached far shadows"
+  ],
+  "description": "Cascades 2 and 3 keep their static content (the classic instances, drawn without wind) in shadow_cache (one square each). Every frame the square is copied into the atlas and the raster draws and skinned characters are drawn over it. A cascade is redrawn (cleared, the static content drawn, copied out, the moving casters drawn) when its fit moved (PF-0028's thresholds), on a cut or a settings change, when vkc_shadow_cache_key changes (LOD meshes built, culling inputs: one cascade a frame) or when streamed placement chunks' cells reach its light box. Its classic culling runs only then; no receiver-volume cull. Measured on the Linux container in the vegetation forest at High with the camera jumping 20 m every few frames: 12 refreshes in ~45 frames (against a redraw every frame).",
+  "metrics": [
+   "scope:shadow_sun",
+   "scopec:shadow_sun:fs_invocations",
+   "gpu_frame",
+   "zone:classic:cull_views"
+  ],
+  "scenes": [
+   "dveg_pine",
+   "dveg_broadleaf",
+   "dveg_horde",
+   "dveg_overlook"
+  ]
  }
 }

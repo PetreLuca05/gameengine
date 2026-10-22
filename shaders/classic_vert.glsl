@@ -30,8 +30,10 @@ void main() {
     v_uv = in_uv;
     v_fade = i_misc.yzwx;
 #ifdef CL_SHADOW
-    vec3 w = base + cl_wpo(base, n, i_pos.xyz, i_pos.w, in_color, i_misc.x, false, layers & ~VGW_NORMALS, nb);
-    gl_Position = shadow_pass_vp(pc.flags.w) * vec4(w, 1.0);
+    // a cached far cascade (PF-0050) holds the trees still: no wind
+    bool frozen = (pc.flags.w & SHADOW_PASS_FROZEN) != 0u;
+    vec3 w = frozen ? base : base + cl_wpo(base, n, i_pos.xyz, i_pos.w, in_color, i_misc.x, false, layers & ~VGW_NORMALS, nb);
+    gl_Position = shadow_pass_vp(pc.flags.w & ~SHADOW_PASS_FROZEN) * vec4(w, 1.0);
 #else
     vec3 w = base + cl_wpo(base, n, i_pos.xyz, i_pos.w, in_color, i_misc.x, false, layers, nb);
     v_world = w;

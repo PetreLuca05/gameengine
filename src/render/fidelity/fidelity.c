@@ -46,6 +46,7 @@ static const FidFeatureDef k_features[FF_COUNT] = {
     [FF_SHADOW_CASTER_LIMIT] = { "shadow_caster_limit", "r_shadow_caster_limit", I, false, 0, 0, 2, true, false, "Grass / plant shadow cascades" },
     [FF_SHADOW_FAR_INTERVAL] = { "shadow_far_interval", "r_shadow_far_interval", I, false, 0, 1, 4, true, false, "Far shadow update rate" },
     [FF_SHADOW_FAR_RES] = { "shadow_far_res", "r_shadow_far_res", I, false, 0, 1, 4, true, false, "Far shadow resolution" },
+    [FF_SHADOW_FAR_CACHE] = { "shadow_far_cache", "r_shadow_far_cache", B, true, 0, 0, 1, true, false, "Cached far shadows" },
     [FF_LIGHT_SHADOW_QUALITY] = { "light_shadow_quality", "r_light_shadow_quality", I, false, 0, 1, 2, false, false, "Light shadow quality" },
     [FF_TEXTURE_QUALITY] = { "texture_quality", "r_texture_quality", I, false, 0, 0, 2, false, false, "Textures" },
     [FF_ANISO] = { "aniso", "r_aniso", I, false, 0, 1, 16, false, false, "Anisotropic filtering" },

@@ -578,8 +578,10 @@ void vkd_create_shadow_map(u32 size) {
     if (R->shadow.image) vkr_target_destroy(&R->shadow);
     R->shadow_gen++;
     // Shared: the froxel injection samples it on the async compute queue (PF-0027).
+    // Transfer: the cached far cascades' squares (PF-0050).
     R->shadow = vkr_target_create_shared(size, size, VK_FORMAT_D32_SFLOAT,
-                                         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
+                                         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                         VK_IMAGE_ASPECT_DEPTH_BIT);
     R->shadow_size = size;
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
         if (!R->frames[i].frame_set) continue;

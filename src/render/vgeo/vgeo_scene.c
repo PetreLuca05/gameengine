@@ -362,6 +362,23 @@ void vgeo_scene_reserve_placements(VgScene *s, u32 instances, u32 cells) {
 }
 
 // The ranges vgeo_scene_placement_record uploads (a CPU-only scene, without a context, has no GPU copy).
+static void changed_cell(VgPlacements *p, const VgCell *c) {
+    if (!c->count) return;
+    if (!p->changed)
+        for (int a = 0; a < 3; a++) p->changed_min[a] = FLT_MAX, p->changed_max[a] = -FLT_MAX;
+    p->changed = true;
+    for (int a = 0; a < 3; a++) p->changed_min[a] = fminf(p->changed_min[a], c->min[a]), p->changed_max[a] = fmaxf(p->changed_max[a], c->max[a]);
+}
+
+bool vgeo_scene_placements_changed(VgScene *s, float mn[3], float mx[3]) {
+    VgPlacements *p = &s->pl;
+    if (!p->changed) return false;
+    memcpy(mn, p->changed_min, sizeof(float) * 3);
+    memcpy(mx, p->changed_max, sizeof(float) * 3);
+    p->changed = false;
+    return true;
+}
+
 static void dirty_range(VgScene *s, u32 first, u32 count) {
     VgPlacements *p = &s->pl;
     if (!count || !s->ctx) return;
@@ -430,10 +447,12 @@ u32 vgeo_scene_placement_add(VgScene *s, const VgCell *cells, u32 ncells, const 
         for (u32 i = cl->first; i < cl->first + cl->count; i++) p->inst[i].cell = c;
         cell_bounds(s, cl);
         dirty_cell(s, c);
+        changed_cell(p, cl);
     }
     dirty_range(s, first, n);
     p->live_chunks++;
     p->live_instances += n;
+    p->serial++;
     return h;
 }
 
@@ -443,6 +462,7 @@ void vgeo_scene_placement_remove(VgScene *s, u32 h) {
     VgPlacementChunk *ch = &p->chunks[h];
     for (u32 k = 0; k < ch->cell_count; k++) {   // cells first: no frame recorded after this sees the instances
         u32 c = ch->cells[k];
+        changed_cell(p, &p->cells[c]);
         p->cells[c] = k_empty_cell;
         p->cell_chunk[c] = ~0u;
         p->free_cells[p->free_cells_n++] = c;
@@ -467,6 +487,7 @@ void vgeo_scene_placement_remove(VgScene *s, u32 h) {
     }
     p->live_chunks--;
     p->live_instances -= ch->count;
+    p->serial++;
     memset(ch, 0, sizeof(*ch));
 }
 

@@ -39,6 +39,9 @@ typedef struct VgPlacements {
     u32 free_cells_n;
     VgPlacementChunk *chunks;
     u32 chunk_count, chunk_cap, live_chunks, live_instances;
+    u32 serial;                  // bumps on every chunk added / removed
+    float changed_min[3], changed_max[3];   // the cells of the chunks added / removed since vgeo_scene_placements_changed (PF-0050)
+    bool changed;
     VgRange *dirty_inst;         // region ranges to upload at the next record
     u32 dirty_inst_n, dirty_inst_cap;
     u32 *dirty_cells;
@@ -125,6 +128,8 @@ void vgeo_scene_reserve_placements(VgScene *s, u32 instances, u32 cells);
 // ~0 when the region is full. Visible from the next vgeo_scene_placement_record.
 u32 vgeo_scene_placement_add(VgScene *s, const VgCell *cells, u32 ncells, const VgInstance *inst, u32 n, u32 user);
 void vgeo_scene_placement_remove(VgScene *s, u32 chunk);
+// The bounds of the cells added / removed since the last call (cached shadow tiles, PF-0050); false: none.
+bool vgeo_scene_placements_changed(VgScene *s, float mn[3], float mx[3]);
 // Uploads the chunk changes since the last record (frame < VG_MAX_FRAMES: its staging buffer is free
 // again); before the frame's first cull. A barrier orders it after every earlier read.
 void vgeo_scene_placement_record(VgScene *s, VkCommandBuffer cmd, u32 frame);

@@ -90,6 +90,7 @@ era preset (`r_era`): `era x3` = three times the era's own error threshold, also
 | `shadow_caster_limit` (0 off, 1 near cascades, 2 cascade 0 + caps; docs/SHADOWS.md "Caster cascade limits") | 2, min 2 | 2, min 2 | 2, min 1 | 1, min 1 | 1, min 0 |
 | `shadow_far_interval` (frames between redraws of cascades 2 / 3; docs/SHADOWS.md "Far cascade staggering") | 2, min 2 | 2, min 2 | 2, min 2 | 2, min 1 | 2, min 1 |
 | `shadow_far_res` (cascades 1 - 3 at 1 / N of the tile's texels, never below 1024; docs/SHADOWS.md "Far cascade resolution") | 2, min 1 | 2, min 1 | 2, min 1 | 2, min 1 | 2, min 1 |
+| `shadow_far_cache` (cascades 2 / 3 of 4 cached without wind, moving casters over them; docs/SHADOWS.md "Cached far cascades") | on | on | on | on | on |
 | `light_shadows` | - | off | on | on | on |
 | `light_shadow_quality` | 1, max 1 | 1, max 1 | 1, max 1 | 2, max 2 | 2, max 2 |
 | `cloud_shadows` | - | off | on | on | on |
@@ -277,6 +278,8 @@ Every preset's shadow entries follow one formula (docs/SHADOWS.md "Per-preset ta
   their tile in between (docs/SHADOWS.md "Far cascade staggering", PF-0028).
 - `r_shadow_far_res`: cascades 1 - 3 at 1 / N of the tile's texels, never below 1024 (docs/SHADOWS.md "Far
   cascade resolution", PF-0049): Modern's far cascades 2048, High's 1024.
+- `r_shadow_far_cache`: cascades 2 and 3 (of 4) keep their trees in a cache drawn without wind, the moving
+  casters drawn over it every frame (docs/SHADOWS.md "Cached far cascades", PF-0050).
 - `r_vm_shadow`: the first-person rig's own tile (1024 .. 2048, following the sun's resolution). The 2010 era
 keeps a fixed-hardness kernel; its shadows still lighten and vanish with the sky.
 

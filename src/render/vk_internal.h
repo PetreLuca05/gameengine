@@ -444,6 +444,12 @@ typedef struct Renderer {
     // its tile and the matrices / bias it was drawn with (shadow_hold); shadow_redraw: re-rendered now.
     bool shadow_redraw[4];
     u32 shadow_tile_px[4];        // texels per side each sun cascade draws (the top-left part of its tile: PF-0049)
+    // Cached far cascades (PF-0050): their static content (the classic instances, no wind) kept in
+    // shadow_cache (one square per cascade, side by side) and copied into the atlas every frame; the
+    // moving casters (raster draws, skinned characters) are drawn over it. shadow_redraw = refresh.
+    bool shadow_cached[4], shadow_cache_valid[4];
+    u32 shadow_cache_key;
+    RenderTarget shadow_cache;
     struct ShadowHold { bool valid; mat4 vps, vp_ndc; vec3 center, L; float radius, texel_m, bias, span, nbias, mpt; } shadow_hold[4];
     u32 shadow_hold_key;                        // cascades / tile / fit / shadow image generation the holds belong to
     bool moon_active;
@@ -505,6 +511,7 @@ typedef struct Renderer {
     Cvar *r_shadow_min_radius;
     Cvar *r_shadow_far_interval;  // sun cascades 2..3 re-rendered every N frames, alternating (PF-0028)
     Cvar *r_shadow_far_res;       // sun cascades 1..3 at 1 / N of the tile's texels (PF-0049)
+    Cvar *r_shadow_far_cache;     // sun cascades 2..3 cached without wind, moving casters drawn over them each frame (PF-0050)
     Cvar *r_shadow_caster_limit;  // classic casters: grass / small plants in the near cascades only (shadow_casters.h, PF-0013)
     Cvar *r_shadow_debug;       // sky-driven shadow views (docs/SHADOWS.md)
     Cvar *r_vm_shadow;          // the viewmodel shadow tile
@@ -685,6 +692,9 @@ void vkc_draw_pip(VkCommandBuffer cmd);       // inside the scope PiP pass (own 
 // The scope PiP view of this frame (setup_scope_pip): view-projection, eye, pixels per unit tangent; false: none.
 bool render_scope_cull(mat4 *vp, vec3 *eye, float *px_scale);
 void vkc_draw_shadow(VkCommandBuffer cmd, u32 cascade);   // inside the sun shadow pass
+void vkc_draw_shadow_ex(VkCommandBuffer cmd, u32 cascade, bool frozen);   // frozen: no wind (a cached far cascade, PF-0050)
+u32 vkc_shadow_cache_key(void);   // what a cached far cascade drew from the classic content (PF-0050)
+bool vkg_placements_changed(float mn[3], float mx[3]);   // the placement cells streamed in / out since the last call (PF-0050)
 u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 view, u32 tile_px, u32 layers);
 void vkc_stats(void);
 void vkc_fade_probe(float radius);   // classic_fade_probe

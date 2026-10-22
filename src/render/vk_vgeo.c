@@ -454,6 +454,9 @@ static void cull_job(void *u) {
     vkc_frame_cull();
 }
 
+// PF-0050: the cells of the placement chunks streamed in / out since the last call (false: none).
+bool vkg_placements_changed(float mn[3], float mx[3]) { return G.ok && vgeo_scene_placements_changed(&G.scene, mn, mx); }
+
 void vkg_classic_frame_begin(void) {
     g_cull_async = false;
     if (!G.ok) return;

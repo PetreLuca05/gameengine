@@ -626,6 +626,8 @@ static void tab_graphics_debug(GuiCursor *c) {
     static const int sfrv[] = { 1, 2, 3, 4 };
     row_fid_combo(c, "Far shadow resolution", FF_SHADOW_FAR_RES, sfr, sfrv, 4,
                   "Every sun cascade after the first at this share of the shadow resolution (never below 1024): far shadows a little softer, the shadow pass much cheaper in forests.");
+    row_fid_toggle(c, "Cached far shadows", FF_SHADOW_FAR_CACHE,
+                   "The two far sun cascades keep their trees in a cache (no wind sway in far shadows); moving characters and vehicles are drawn over it every frame.");
 
     section(c, "Geometry, textures & foliage");
     static const char *const texq[] = { "Low (mips -2)", "Medium (mips -1)", "High" };

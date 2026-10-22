@@ -2005,6 +2005,12 @@
    "reason": "Debug view / log: dev builds only (debug views can show geometry and entities through walls).",
    "category": "rendering"
   },
+  "r_shadow_far_cache": {
+   "class": "TIER",
+   "ui": "Graphics (dev)",
+   "reason": "Sun cascades 2 and 3 (of 4) keep their static content (trees, foliage: no wind sway) in a cache redrawn when the fit or the scene changes; moving casters are drawn over it every frame. Nothing hidden or revealed: cost only (PF-0050).",
+   "category": "rendering"
+  },
   "r_shadow_far_interval": {
    "class": "TIER",
    "ui": "Graphics (dev)",

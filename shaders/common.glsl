@@ -189,6 +189,7 @@ layout(set = 0, binding = 10) uniform sampler2D wx_puddles;
 #define SHADOW_PASS_MOON 0x10000u
 #define SHADOW_PASS_VM 0x20000u
 #define SHADOW_PASS_OCCL 0x40000u
+#define SHADOW_PASS_FROZEN 0x100000u   // classic draws into a cached far cascade: no wind (PF-0050; OR'ed onto the cascade index)
 mat4 shadow_pass_vp(uint idx) {
     if (idx == SHADOW_PASS_MOON) return frame.shadow_vp_moon;
     if (idx == SHADOW_PASS_VM) return frame.shadow_vp_vm;

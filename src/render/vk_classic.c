@@ -42,6 +42,7 @@
 #include "vgeo/vgeo_tex.h"
 #include "core/jobs.h"
 #include <SDL3/SDL.h>
+#include <stdint.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -89,7 +90,8 @@ typedef struct ClWindGpu {
     float wind[4], wind_prev[4], tile[4], tile_prev[4], disp[4], time[4];
     u32 ring, ring_prev, layers, debug;
 } ClWindGpu;
-typedef struct ClBatch { u32 key, first, count; } ClBatch;   // key = mesh << 4 | fade << 3 | LOD (CL_IMPOSTOR)
+typedef struct ClBatch { u32 key, first, count; } ClBatch;
+#define CL_SHADOW_FROZEN 0x100000u   // shaders/common.glsl SHADOW_PASS_FROZEN: a cached far cascade, no wind (PF-0050)   // key = mesh << 4 | fade << 3 | LOD (CL_IMPOSTOR)
 typedef struct ClView {
     ClBatch *batches;
     u32 batch_count, batch_cap, instances;
@@ -142,6 +144,7 @@ static struct {
     u32 inst_spare_cap;
     JobCounter inst_spare_job;
     u32 cull_slot;                  // the frame slot whose instance buffer holds the views' streams
+    u32 lod_builds;                 // LOD meshes built so far (a cached shadow tile drew a coarser stand-in: PF-0050)
     ClInst *tmp;                    // gathered instances of one view
     u32 *tmp_key;
     u32 tmp_n, tmp_cap;
@@ -605,6 +608,7 @@ static void cl_build_cut(ClLod *L, const VgBuilt *b, float error) {
         off += icount[m];
     }
     L->gpu = render_mesh_create(v, vn, all, total);
+    C.lod_builds++;
     if (L->gpu) C.gpu_bytes += sizeof(Vertex) * (u64)vn + 4ull * total;
     L->tris = total / 3;
     L->ready_frame = R->frame_index + 2;
@@ -629,6 +633,7 @@ static void cl_build_exported(ClMesh *cm, u32 k) {
         v[i].color = 0xFFFFFFFFu;
     }
     L->gpu = render_mesh_create(v, l->vertex_count, cm->indices + l->first_index, l->index_count);
+    C.lod_builds++;
     if (L->gpu) C.gpu_bytes += sizeof(Vertex) * (u64)l->vertex_count + 4ull * l->index_count;
     L->sec[0] = (ClSection){ 0, l->index_count, 0 };
     L->nsec = 1;
@@ -2207,8 +2212,22 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
 void vkc_draw_gbuffer(VkCommandBuffer cmd) { draw_view(cmd, &C.view[0], 0, 0); }
 void vkc_draw_lit(VkCommandBuffer cmd) { draw_view(cmd, &C.view[0], 1, 0); }
 void vkc_draw_pip(VkCommandBuffer cmd) { draw_view(cmd, &C.view[CL_VIEW_PIP], 3, 0); }
-void vkc_draw_shadow(VkCommandBuffer cmd, u32 cascade) {
-    if (cascade < C.ncasc) draw_view(cmd, &C.view[1 + cascade], 2, cascade);
+void vkc_draw_shadow(VkCommandBuffer cmd, u32 cascade) { vkc_draw_shadow_ex(cmd, cascade, false); }
+void vkc_draw_shadow_ex(VkCommandBuffer cmd, u32 cascade, bool frozen) {
+    if (cascade < C.ncasc) draw_view(cmd, &C.view[1 + cascade], 2, cascade | (frozen ? CL_SHADOW_FROZEN : 0u));
+}
+
+// What a cached far cascade (PF-0050) drew from the classic content: the scene, the LOD meshes
+// resident, the culling inputs that decide which instances a cascade keeps (foliage density, shadow LOD,
+// caster limits). Any change refreshes the cached tiles; streamed chunks refresh only the cascades
+// their cells reach (vkg_placements_changed, render.c).
+u32 vkc_shadow_cache_key(void) {
+    const VgScene *s = C.scene ? C.scene : FA.s;
+    u32 h = 2166136261u;
+    u32 v[8] = { (u32)(uintptr_t)s, s ? s->generation : 0u, 0u, C.lod_builds, (u32)(FA.density * 1000.0f), (u32)(FA.shadow_lod_px * 100.0f), (u32)C.scc_mode,
+                 (u32)C.mesh_cap };
+    for (int i = 0; i < 8; i++) h = (h ^ v[i]) * 16777619u;
+    return h;
 }
 
 // Point / spot light shadow tile: the instances touching the light's sphere and the tile frustum, LOD

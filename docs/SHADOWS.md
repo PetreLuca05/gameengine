@@ -319,6 +319,33 @@ level, minimum 1.
 - **Visible:** shadows from about the first split (~10 m at Modern) are a little softer and coarser.
   The near cascade, the viewmodel tile and the soft-shadow filter widths in metres are unchanged.
 
+### Cached far cascades
+
+PF-0050 is a visual trade-off: `r_shadow_far_cache`, fidelity feature `shadow_far_cache`, on at every level.
+It applies with 4 cascades only.
+
+- **What is cached:** cascades 2 and 3 keep their static content in `shadow_cache`, one square per cascade
+  side by side. The static content is the classic instances (trees, foliage, rocks), drawn without wind
+  (`SHADOW_PASS_FROZEN` in the classic vertex stage).
+- **Every frame:**
+  1. Each cached square is copied into the atlas.
+  2. The moving casters are drawn over it: raster draws (props, vehicles, level geometry) and skinned
+     characters, culled per cascade.
+- **When a cached cascade is redrawn:**
+  - Its fit moved, as for PF-0028 (centre by a tenth of its radius, radius by 2 %, light direction by
+    0.25 deg), or after a cut or a settings change. This forces both cascades.
+  - `vkc_shadow_cache_key` changed: the scene, streamed placement chunks (`VgPlacements.serial`), LOD
+    meshes built, foliage density, shadow LOD, caster limits. One cascade is refreshed per frame, so a
+    streamed chunk causes no spike.
+- **Refresh frame:** the cascade's square is cleared and the static content drawn, then the square is
+  copied into the cache, then the moving casters are drawn over it.
+- **Interplay:**
+  - The classic culling of a cached cascade runs only on its refresh frames.
+  - The receiver-volume cull (PF-0006) never applies to it, because the cache outlives the view.
+  - PF-0028's staggering no longer applies to it: its moving casters are drawn every frame.
+- **Visible:** trees beyond the second split (~30 m at Modern) cast still shadows (no sway). Characters'
+  and vehicles' far shadows are current every frame, which they were not under PF-0028.
+
 ### Bias
 
 Per cascade, in metres, from its texel size t (`csm_bias`), × the low-sun factor:
