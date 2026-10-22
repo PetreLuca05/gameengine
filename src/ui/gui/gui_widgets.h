@@ -61,6 +61,7 @@ void gw_avatar(GuiRect r, TextureId tex, const char *name, u32 tint);
 typedef struct GuiSlotView {
     TextureId icon;           // 0: draw the fallback (type tint + initials)
     vec4 uv;
+    float aspect;             // the icon's width / height, fitted in the slot; 0 = fill it
     u32 tint;                 // type colour
     const char *name;         // fallback label / initials
     int count;                // > 1: stack count

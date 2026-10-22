@@ -120,20 +120,16 @@ middle.
 - **Healing interruption.** Consumables with `"interrupt_on_damage": true` (medkit, bandage,
   painkillers, armor) are cancelled by damage, on the host.
 
-## Kill counter and kill feed
+## Kill count and kill feed
 
 `src/ui/hud/hud_kills.c`, model in `src/gameplay/kill_stats.h` (pure).
 
 - **Source.** `EV_KILL` now carries flags (headshot, victim player / zombie, killer player, self)
   and `KillEventData` (killer name, victim name, weapon item). Every machine builds its own feed
   and counts its own kills; nothing extra is replicated. A late joiner starts at 0.
-- **Counter (top right).**
-  - A skull with the total.
-  - The zombies / players split: on hover, for 2.5 s after a kill, or always with
-    `hud_killcount_split`.
-  - A pulse on each kill and a headshot tick.
-  - A "Streak ×N" pill: kills less than 4 s apart.
-- **Feed (under the counter).** Five entries, 6 s each, fading over the last second, sliding in.
+- **Count.** Not on the HUD: the inventory's header shows it at its right end (the total, the
+  zombies / players split).
+- **Feed (top right).** Five entries, 6 s each, fading over the last second, sliding in.
   - Each row: killer, weapon icon, collateral icon (the bullet had already killed someone: `KILLF_COLLATERAL`,
     counted per bullet on the host, `BalLive.kills`), headshot icon, victim. The icons draw white (the weapon icon is the silhouette of its baked item icon, `gd_image_mask`).
   - Your kills have a white edge; your deaths a red one.
@@ -186,7 +182,7 @@ Settings > HUD (all archived cvars):
 
 - **Layout:** `hud_opacity`, `hud_scale`.
 - **Compass:** `hud_compass`, `hud_coords`, `hud_ping_compass`.
-- **Kills:** `hud_killcount`, `hud_killcount_split`, `hud_killfeed`.
+- **Kills:** `hud_killfeed`.
 - **Pings:** `hud_ping_markers`, `ping_enable`, `ping_chat`, `ping_sound`.
 - **Wheels:** `wheel_enable`, `wheel_hold_time`, `wheel_timescale`, `wheel_heal_auto_use`,
   `hud_timed_ring`.

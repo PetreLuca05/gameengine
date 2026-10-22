@@ -1,7 +1,7 @@
 // Inventory screen (docs/INVENTORY.md "Screen"), over the game: the first-person view keeps rendering
 // behind it (the camera never moves) under a full-screen blur.
-//   header: the title centred, the category bar (highlights, never moves anything) and Compact above
-//           the divider;
+//   header: the title centred, the category bar (highlights, never moves anything) and Compact left of
+//           it, the kills right, above the divider;
 //   left:   one panel down to the bottom of the screen: an open world container's grid above the
 //           player's grid (the worn backpack's), scrolling; right of it the helmet, plate carrier
 //           and backpack slots stacked;
@@ -88,7 +88,6 @@ static struct {
         TextureId tex;
         ItemViewCam cam;
         u16 item;
-        float turn;            // hovered: a slow turn (radians), eased back to the side view after
     } wv[3];
     int cat;                   // the category bar: 0 all, else ICAT_* + 1
     float char_yaw;            // the character turned by dragging it
@@ -158,7 +157,8 @@ void inventory_slot_view(const InvSlot *s, const ItemDB *db, int mag_override, G
     v->tint = type_color(d);
     v->name = revive_item_name(db, s->item, s->ammo);   // DNA samples carry the player's name
     v->count = s->count;
-    if (!inv_cells_get(s->item, &v->icon, &v->uv)) icons_get(s->item, &v->icon, &v->uv);
+    if (inv_cells_get(s->item, &v->icon, &v->uv)) v->aspect = (float)DG_MAX(1, d->grid_w) / (float)DG_MAX(1, d->grid_h);
+    else if (icons_get(s->item, &v->icon, &v->uv)) v->aspect = 1.0f;
     const WeaponDef *wd = item_weapon(db, s->item);
     if (wd && wd->mag_size > 0 && wd->kind != WPN_MELEE) {
         WeaponDef eff;
@@ -556,10 +556,10 @@ static float fit_zoom(const ItemViewCam *rest, vec3 mn, vec3 mx, float aspect, f
     return clampf(fill / ext, 0.8f, 2.3f);
 }
 
-// A weapon slot's 3D view (render_ui3d, its own target): the weapon as the hands hold it with its
-// attachments, from the side, zoomed so its bounds fill the slot; hovered, it turns slowly. Items
-// without a model: their image.
-static void weapon_view(int i, GuiRect r, const InvItem *it, bool hot) {
+// A weapon slot's 3D view (render_ui3d, its own target): the weapon with its attachments, straight
+// from the side (orthographic, no yaw / pitch: the muzzle points left), zoomed so its bounds fill the
+// slot. Items without a model: their image.
+static void weapon_view(int i, GuiRect r, const InvItem *it) {
     const ItemDB *db = items();
     static RenderUi3dPart parts[ITEM_VIEW_MAX_PARTS];
     vec3 mn, mx;
@@ -571,17 +571,14 @@ static void weapon_view(int i, GuiRect r, const InvItem *it, bool hot) {
     }
     if (V.wv[i].item != it->s.item) {
         item_view_default_cam(db, it->s.item, &V.wv[i].cam);
-        V.wv[i].cam.yaw = 0.3f;     // flatter than the inspect view: the silhouette reads in a short slot
-        V.wv[i].cam.pitch = -0.2f;
+        V.wv[i].cam.yaw = 3.14159265f;   // from -X: the barrel (model -Z) to the screen left
+        V.wv[i].cam.pitch = 0.0f;
+        V.wv[i].cam.ortho = true;
         V.wv[i].item = it->s.item;
-        V.wv[i].turn = 0;
     }
-    float tau = 6.2831853f, aspect = r.w / fmaxf(1.0f, r.h);
-    if (hot) V.wv[i].turn = fmodf(V.wv[i].turn + gui_dt() * 0.9f, tau);
-    else V.wv[i].turn += ((V.wv[i].turn > tau * 0.5f ? tau : 0.0f) - V.wv[i].turn) * saturate(gui_dt() * 5.0f);
+    float aspect = r.w / fmaxf(1.0f, r.h);
     ItemViewCam cam = V.wv[i].cam;
     cam.zoom = fit_zoom(&V.wv[i].cam, mn, mx, aspect, 0.44f);
-    cam.yaw += V.wv[i].turn;
     RenderUi3dView rv;
     memset(&rv, 0, sizeof(rv));
     rv.target = V.wv[i].tex;
@@ -605,8 +602,7 @@ static void draw_weapon_slot(int slot) {
     if (!it) return;
     gd_alpha_push(carrying(INV_SIDE_SELF, it->uid) ? 0.35f : 1.0f);
     float fs = tpx(TH->t_small);
-    bool hot = V.hover.kind == IT_EQUIP && V.hover.side == INV_SIDE_SELF && V.hover.index == slot && V.dd.state == IDD_IDLE;
-    weapon_view(slot - EQ_PRIMARY, gui_rect(c.x, c.y, c.w, c.h - gd_line_height(fs)), it, hot);
+    weapon_view(slot - EQ_PRIMARY, gui_rect(c.x, c.y, c.w, c.h - gd_line_height(fs)), it);
     GuiText nm = { fs, GW_SEMIBOLD, TH->text, GUI_LEFT, 0, false, true, c.w * 0.6f };
     gd_text(&nm, c.x + gui_s(2), c.y + c.h - gd_line_height(fs), revive_item_name(db, it->s.item, it->s.ammo));
     const WeaponDef *wd = item_weapon(db, it->s.item);
@@ -972,8 +968,8 @@ static void draw_character(void) {
 
 // ------------------------------------------------------------------ header: categories
 
-// The category bar and Compact in the header (above the divider): right-aligned beside the title,
-// centred on a row of their own under it. The chips' padding shrinks when they don't fit.
+// The category bar and Compact in the header (above the divider): left of the title, or left-aligned
+// on a row of their own under it. The chips' padding shrinks when they don't fit.
 static void draw_cats(void) {
     GuiRect r = V.L.cats;
     float h = gui_s(24), gap = gui_s(6), cw = gui_s(92);
@@ -984,10 +980,7 @@ static void draw_cats(void) {
     int n = ICAT_COUNT + 1;
     float pad = gui_s(20), rest = r.w - text - gap * (float)(n + 1) - cw;
     if (pad * (float)n > rest) pad = fmaxf(gui_s(6), rest / (float)n);
-    float total = text + pad * (float)n + gap * (float)(n + 1) + cw;
-    bool own_row = r.x <= V.L.header.x + 0.5f;
-    float x = own_row ? r.x + (r.w - total) * 0.5f : r.x + r.w - total, y = r.y + (r.h - h) * 0.5f;
-    x = fmaxf(x, r.x);
+    float x = r.x, y = r.y + (r.h - h) * 0.5f;
     for (int i = 0; i <= ICAT_COUNT; i++) {
         const char *name = i ? cat_name(i - 1) : "All";
         float w = gd_text_width(&t, name) + pad;
@@ -1011,6 +1004,25 @@ static void draw_cats(void) {
         s.dst_side = INV_SIDE_SELF;
         inv_screen_send(s);
     }
+}
+
+// The kills (this machine's count: docs/UI_WHEELS_HUD.md "Kill feed") at the header's right end, the
+// zombies / players split before them; the sync state left of it all while intents are pending.
+static void draw_kills(void) {
+    InvLayout *L = &V.L;
+    Game *g = g_();
+    const KillStats *k = &g->kill_stats;
+    float rx = L->header.x + L->header.w, cy = L->header.y + gui_s(6) + gd_line_height(tpx(TH->t_title)) * 0.5f;
+    char b[64];
+    snprintf(b, sizeof(b), "%d", kill_stats_total(k));
+    GuiText num = { tpx(TH->t_title), GW_SEMIBOLD, TH->text, GUI_RIGHT, 0, false, true, 0 };
+    rx -= gd_text(&num, rx, cy - gd_line_height(num.size) * 0.5f, b) + gui_s(8);
+    GuiText lab = { tpx(TH->t_small), GW_SEMIBOLD, TH->text_dim, GUI_RIGHT, TH->tracking_caps, true, false, 0 };
+    rx -= gd_text(&lab, rx, cy - gd_line_height(lab.size) * 0.5f, "Kills") + gui_s(18);
+    snprintf(b, sizeof(b), "Zombies %d  \xC2\xB7  Players %d", k->zombies, k->players);
+    GuiText sp = { tpx(TH->t_small), GW_MEDIUM, TH->text_faint, GUI_RIGHT, 0, false, true, 0 };
+    rx -= gd_text(&sp, rx, cy - gd_line_height(sp.size) * 0.5f, b) + gui_s(18);
+    if (game_inv_pending()) gd_text(&sp, rx, cy - gd_line_height(sp.size) * 0.5f, "syncing\xE2\x80\xA6");
 }
 
 // ------------------------------------------------------------------ right: loot, grid, gear
@@ -1635,10 +1647,7 @@ bool inventory_draw(GuiRect area, bool as_modal) {
     // Header: the title centred, the sync state left, the category bar; the divider under it.
     GuiText title = { tpx(TH->t_title), GW_SEMIBOLD, TH->text, GUI_CENTER, 0.02f, true, true, 0 };
     gd_text(&title, L->header.x + L->header.w * 0.5f, L->header.y + gui_s(6), "Inventory");
-    if (game_inv_pending()) {
-        GuiText ht = { tpx(TH->t_small + 1), GW_MEDIUM, TH->text_dim, GUI_LEFT, 0, false, true, 0 };
-        gd_text(&ht, L->header.x, L->header.y + gui_s(14), "syncing\xE2\x80\xA6");
-    }
+    draw_kills();
     draw_cats();
     gd_rect(gui_rect(L->header.x, L->header.y + L->header.h - 1, L->header.w, 1), gui_rgba_mul(TH->panel_border, 0.8f));
     // Columns, then the inspect window over them.

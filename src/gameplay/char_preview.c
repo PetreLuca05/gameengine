@@ -39,7 +39,6 @@ static struct {
     float hip_y, knee_y;
     float face_fix;            // turn squaring the idle's stance to the camera (rad)
     u64 frame;                 // engine frame of the last request (one evaluation per frame)
-    TextureId tex;
     CharPreviewRig rig;
     bool rig_loaded;
     bool frozen;               // tests: the pose holds still (char_preview_show 3)
@@ -195,9 +194,8 @@ static vec3 cam_to_world(vec3 right, vec3 up, vec3 back, vec3 v) { return v3_add
 
 TextureId chars_preview(World *w, int player_slot, const CharPreviewIn *in) {
     if (!w || !in || !LIB || !LIB->loaded || in->w < 8 || in->h < 8) return 0;
-    if (PV.frame == g_engine.frame_index && PV.c) return PV.tex;   // several callers in a frame: the first request
+    if (PV.frame == g_engine.frame_index && PV.c) return render_char_preview_texture(in->target);   // several callers in a frame: the first request renders
     PV.frame = g_engine.frame_index;
-    PV.tex = 0;
     const CharPreviewRig *rig = char_preview_rig();
     // The shown player's character (read only): its definition and parts; none (menus, between lives):
     // the player character with the default skin.
@@ -236,6 +234,7 @@ TextureId chars_preview(World *w, int player_slot, const CharPreviewIn *in) {
     render_char_preview_capture_end();
     RenderCharPreview rq;
     memset(&rq, 0, sizeof(rq));
+    rq.target = in->target;
     rq.width = in->w;
     rq.height = in->h;
     rq.supersample = rig->supersample;
@@ -257,9 +256,10 @@ TextureId chars_preview(World *w, int player_slot, const CharPreviewIn *in) {
     rq.tonemap = rig->tonemap;
     rq.saturation = rig->saturation;
     render_char_preview(&rq);
-    PV.tex = render_char_preview_texture();
-    return PV.tex;
+    return render_char_preview_texture(in->target);
 }
+
+TextureId chars_preview_cached(int target) { return render_char_preview_texture(target); }
 
 // Diagnostics (char_preview_check): the skin drawn, the framing.
 void char_preview_info(char *out, size_t n) {

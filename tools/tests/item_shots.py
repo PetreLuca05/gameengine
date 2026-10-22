@@ -34,7 +34,7 @@ def main(argv):
     cat = json.load(open(os.path.join(ROOT, "assets", "items", "catalog.json")))["items"]
     if not ids:
         ids = sorted(cat)
-    lines = ["r_maxfps 60", "time_set 11:00", "time_pause", "weather_set clear 0", "hud_compass 0", "hud_coords 0", "hud_killcount 0", "setpos 0 0 -8 0 0", "wait 12"]
+    lines = ["r_maxfps 60", "time_set 11:00", "time_pause", "weather_set clear 0", "hud_compass 0", "hud_coords 0", "setpos 0 0 -8 0 0", "wait 12"]
     for i in ids:
         insp = i if cat.get(i, {}).get("kind") != "attachment" else i   # attachments are inspected by "att_<id>"
         for view in views:

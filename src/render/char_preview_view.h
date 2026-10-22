@@ -10,6 +10,8 @@
 //     src alpha in display space, like the ui3d item views), transparent background, the empty
 //     pixels next to the silhouette carrying its colour (no dark halo when sampled bilinearly).
 // The UI pass of the same frame samples it. Nothing is recorded on frames without a request.
+// One request a frame; each request names one of CHAR_PREVIEW_TARGETS persistent targets (the
+// inventory's, the HUD player cards'), which keep their last image for the frames between.
 #ifndef DG_CHAR_PREVIEW_VIEW_H
 #define DG_CHAR_PREVIEW_VIEW_H
 
@@ -17,8 +19,10 @@
 
 #define CHAR_PREVIEW_MAX_SIZE 4096
 #define CHAR_PREVIEW_MAX_SS 4
+#define CHAR_PREVIEW_TARGETS 16
 
 typedef struct RenderCharPreview {
+    int target;               // 0 .. CHAR_PREVIEW_TARGETS - 1
     int width, height;        // the target (re-created when it changes)
     int supersample;          // 1 .. CHAR_PREVIEW_MAX_SS samples per side and output pixel
     vec3 cam_pos;
@@ -36,7 +40,7 @@ typedef struct RenderCharPreview {
 } RenderCharPreview;
 
 void render_char_preview(const RenderCharPreview *v);   // this frame (between begin / end frame)
-TextureId render_char_preview_texture(void);             // the target (0 before the first request)
+TextureId render_char_preview_texture(int target);       // a target (0 before its first request)
 // render_draw calls between begin / end go to the preview's own static draw list (drawn only by
 // the preview pass); render_camera_info answers with the preview camera meanwhile (item mesh LODs).
 void render_char_preview_capture_begin(vec3 cam_pos, float fov_deg);

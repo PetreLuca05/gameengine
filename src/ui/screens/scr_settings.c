@@ -534,7 +534,7 @@ static void tab_audio(GuiCursor *c) {
 }
 
 // Phone companion (docs/PHONE.md): server, stream, orientation, capture.
-// HUD (docs/UI_WHEELS_HUD.md "Settings"): the compass, kill counter / feed, pings and wheels.
+// HUD (docs/UI_WHEELS_HUD.md "Settings"): the compass, kill feed, pings and wheels.
 static void tab_hud(GuiCursor *c) {
     section(c, "Interface");
     row_slider_cvar(c, "UI scale", "ui_scale", 0, 3, 0.05f, "%.2f", "0 = automatic from the resolution.");
@@ -549,8 +549,6 @@ static void tab_hud(GuiCursor *c) {
     row_toggle_cvar(c, "Coordinates", "hud_coords", "X, Z and height under the compass. Copy them from the pause menu.");
     row_toggle_cvar(c, "Pings and teammates on the compass", "hud_ping_compass", NULL);
     section(c, "Kills");
-    row_toggle_cvar(c, "Kill counter", "hud_killcount", NULL);
-    row_toggle_cvar(c, "Always show zombies / players", "hud_killcount_split", "Otherwise on hover and for a moment after each kill.");
     row_toggle_cvar(c, "Kill feed", "hud_killfeed", NULL);
     section(c, "Pings");
     row_toggle_cvar(c, "Ping markers in the world", "hud_ping_markers", NULL);

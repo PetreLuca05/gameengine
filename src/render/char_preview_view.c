@@ -1,43 +1,49 @@
 // Inventory character preview view (see char_preview_view.h): this frame's request -> scene pass
 // (render.c render_char_preview_pass: the preview's skinned + captured static draws, its own frame
 // UBO with the studio rig) at supersample x the size -> resolve (post/char_preview.comp) into the
-// persistent RGBA8 target the UI samples in the same frame.
+// persistent RGBA8 target the UI samples in the same frame (and the frames after, until that target's
+// next request).
 #include "char_preview_view.h"
 #include "post/post_internal.h"
 #include "core/log.h"
 
-static struct {
-    RenderCharPreview req;
-    bool want;                // requested this frame
+typedef struct CpTarget {
     RenderTarget target;      // persistent: storage (the resolve) + sampled (the UI)
     TextureId tex;
     int w, h;
+} CpTarget;
+
+static struct {
+    RenderCharPreview req;
+    bool want;                // requested this frame
+    CpTarget t[CHAR_PREVIEW_TARGETS];
+    CpTarget *cur;            // this frame's
     FgRes hdr, depth, out;    // this frame's graph resources
 } CP = { .hdr = FG_NONE, .depth = FG_NONE, .out = FG_NONE };
 
-static void destroy_target(void) {
-    if (CP.tex) vkr_texture_unwrap(CP.tex);   // the descriptor set is freed once no frame uses it
-    if (CP.target.image) vkr_defer_image(CP.target.image, CP.target.view, CP.target.alloc);
-    memset(&CP.target, 0, sizeof(CP.target));
-    CP.tex = 0;
-    CP.w = CP.h = 0;
+static void destroy_target(CpTarget *t) {
+    if (t->tex) vkr_texture_unwrap(t->tex);   // the descriptor set is freed once no frame uses it
+    if (t->target.image) vkr_defer_image(t->target.image, t->target.view, t->target.alloc);
+    memset(t, 0, sizeof(*t));
 }
 
-static bool ensure_target(int w, int h) {
-    if (CP.target.image && CP.w == w && CP.h == h) return true;
-    destroy_target();
-    CP.target = vkr_target_create((u32)w, (u32)h, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
-    if (!CP.target.image) return false;
-    CP.tex = vkr_texture_wrap(CP.target.image, CP.target.view, CP.target.w, CP.target.h, CP.target.format);
-    CP.w = w;
-    CP.h = h;
-    return CP.tex != 0;
+static bool ensure_target(CpTarget *t, int w, int h) {
+    if (t->target.image && t->w == w && t->h == h) return true;
+    destroy_target(t);
+    t->target = vkr_target_create((u32)w, (u32)h, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+    if (!t->target.image) return false;
+    t->tex = vkr_texture_wrap(t->target.image, t->target.view, t->target.w, t->target.h, t->target.format);
+    t->w = w;
+    t->h = h;
+    return t->tex != 0;
 }
 
 void render_char_preview(const RenderCharPreview *v) {
-    if (!R->frame_active || v->width < 8 || v->height < 8) return;
+    if (!R->frame_active || v->width < 8 || v->height < 8 || v->target < 0 || v->target >= CHAR_PREVIEW_TARGETS) return;
     int w = DG_MIN(v->width, CHAR_PREVIEW_MAX_SIZE), h = DG_MIN(v->height, CHAR_PREVIEW_MAX_SIZE);
-    if (!ensure_target(w, h)) { log_warn("char preview: target creation failed (%dx%d)", w, h); return; }
+    CpTarget *t = &CP.t[v->target];
+    if (!ensure_target(t, w, h)) { log_warn("char preview: target creation failed (%dx%d)", w, h); return; }
+    CP.cur = t;
     CP.req = *v;
     CP.req.width = w;
     CP.req.height = h;
@@ -49,7 +55,7 @@ void render_char_preview(const RenderCharPreview *v) {
     CP.want = true;
 }
 
-TextureId render_char_preview_texture(void) { return CP.tex; }
+TextureId render_char_preview_texture(int target) { return target >= 0 && target < CHAR_PREVIEW_TARGETS ? CP.t[target].tex : 0; }
 bool char_preview_pending(void) { return CP.want; }
 
 static void exec_resolve(VkCommandBuffer cmd, void *u) {
@@ -68,22 +74,23 @@ static void exec_resolve(VkCommandBuffer cmd, void *u) {
     pc.u[0] = (u32)rq->supersample;
     pc.u[1] = (u32)rq->tonemap;
     post_push_constants(cmd, &pc, 128);
-    post_dispatch(cmd, "char_preview", (u32)CP.w, (u32)CP.h, 1, 8);
+    post_dispatch(cmd, "char_preview", (u32)CP.cur->w, (u32)CP.cur->h, 1, 8);
 }
 
 void char_preview_view_build(struct FrameData *fd) {
     CP.hdr = CP.depth = CP.out = FG_NONE;
     if (!CP.want) return;
     CP.want = false;
-    if (!CP.target.image) return;
-    u32 s = (u32)CP.req.supersample, sw = (u32)CP.w * s, sh = (u32)CP.h * s;
+    CpTarget *t = CP.cur;
+    if (!t || !t->target.image) return;
+    u32 s = (u32)CP.req.supersample, sw = (u32)t->w * s, sh = (u32)t->h * s;
     FgTexDesc hd = { "char_preview_hdr", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_ABS, sw, sh, 1, 1, 0 };
     CP.hdr = fg_texture(&hd);
     hd.name = "char_preview_depth";
     hd.format = R->depth.format;
     CP.depth = fg_texture(&hd);
     if (render_char_preview_pass(&CP.req, CP.hdr, CP.depth, sw, sh, fd) < 0) return;
-    CP.out = fg_import("char_preview", CP.target.image, CP.target.view, CP.target.format, CP.target.w, CP.target.h, VK_IMAGE_ASPECT_COLOR_BIT, &CP.target.layout);
+    CP.out = fg_import("char_preview", t->target.image, t->target.view, t->target.format, t->target.w, t->target.h, VK_IMAGE_ASPECT_COLOR_BIT, &t->target.layout);
     int q = fg_pass("char_preview_resolve", exec_resolve, NULL);
     fg_read(q, CP.hdr, FG_SAMPLED);
     fg_read(q, CP.depth, FG_SAMPLED);
@@ -96,8 +103,10 @@ void char_preview_final_reads(int pass) {
 }
 
 void char_preview_view_shutdown(void) {
-    if (CP.tex) vkr_texture_unwrap(CP.tex);
-    vkr_target_destroy(&CP.target);
+    for (int i = 0; i < CHAR_PREVIEW_TARGETS; i++) {
+        if (CP.t[i].tex) vkr_texture_unwrap(CP.t[i].tex);
+        vkr_target_destroy(&CP.t[i].target);
+    }
     memset(&CP, 0, sizeof(CP));
     CP.hdr = CP.depth = CP.out = FG_NONE;
 }

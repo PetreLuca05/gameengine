@@ -23,13 +23,14 @@ void inv_layout(const InvLayoutIn *in, InvLayout *o) {
     o->title_h = 26 * s;
     o->chip_gap = 6 * s;
     float g = o->gap;
-    // Header: the title centred; the category bar right of it when the half beside the title holds it
-    // (~700 design px), else on a second row. The divider is the header's bottom edge.
+    // Header: the title centred; the category bar left of it when the half beside the title holds it
+    // (~700 design px), else on a second row (the kills take the title row's right end). The divider
+    // is the header's bottom edge.
     float title_half = 90 * s, row_h = 44 * s, cats_h = 26 * s;
     float beside = S.w * 0.5f - title_half - g;
     if (beside >= 700 * s) {
         o->header = R(S.x, S.y, S.w, row_h);
-        o->cats = R(S.x + S.w - beside, S.y + (row_h - cats_h) * 0.5f, beside, cats_h);
+        o->cats = R(S.x, S.y + (row_h - cats_h) * 0.5f, beside, cats_h);
     } else {
         o->header = R(S.x, S.y, S.w, row_h + cats_h + g * 0.5f);
         o->cats = R(S.x, S.y + row_h, S.w, cats_h);

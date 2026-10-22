@@ -102,12 +102,10 @@ void hud_register(void) {
     HC.cv.compass = cvar_reg_bool("hud_compass", true, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: compass strip (top centre)");
     HC.cv.compass_arc = cvar_reg_float("hud_compass_arc", 150.0f, 90.0f, 180.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: degrees of heading the compass strip shows (90 .. 180)");
     HC.cv.coords = cvar_reg_bool("hud_coords", true, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: X / Z / height coordinates under the compass");
-    HC.cv.killcount = cvar_reg_bool("hud_killcount", true, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: kill counter (top right)");
-    HC.cv.killcount_split = cvar_reg_bool("hud_killcount_split", false, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: always show the zombies / players split (else on hover and after a kill)");
-    HC.cv.killfeed = cvar_reg_bool("hud_killfeed", true, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: kill feed under the counter");
+    HC.cv.killfeed = cvar_reg_bool("hud_killfeed", true, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: kill feed (top right)");
     HC.cv.ping_markers = cvar_reg_bool("hud_ping_markers", true, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: ping markers in the world");
     HC.cv.ping_compass = cvar_reg_bool("hud_ping_compass", true, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: ping and teammate markers on the compass");
-    HC.cv.opacity = cvar_reg_float("hud_opacity", 1.0f, 0.2f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: opacity of the compass, kill counter, feed and markers");
+    HC.cv.opacity = cvar_reg_float("hud_opacity", 1.0f, 0.2f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: opacity of the compass, kill feed and markers");
     HC.cv.scale = cvar_reg_float("hud_scale", 1.0f, 0.75f, 1.5f, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: size of the compass and ping markers");
     cmd_register("hud_reload", cmd_hud_reload, "reload assets/ui/hud_compass.json");
     cmd_register("copypos", cmd_copypos, "copy your position to the clipboard (as a setpos command)");

@@ -23,7 +23,7 @@ Tarkov-style grid mechanics on a deliberately simple model:
 | World containers, corpses, vehicle trunks, host intent handling, loot sync | `src/gameplay/entities.c` (`container_tree`), `src/game/game_events.c`, `src/net/net.c` |
 | Screen: layout + drag and drop (pure), panels, inspect, context menu, gamepad | `src/ui/inventory/{inv_layout,inv_dd,inv_screen}.c` |
 | The character render on the screen | `src/gameplay/characters.c` (`chars_preview`), docs/CHARACTERS.md "Character preview" |
-| HUD weapon list, health / armor | `src/ui/hud.c` (`draw_weapon_list`, `draw_vitals`) |
+| HUD player card (portrait, name, armor, health) | `src/ui/hud.c` (`draw_player_card`) |
 | Cell images (grid-aspect icons, baker) | `src/ui/inventory/inv_cells.c`, `tools/bake_icons/bake_cells.sh` |
 | Editor panel | `src/ui/inventory/inv_editor.c` (`inv_editor`) |
 | Drops (G tap, discards, downed) | `src/game/game_events.c` (`drop_held`, `spawn_dropped`), `src/gameplay/entities.c` (`spawn_pickup_tree`, `pickup_use`) |
@@ -302,14 +302,16 @@ World container saves migrate the same way (a three-drawer cabinet into its one 
   - A full-screen UI blur (`gd_backdrop`) under the theme's `scrim` covers it.
   - The simulation pauses or runs as before (the pause menu rule).
   - `tools/tests/inv_camera.cfg` checks the camera's position, rotation and FOV over 60 frames.
-* **Header:** the title centred. The **category bar** and Compact sit above the divider, right of
-  the title, or on a centred row of their own under it when that half is narrower than ~700 design
-  px (4:3). The chips' padding shrinks to fit.
+* **Header:** the title centred. The **category bar** and Compact sit above the divider, left of
+  the title, or left-aligned on a row of their own under it when that half is narrower than ~700
+  design px (4:3). The chips' padding shrinks to fit. The **kills** sit at the title row's right
+  end: the zombies / players split, then "Kills" and the total (`kill_stats`); "syncing…" left of
+  them while intents are pending.
 * **Weapon column (right):**
   - The weapon slots stacked, as tall as the column allows (up to 210 design px). Each shows the
     weapon **live in 3D** (`render_ui3d`, its own target per slot): as the hands hold it, with its
-    mounted attachments, from the side, zoomed so its bounds fill the slot. Hovered, it turns slowly
-    and eases back after.
+    mounted attachments, straight from the side (orthographic, no yaw or pitch: the muzzle points
+    left), zoomed so its bounds fill the slot. It never turns.
   - Primary and secondary each have a row of attachment chips under them: five squares across the
     slot's width, one per attachment slot in slot order. A slot the weapon lacks is a faint outline;
     otherwise the mounted attachment or an outline with the slot name. Drag an attachment onto a
@@ -376,19 +378,17 @@ menu's Inventory entry opens the same screen.
 
 ## 6. HUD (`src/ui/hud.c`)
 
-* **Weapon list, bottom left** (theme `layout` tokens `hud_wlist_*`):
-  - Three rows, primary / secondary / holster: the key, the cell image, the name, magazine /
-    reserve, and the drawn gun's fire mode.
-  - The selected row is white (theme `select`); an empty row is a dim outline with the slot's name.
-  - Keys 1-3 and the wheel cycle them.
-  - While the hands hold a grid item, an "In hands" row shows above.
-* **Health and armor, bottom centre** (`hud_vitals_*`):
-  - The armor bar above the health bar, one segment per plate the player can hold (1, or 4 with a
-    plate carrier). Each has its number.
+* **Player card, bottom left** (theme `layout` tokens `hud_card_*`):
+  - A portrait: the viewed player's character (`chars_preview`, its skin and worn gear, the idle
+    pose, like the inventory's) on a dark rounded panel, as tall as the column right of it.
+  - The column: the player's name, the armor bar (one bar, whatever the plates), the health bar with
+    its number. No labels; armor shows no number.
   - While a plate would go in (armor not full, a plate carried, not seated), a **V Plate** key cap
-    sits right of the armor number (docs/DAMAGE.md "Armor").
-  - `tools/tests/hud_vitals.cfg` checks the block is centred at 16:9, 21:9 and 4:3.
+    sits right of the armor bar (docs/DAMAGE.md "Armor").
+  - No weapon list (keys 1-3 and the wheel still pick primary / secondary / holster), no "In hands".
+  - `tools/tests/hud_vitals.cfg` checks the card at 16:9, 21:9 and 4:3.
 * The ammo readout stays bottom right.
+* The kill count is in the inventory's header (right end), not on the HUD.
 
 ## 7. Commands
 
@@ -429,7 +429,7 @@ menu's Inventory entry opens the same screen.
 - Source order: the item's `"cell_image"`, then `assets/ui/cells/<id>.png`, then a live bake through
   the UI item view renderer.
 - Rotated items draw the same image turned a quarter (`gd_image_rot90`).
-- The HUD weapon list and the attachment chips use the cell images too.
+- The attachment chips use the cell images too, fitted at the item's grid aspect (never stretched).
 
 ## 10. Tests
 
@@ -461,7 +461,7 @@ menu's Inventory entry opens the same screen.
     discard, outside, panel); rotation while dragging, split, clicks, Esc, the pad carry.
   - The category bar only dims.
 * `lint_inventory.py`:
-  - Theme tokens in the screen and in the HUD weapon list / vitals.
+  - Theme tokens in the screen and in the HUD player card.
   - No deleted slot / field / API anywhere in code, tests, scripts or data.
   - No `"weight"` key.
   - The six slot names; only ten-wide backpacks have grids, one default; one-grid roots.
@@ -477,6 +477,6 @@ menu's Inventory entry opens the same screen.
     doesn't move for 60 frames.
   - `inv_tab.cfg` + `inv_tab_check.py`: Tab closes the screen with a selection, the context menu or
     the inspect window open, over the pause menu, and on a looted crate.
-  - `hud_vitals.cfg` + `hud_vitals_check.py`: the vitals centred at three aspects.
+  - `hud_vitals.cfg` + `hud_vitals_check.py`: the player card at three aspects.
   - `plate_key.cfg` + `plate_key_check.py`: V puts plates in (and the HUD key hint), nothing with
     none left or the armor full.

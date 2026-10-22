@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Inventory lint (docs/INVENTORY.md):
-  * theme tokens: the inventory screen (src/ui/inventory/*.c) and the HUD's weapon list and vitals
-    (src/ui/hud.c draw_weapon_list / weapon_row / draw_vitals) take every colour from the theme
+  * theme tokens: the inventory screen (src/ui/inventory/*.c) and the HUD player card
+    (src/ui/hud.c draw_player_card) take every colour from the theme
     (TH->...): no UI_RGBA(...) or 0xAARRGGBB literals unless the line says "lint:ok";
   * the deleted slots, fields and APIs are gone everywhere (code, tests, scripts, data): the old
     equipment slots (melee, earpiece, face cover, eyewear, tactical rig, armband, secure container),
@@ -23,7 +23,7 @@ GONE = re.compile(r"\b(EQ_MELEE|EQ_EARPIECE|EQ_FACE_COVER|EQ_EYEWEAR|EQ_RIG|EQ_A
                   r"inv_quick_order|inv_showcase|showcase_camera|hotbar_slot)\b")
 GONE_JSON = re.compile(r'"(earpiece|face_cover|eyewear|tactical_rig|secure_container|no_containers|max_item|hotbar)"\s*:|"equip"\s*:\s*"(melee|earpiece|face_cover|eyewear|tactical_rig|armband|secure_container)"')
 SCAN = ("src", "tests", "tools", "data", "assets/ui", "assets/items", "assets/attachments", "assets/kits", "assets/story")
-HUD_FUNCS = ("static void weapon_row(", "static void draw_weapon_list(", "static void draw_vitals(")
+HUD_FUNCS = ("static void draw_player_card(", "static void draw_player_cards(")
 
 
 def hud_bodies(path):

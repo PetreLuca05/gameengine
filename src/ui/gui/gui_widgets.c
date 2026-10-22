@@ -583,6 +583,10 @@ void gw_slot(GuiRect r, const GuiSlotView *v) {
         // Type tint: a thin strip at the bottom edge.
         gd_rect(gui_rect(r.x + rad, r.y + r.h - gui_s(2), r.w - rad * 2, gui_s(2)), gui_rgba_mul(v->tint, 0.85f));
         GuiRect ir = gui_rect_inset(r, r.w * 0.12f);
+        if (v->aspect > 0.0f) {
+            float iw = fminf(ir.w, ir.h * v->aspect), ih = iw / v->aspect;
+            ir = gui_rect(ir.x + (ir.w - iw) * 0.5f, ir.y + (ir.h - ih) * 0.5f, iw, ih);
+        }
         if (v->icon) {
             gd_image(ir, v->icon, v->uv, UI_RGBA(255, 255, 255, 255));
         } else {

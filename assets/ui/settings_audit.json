@@ -370,7 +370,7 @@
   "cl_clock": {
    "class": "EDITABLE",
    "ui": "HUD",
-   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock.",
+   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill feed, pings, phone panel, timed ring, clock.",
    "category": "world"
   },
   "cl_crouch_toggle": {
@@ -760,79 +760,67 @@
   "hud_compass": {
    "class": "EDITABLE",
    "ui": "HUD",
-   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock.",
+   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill feed, pings, phone panel, timed ring, clock.",
    "category": "hud"
   },
   "hud_compass_arc": {
    "class": "EDITABLE",
    "ui": "HUD",
-   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock.",
+   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill feed, pings, phone panel, timed ring, clock.",
    "category": "hud"
   },
   "hud_coords": {
    "class": "EDITABLE",
    "ui": "HUD",
-   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock.",
-   "category": "hud"
-  },
-  "hud_killcount": {
-   "class": "EDITABLE",
-   "ui": "HUD",
-   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock.",
-   "category": "hud"
-  },
-  "hud_killcount_split": {
-   "class": "EDITABLE",
-   "ui": "HUD",
-   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock.",
+   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill feed, pings, phone panel, timed ring, clock.",
    "category": "hud"
   },
   "hud_killfeed": {
    "class": "EDITABLE",
    "ui": "HUD",
-   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock.",
+   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill feed, pings, phone panel, timed ring, clock.",
    "category": "hud"
   },
   "hud_opacity": {
    "class": "EDITABLE",
    "ui": "HUD",
-   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock.",
+   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill feed, pings, phone panel, timed ring, clock.",
    "category": "hud"
   },
   "hud_phone_corner": {
    "class": "EDITABLE",
    "ui": "HUD",
-   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock.",
+   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill feed, pings, phone panel, timed ring, clock.",
    "category": "hud"
   },
   "hud_phone_size": {
    "class": "EDITABLE",
    "ui": "HUD",
-   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock.",
+   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill feed, pings, phone panel, timed ring, clock.",
    "category": "hud"
   },
   "hud_ping_compass": {
    "class": "EDITABLE",
    "ui": "HUD",
-   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock.",
+   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill feed, pings, phone panel, timed ring, clock.",
    "category": "hud"
   },
   "hud_ping_markers": {
    "class": "EDITABLE",
    "ui": "HUD",
-   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock.",
+   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill feed, pings, phone panel, timed ring, clock.",
    "category": "hud"
   },
   "hud_scale": {
    "class": "EDITABLE",
    "ui": "HUD",
-   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock.",
+   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill feed, pings, phone panel, timed ring, clock.",
    "category": "hud"
   },
   "hud_timed_ring": {
    "class": "EDITABLE",
    "ui": "HUD",
-   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock.",
+   "reason": "HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill feed, pings, phone panel, timed ring, clock.",
    "category": "hud"
   },
   "kit_hot_reload": {

@@ -56,8 +56,7 @@
   "layout": {
     "_doc": "Named design-px sizes: screen JSON uses them as \"@name\" (the main menu screens use nothing else), the screens' code through gui_tok().",
     "zero": 0,
-    "hud_wlist_w": 330, "hud_wlist_row_h": 46, "hud_wlist_gap": 5, "hud_wlist_img_w": 84, "hud_wlist_lift": 6,
-    "hud_vitals_w": 300, "hud_vitals_hp_h": 8, "hud_vitals_armor_h": 6, "hud_vitals_label_w": 64, "hud_vitals_num_w": 46, "hud_vitals_row_h": 18, "hud_vitals_plate_gap": 4,
+    "hud_card_bar_w": 280, "hud_card_hp_h": 10, "hud_card_armor_h": 8, "hud_card_row_h": 30, "hud_card_name_h": 40, "hud_card_gap": 14, "hud_card_portrait_aspect": 0.72, "hud_card_stack_gap": 10,
     "tab_text": 17, "tab_gap": 34, "tab_pad": 8, "tab_underline": 2, "tab_hint_y": 4, "power_stroke": 2,
     "mm_tabbar_h": 60, "mm_power": 34, "mm_footer_h": 66, "mm_status_w": 440, "mm_news_w": 380,
     "mm_content_gap": 20, "mm_gap_sm": 2, "mm_gap": 8, "mm_gap_lg": 20,
@@ -73,7 +72,7 @@
     "chat_y": -150, "chat_w": 520, "chat_h": 260, "chat_fade": 8,
     "bar_thickness": 2.5, "ring_thickness_wheel": 4, "ring_radius": 34, "ring_hud_offset": 96,
     "wheel_radius": 200, "wheel_inner": 96, "wheel_slot": 70, "wheel_ring": 1.5, "wheel_dead_zone": 24, "wheel_cursor": 120, "wheel_hysteresis_deg": 6, "wheel_label": 14,
-    "killcount_w": 220, "killcount_h": 46, "killfeed_row_h": 28, "killfeed_gap": 4, "killfeed_icon": 18,
+    "killfeed_row_h": 28, "killfeed_gap": 4, "killfeed_icon": 18,
     "compass_w": 720, "compass_h": 30, "compass_tick": 6, "compass_tick_major": 11, "compass_marker": 16, "compass_coords_w": 230,
     "ping_icon": 26, "ping_edge_margin": 48,
     "cmd_row_h": 34, "cmd_console_h": 230, "cmd_search_w": 320

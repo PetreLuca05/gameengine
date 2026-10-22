@@ -10,7 +10,7 @@
 #define TH (gui_theme())
 
 typedef struct HudCvars {
-    Cvar *compass, *compass_arc, *coords, *killcount, *killcount_split, *killfeed, *ping_markers, *ping_compass, *opacity, *scale;
+    Cvar *compass, *compass_arc, *coords, *killfeed, *ping_markers, *ping_compass, *opacity, *scale;
 } HudCvars;
 
 typedef struct HudCompassCfg {

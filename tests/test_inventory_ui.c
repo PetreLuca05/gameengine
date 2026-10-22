@@ -87,9 +87,11 @@ static void test_layout(void) {
                           "%s: the character from the safe top to the screen bottom (%.0f .. %.0f, head %.3f)", n, L.player.y, bot, L.player_head_top);
                     CHECK(fabsf(mid - pm) < 1.0f, "%s: the head's middle %.0f px, the primary slot's %.0f", n, mid, pm);
                 }
-                // The header: the category bar above the divider (the header's bottom), right of the title or on a row of its own.
+                // The header: the category bar above the divider (the header's bottom), left of the title (from the
+                // header's left edge) or on a row of its own; the kills take the title row's right end.
                 CHECK(inside(L.cats, L.header) && fabsf(L.header.x - in.safe.x) < 0.5f && fabsf(L.header.w - in.safe.w) < 0.5f, "%s: the category bar in the header", n);
-                CHECK(L.cats.x >= L.header.x + L.header.w * 0.5f + 60 * res[r].scale || L.cats.y >= L.header.y + 40 * res[r].scale, "%s: the category bar clear of the centred title", n);
+                CHECK(fabsf(L.cats.x - L.header.x) < 0.5f, "%s: the category bar from the header's left edge", n);
+                CHECK(L.cats.x + L.cats.w <= L.header.x + L.header.w * 0.5f - 60 * res[r].scale || L.cats.y >= L.header.y + 40 * res[r].scale, "%s: the category bar clear of the centred title", n);
                 CHECK(L.panel.y >= L.header.y + L.header.h && L.slots.y >= L.header.y + L.header.h, "%s: the columns under the divider", n);
                 // The grid panel and the gear column reach the bottom of the safe area; the footer stays left of them.
                 CHECK(fabsf(L.panel.y + L.panel.h - sb) < 0.5f && fabsf(L.gear.y + L.gear.h - sb) < 0.5f, "%s: the grid panel down to the bottom", n);

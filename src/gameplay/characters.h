@@ -204,8 +204,11 @@ void chars_set_worn(World *w, int player_slot, const u16 worn[CWORN_COUNT]);   /
 // of a player's character (same model and cosmetics, its own pose: the idle clip, empty hands unless
 // held_item), drawn alone into its own RGBA target: transparent background, a fixed studio light rig,
 // front view framed head to mid-thigh. Call once per frame while it is shown (nothing renders on frames
-// it isn't called); returns the texture to draw this frame (0 until one is ready).
+// it isn't called); returns the texture to draw this frame (0 until one is ready). One render a frame:
+// each caller names its own target (render/char_preview_view.h), a second call in the same frame
+// returns that target's last image (chars_preview_cached does the same without asking for a render).
 typedef struct CharPreviewIn {
+    int target;                  // 0 the inventory, CHAR_PREVIEW_HUD + player slot the HUD cards
     int w, h;                    // target size in pixels (the target follows changes)
     u16 held_item;               // item def in the hands, 0 = empty hands (the default)
     u8 held_att[ATT_SLOTS];      // its attachments
@@ -214,6 +217,8 @@ typedef struct CharPreviewIn {
     float head_top;              // the image height above the head top (fraction; 0 = assets/ui/char_preview.json's framing)
 } CharPreviewIn;
 TextureId chars_preview(World *w, int player_slot, const CharPreviewIn *in);
+TextureId chars_preview_cached(int target);
+#define CHAR_PREVIEW_HUD 1
 // Pelvis + head of a character's current (ragdoll / settled / animated) pose.
 bool chars_body_axis(World *w, EntityId e, vec3 *pelvis, vec3 *head);
 // extract_blood hand IK: [0] where the free hand steadies the body (chest), [1] the needle point (arm / neck).
