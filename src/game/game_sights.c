@@ -120,6 +120,14 @@ void sights_camera(const Player *p, const WeaponDef *wd, CameraAds *out) {
 
 // ------------------------------------------------------------------ renderer hand-off
 
+static vec2 g_dot_px, g_axis_deg;
+
+static void cmd_sight_dot(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    log_info("sight_dot: %s dot %.2f %.2f px from the centre, gun axis %.3f %.3f deg off the view", S.complete ? "aimed" : "not aimed", g_dot_px.x, g_dot_px.y, g_axis_deg.x, g_axis_deg.y);
+}
+
 void sights_frame(const RenderCamera *cam, bool first_person) {
     RenderSight *rs = &S.rs;
     memset(rs, 0, sizeof(*rs));
@@ -197,10 +205,29 @@ void sights_frame(const RenderCamera *cam, bool first_person) {
                     rs->up = v3_cross(rs->right, f);
                 }
             }
-            // Collimated dot: converges on the optic's own axis at the parallax-free distance (through
-            // the viewmodel -> world mapping like the lens). It follows the gun: sway, bob and the kick
-            // move it on the screen, it is not pinned to the screen centre.
-            rs->dot_point = render_viewmodel_to_world(v3_madd(xf_point(opt, a->lens_pos), xf_dir(opt, v3(0, 0, -1)), fmaxf(a->parallax_m, 1.0f)));
+            // Collimated dot (the parallax look): aimed, it stays near the aim line (the screen centre)
+            // while the housing sways and kicks around it - only DOT_FOLLOW of the gun's own axis (the
+            // sway, the kick) reaches it, a small reaction; before fully aimed it rides the gun's axis.
+            // Both at the parallax-free distance (the optic point through the viewmodel -> world mapping).
+            {
+                const float DOT_FOLLOW = 0.12f;
+                float dist = fmaxf(a->parallax_m, 1.0f);
+                vec3 on_axis = render_viewmodel_to_world(v3_madd(xf_point(opt, a->lens_pos), xf_dir(opt, v3(0, 0, -1)), dist));
+                if (cam && S.ads_t > 0.0f) {
+                    vec3 on_aim = v3_madd(cam->pos, dir_from_angles(cam->yaw, cam->pitch), dist);
+                    float k = 1.0f - (1.0f - DOT_FOLLOW) * saturate(S.ads_t);
+                    rs->dot_point = v3_lerp(on_aim, on_axis, k);
+                } else {
+                    rs->dot_point = on_axis;
+                }
+            }
+            if (cam) {   // sight_dot: where the dot is against the screen centre
+                vec3 cf = dir_from_angles(cam->yaw, cam->pitch), cr = right_from_yaw(cam->yaw), cu = v3_cross(cr, cf);
+                vec3 d = v3_norm(v3_sub(rs->dot_point, cam->pos)), g = rs->axis_fwd;
+                float k = (float)render_height() * 0.5f / tanf(cam->fov_deg * 0.5f * DG_DEG2RAD);
+                g_dot_px = v2(v3_dot(d, cr) / v3_dot(d, cf) * k, v3_dot(d, cu) / v3_dot(d, cf) * k);
+                g_axis_deg = v2(atan2f(v3_dot(g, cr), v3_dot(g, cf)) * DG_RAD2DEG, atan2f(v3_dot(g, cu), v3_dot(g, cf)) * DG_RAD2DEG);
+            }
             rs->reticle_moa = a->reticle.moa;
             rs->reticle_outer_moa = a->reticle.outer_moa;
             rs->reticle_shape = a->reticle.shape;
@@ -702,6 +729,7 @@ void sights_register(void) {
     S.dof_focus = cvar_reg_float("ads_dof_focus", 80.0f, 5.0f, 1000.0f, CVAR_LOCKED, "ADS depth of field: fixed focus distance (m)");
     S.dof_fstop = cvar_reg_float("ads_dof_fstop", 4.0f, 0.5f, 32.0f, CVAR_LOCKED, "ADS depth of field: f-stop");
     S.iron_blur = cvar_reg_float("ads_dof_near_blur", 3.5f, 0.0f, 16.0f, CVAR_LOCKED, "ADS near-field (weapon) blur with iron sights, CoC pixels (optics: their own value)");
+    cmd_register("sight_dot", cmd_sight_dot, "sight_dot: the red dot's offset from the screen centre (px) and the gun axis vs the view (deg), this frame");
     cmd_register("sight_test", cmd_sight_test, "sight_test align [weapon|all] [quit] | sweep | fov | parallax | aspect | net | dump: attachment / sight tests");
     cmd_register("sight_test_report", cmd_sight_test_report, "end sight_test fov and print the result");
     cmd_register("sight_pip_res", cmd_sight_pip_res, "sight_pip_res [optic multiplier]: scope PiP resolution per sight (pip_resolution x r_scope_pip_scale, bounded by the fidelity level) and the PiP size now; a value sets it live (not saved)");

@@ -11,7 +11,7 @@
     "camera": { "land_pitch": 25, "stiffness": 120, "damping_ratio": 0.6 },
     "idle": { "rot": 0.4, "pos": 0.0008, "f1": 0.35, "f2": 0.9, "noise": 0.15, "noise_hz": 0.25, "fade_in": 0.5, "fade_out": 0.2, "move_speed": 0.3, "crouch": 0.7, "hold_breath": 0.1 },
     "ads_transition": { "settle_pitch": 20, "settle_pos": 0.04, "fov_delta": 0, "ease": true },
-    "ads": { "look": [0.2, 0.1], "move": [0.2, 0.2], "bob": [0.12, 0.12], "air": [0.35, 0.3], "idle": [0.25, 0.25] },
+    "ads": { "look": [0.7, 0.4], "move": [0.2, 0.2], "bob": [0.12, 0.12], "air": [0.35, 0.3], "idle": [0.25, 0.25] },
     "layers": { "look": true, "move": true, "bob": true, "air": true, "idle": true },
     "weight": 0.5,
     "pivot_offset": [0, 0, 0],
@@ -63,7 +63,7 @@
       "move": { "stiffness": 95, "damping_ratio": 0.74 },
       "bob": { "y": 0.009 },
       "sprint_pose": { "rot": [-14, 27, 6], "in": 0.2, "out": 0.1 },
-      "ads": { "look": [0.15, 0.08], "bob": [0.1, 0.1], "idle": [0.2, 0.2] }
+      "ads": { "look": [0.55, 0.3], "bob": [0.1, 0.1], "idle": [0.2, 0.2] }
     },
     "crossbow": {
       "weight": 0.5,

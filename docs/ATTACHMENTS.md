@@ -285,9 +285,11 @@ The lens is analytic, one fullscreen triangle per pass, scissored to the lens:
 | `scope.frag` | Premultiplied over: the PiP image, or the full-screen vignette |
 
 **The red dot** is aimed at the convergence point (lens + axis × `parallax_m`). Any eye position
-sees it on the same target point, which makes it parallax-free at that distance. The axis is the
-optic's own, so the dot moves with the gun (sway, bob, the kick) instead of staying at the screen
-centre. It is sized in
+sees it on the same target point, which makes it parallax-free at that distance. Aimed, the dot stays near
+the aim line while the housing sways and kicks around it (the parallax look): only 12 % of the gun's
+own axis reaches the dot (`DOT_FOLLOW`, game_sights.c; firing moves it 3-5 px while the gun kicks ~2 deg,
+turning 2 px while the housing lags ~0.7 deg; ADS look sway `ads.look` in viewmodel_sway.json).
+Before fully aimed it rides the gun's axis. `sight_dot` logs the dot's offset and the gun axis. It is sized in
 MOA, drawn at least about 2.3 px wide with its energy spread, and emissive in exposed units. Its
 brightness is `sight_brightness`. Its glow is additive in exposed units, so it reads in the dark.
 
