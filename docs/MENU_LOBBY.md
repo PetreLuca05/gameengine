@@ -135,8 +135,12 @@ and the lobby stops being joinable when full or started without late join. Rich 
 
 ## Steam setup
 
-* Build with `STEAM_SDK_DIR` (the SDK's `sdk` folder); the build writes `steam_appid.txt` (480,
-  Spacewar) next to the exe. Without it the game is a LAN build ("LAN build (no Steam)").
+* Build with `STEAM_SDK_DIR` (the SDK's `sdk` folder), or unpack the Steamworks SDK so
+  `.toolchain/steamworks/sdk/public/steam/steam_api.h` exists (picked up when `STEAM_SDK_DIR` is
+  empty; re-run CMake). The build copies `steam_api64.dll` and writes `steam_appid.txt` (480,
+  Spacewar) next to the exe. Without the SDK the game is a LAN build ("LAN build (no Steam)"; the log
+  says `steam: LAN-only build`). With it the log says `steam: online as <name>` or why
+  `SteamAPI_Init` failed.
 * With Steam not running the menu is in offline / LAN mode: Steam lobbies, Friends, Steam hosting and
   invites are greyed with the reason; LAN discovery and direct IP work.
 * **Join through Steam:** the friends list "Join game", an accepted invite (overlay) and the

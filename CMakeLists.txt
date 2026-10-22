@@ -161,6 +161,10 @@ target_link_libraries(jolt_shim PUBLIC joltc PRIVATE Jolt)
 
 # ---------------------------------------------------------------- Steam (optional)
 set(DG_HAVE_STEAM OFF)
+# No STEAM_SDK_DIR given: use the SDK unpacked into the (git-ignored) toolchain folder, if there.
+if(DG_ENABLE_STEAM AND NOT STEAM_SDK_DIR AND EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/steamworks/sdk/public/steam/steam_api.h")
+  set(STEAM_SDK_DIR "${CMAKE_SOURCE_DIR}/.toolchain/steamworks/sdk" CACHE PATH "Path to the Steamworks SDK 'sdk' folder (optional)" FORCE)
+endif()
 if(DG_ENABLE_STEAM AND STEAM_SDK_DIR AND EXISTS "${STEAM_SDK_DIR}/public/steam/steam_api.h")
   set(DG_HAVE_STEAM ON)
   if(WIN32)
@@ -179,7 +183,8 @@ if(DG_ENABLE_STEAM AND STEAM_SDK_DIR AND EXISTS "${STEAM_SDK_DIR}/public/steam/s
   target_link_libraries(steam_shim PUBLIC "${STEAM_LIB}")
   message(STATUS "Deadground: Steam transport ENABLED (${STEAM_SDK_DIR})")
 else()
-  message(STATUS "Deadground: Steam transport disabled (LAN-only build)")
+  message(STATUS "Deadground: Steam transport disabled (LAN-only build): no Steamworks SDK. Unpack it so "
+                 ".toolchain/steamworks/sdk/public/steam/steam_api.h exists, or set STEAM_SDK_DIR, and re-run CMake")
 endif()
 
 # ---------------------------------------------------------------- shaders

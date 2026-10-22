@@ -176,7 +176,8 @@ static void cmd_connect_steam(int argc, const char **argv) {
 void net_steam_register_commands(void) {
     cmd_register("connect_lobby", cmd_connect_lobby, "join a Steam lobby by id (used by invites / rich presence)");
     cmd_register("connect_steam", cmd_connect_steam, "connect to a host by SteamID64");
-    dgs_init();
+    if (dgs_init()) log_info("steam: online as %s (%llu)", dgs_persona_name(), (unsigned long long)dgs_my_id());
+    else log_warn("steam: SteamAPI_Init failed: Steam not running, or steam_appid.txt / steam_api64.dll missing next to the exe; LAN only");
 }
 
 void net_steam_poll_idle(void) {
@@ -204,7 +205,9 @@ NetTransport *transport_steam_create(void) {
 bool net_steam_available(void) { return false; }
 void net_steam_invite(void) { log_info("steam: not available in this build"); }
 bool net_steam_in_lobby(void) { return false; }
-void net_steam_register_commands(void) {}
+void net_steam_register_commands(void) {
+    log_warn("steam: LAN-only build, compiled without the Steamworks SDK (docs/MENU_LOBBY.md \"Steam setup\")");
+}
 void net_steam_poll_idle(void) {}
 void net_steam_shutdown(void) {}
 
