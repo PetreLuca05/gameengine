@@ -4,7 +4,9 @@
 #   nightly: on the self-hosted Windows runner with the target GPU (labels: self-hosted, windows, gpu):
 #            build, the full audit, the all-fixes A/B image + state check, the regression gate (fails
 #            when a scene's CPU work or GPU p50 regresses more than 5 % against docs/perf/baseline.json,
-#            or when an image / state diff fails); the report and timelines are uploaded as artifacts.
+#            or when an image / state diff fails), the FPS benchmark (map devroom_vegetation) against
+#            docs/perf/bench_baseline.json (fails when a scene's fps or 1 % low drops more than 5 %);
+#            the reports and timelines are uploaded as artifacts.
 # Runner setup (once): register a runner on the game PC with those labels; give it the portable toolchain
 # by setting the repository variable DG_TOOLCHAIN to the folder holding b.sh (the .toolchain the
 # developer builds with), then run the workflow once with write_baseline: true.
@@ -65,12 +67,18 @@ jobs:
           cd build/bin
           printf 'perf_verify all devroom,horde500,night_lights 120 %s reps=1 settle=120 quit\n' "$PERF_OUT/verify" > "$PERF_OUT/verify_all.cfg"
           ./deadground.exe --test --nosound --log "$PERF_OUT/verify_all.log" --script "$PERF_OUT/verify_all.cfg" || true
+      - name: FPS benchmark (devroom_vegetation, Modern + Low)
+        run: BENCH_OUT="$PERF_OUT/bench" tools/perf_audit/run_bench.sh modern,low 600
       - name: Baseline
         if: github.event.inputs.write_baseline == 'true'
-        run: python tools/perf_audit/perf_audit.py ci "$PERF_OUT" --write-baseline --machine "$RUNNER_NAME"
+        run: |
+          python tools/perf_audit/perf_audit.py ci "$PERF_OUT" --write-baseline --machine "$RUNNER_NAME"
+          python tools/perf_audit/perf_audit.py bench "$PERF_OUT/bench" --write-baseline --machine "$RUNNER_NAME"
       - name: Regression gate
         if: github.event.inputs.write_baseline != 'true'
-        run: python tools/perf_audit/perf_audit.py ci "$PERF_OUT" --threshold 5 --verify "$PERF_OUT/verify/all"
+        run: |
+          python tools/perf_audit/perf_audit.py ci "$PERF_OUT" --threshold 5 --verify "$PERF_OUT/verify/all"
+          python tools/perf_audit/perf_audit.py bench "$PERF_OUT/bench" --threshold 5 --gate
       - name: Publish the report
         if: always()
         uses: actions/upload-artifact@v4
@@ -82,3 +90,4 @@ jobs:
             docs/perf/timeline/
             ${{ env.PERF_OUT }}/**/*.json
             ${{ env.PERF_OUT }}/verify/all/diff/
+            ${{ env.PERF_OUT }}/bench/bench_report.md

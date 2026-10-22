@@ -10,6 +10,9 @@
   perf_audit.py findings                   regenerate docs/perf/FINDINGS.md from docs/perf/fixes.json
   perf_audit.py ci <profile dir> [--baseline docs/perf/baseline.json] [--threshold 5] [--write-baseline]
       regression gate: exit 1 when a scene's CPU work or GPU p50 regressed more than threshold %
+  perf_audit.py bench <bench dir> [--baseline docs/perf/bench_baseline.json] [--threshold 5] [--gate] [--write-baseline]
+      the FPS benchmark (`perf_bench`, map devroom_vegetation): every scene's fps / 1 % low / CPU / GPU,
+      the 300 fps verdict, the change against the reference machine's baseline -> <dir>/bench_report.md
   perf_audit.py timeline <profile.json> <out.html>
 The tool never changes the engine: it reads profiles, screenshots, sources and assets."""
 import argparse
@@ -200,6 +203,100 @@ def cmd_budget(a):
     return 1 if fail else 0
 
 
+BENCH_BASELINE = os.path.join(ROOT, "docs", "perf", "bench_baseline.json")
+
+
+def bench_metrics(profiles):
+    """perf_bench profiles -> {scene/level: metrics}, plus TOUR/<level> over every frame of that level.
+    fps_avg = frames / time; fps_1low = the fps of the 99th percentile frame time (the "1 % low");
+    frame = the frame period (no frame cap in a bench), cpu = CPU work (waits removed), gpu = GPU frame."""
+    def m(f, w, g):
+        f = [x for x in f if x and x > 0]
+        if not f:
+            return None
+        return {"frames": len(f), "fps_avg": 1000.0 * len(f) / sum(f), "fps_1low": 1000.0 / pct(f, 99), "frame_p50_ms": median(f),
+                "frame_p99_ms": pct(f, 99), "cpu_p50_ms": median(w), "cpu_p99_ms": pct(w, 99), "gpu_p50_ms": median(g), "gpu_p99_ms": pct(g, 99)}
+    out, pooled = {}, {}
+    for p in profiles:
+        f, w, g = p.cpu_ms(), verify.cpu_work(p), p.gpu_frame_ms()
+        r = m(f, w, g)
+        if not r:
+            continue
+        out[p.key] = r
+        t = pooled.setdefault("TOUR/" + p.fidelity, ([], [], []))
+        t[0].extend(f), t[1].extend(w), t[2].extend(g)
+    for k, (f, w, g) in pooled.items():
+        out[k] = m(f, w, g)
+    return out
+
+
+def bench_report(profiles, budget_ms, base=None, threshold=5.0):
+    """The table (markdown) and the number of regressions past threshold % (fps avg or 1 % low)."""
+    cur = bench_metrics(profiles)
+    dev = profiles[0].gpu().get("device", "?") if profiles else "?"
+    rw = profiles[0].gpu().get("render_w", 0) if profiles else 0
+    rh = profiles[0].gpu().get("render_h", 0) if profiles else 0
+    lines = ["# FPS benchmark (devroom_vegetation)", "", "GPU %s, render %d x %d; 1 %% low = the fps of the 99th percentile frame time; "
+             "300 fps constant = frame p99 <= %.2f ms." % (dev, rw, rh, budget_ms), ""]
+    hdr = "| Scene | fps avg | 1 % low | frame p50 / p99 ms | CPU p50 / p99 ms | GPU p50 / p99 ms | bound | 300 fps |"
+    if base:
+        hdr += " vs baseline (avg / 1 % low) |"
+    lines += [hdr, "|" + "---|" * (hdr.count("|") - 1)]
+    regress = 0
+    try:   # the tour's order (scenes.json "bench")
+        with open(os.path.join(ROOT, "assets", "perf", "scenes.json"), encoding="utf-8") as f:
+            tour = json.load(f).get("bench", [])
+    except (OSError, ValueError):
+        tour = []
+    rank = lambda k: (k.startswith("TOUR"), tour.index(k.split("/")[0]) if k.split("/")[0] in tour else len(tour), k)   # noqa: E731
+    order = sorted(cur, key=rank)
+    for k in order:
+        r = cur[k]
+        bound = "GPU" if r["gpu_p50_ms"] > 0.85 * r["frame_p50_ms"] else "CPU"
+        row = "| %s | %.1f | %.1f | %.2f / %.2f | %.2f / %.2f | %.2f / %.2f | %s | %s |" % (
+            ("**%s**" % k) if k.startswith("TOUR") else k, r["fps_avg"], r["fps_1low"], r["frame_p50_ms"], r["frame_p99_ms"], r["cpu_p50_ms"],
+            r["cpu_p99_ms"], r["gpu_p50_ms"], r["gpu_p99_ms"], bound, "yes" if r["frame_p99_ms"] <= budget_ms else "no (x%.2f)" % (r["frame_p99_ms"] / budget_ms))
+        if base:
+            b = base.get(k)
+            if b:
+                da = 100.0 * (r["fps_avg"] - b["fps_avg"]) / b["fps_avg"]
+                dl = 100.0 * (r["fps_1low"] - b["fps_1low"]) / b["fps_1low"]
+                bad = da < -threshold or dl < -threshold
+                regress += bad
+                row += " %+.1f %% / %+.1f %%%s |" % (da, dl, " **REGRESSED**" if bad else "")
+            else:
+                row += " new |"
+        lines.append(row)
+    return "\n".join(lines) + "\n", regress, cur
+
+
+def cmd_bench(a):
+    profiles = [p for p in load_dir(a.dir) if p.scene.startswith(a.prefix)]
+    if not profiles:
+        print("bench: no perf_bench profiles under %s" % a.dir)
+        return 1
+    base = None
+    if not a.write_baseline and os.path.exists(a.baseline):
+        with open(a.baseline, encoding="utf-8") as f:
+            bj = json.load(f)
+        base = bj.get("scenes")
+        print("bench: baseline %s (%s, %s, %s)" % (a.baseline, bj.get("date"), bj.get("machine"), bj.get("gpu")))
+    text, regress, cur = bench_report(profiles, a.ms, base, a.threshold)
+    print(text)
+    with open(os.path.join(a.dir, "bench_report.md"), "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    if a.write_baseline:
+        with open(a.baseline, "w", encoding="utf-8", newline="\n") as f:
+            json.dump({"date": datetime.date.today().isoformat(), "machine": a.machine, "gpu": profiles[0].gpu().get("device", "?"),
+                       "render": [profiles[0].gpu().get("render_w", 0), profiles[0].gpu().get("render_h", 0)], "scenes": cur}, f, indent=1)
+            f.write("\n")
+        print("bench: baseline written (%d entries) -> %s" % (len(cur), a.baseline))
+        return 0
+    if regress:
+        print("bench: %d entr%s regressed more than %.1f %% against the baseline" % (regress, "y" if regress == 1 else "ies", a.threshold))
+    return 1 if (a.gate and regress) else 0
+
+
 def cmd_ci(a):
     profiles = load_dir(a.dir)
     cur = scene_metrics(profiles)
@@ -282,6 +379,16 @@ def main(argv=None):
     p.add_argument("dir")
     p.add_argument("--ms", type=float, default=1000.0 / 300.0, help="frame budget (default 3.33 ms: 300 fps)")
     p.set_defaults(fn=cmd_budget)
+    p = sub.add_parser("bench")
+    p.add_argument("dir")
+    p.add_argument("--baseline", default=BENCH_BASELINE, help="the reference machine's run (docs/perf/bench_baseline.json)")
+    p.add_argument("--threshold", type=float, default=5.0, help="a regression: fps avg or 1 %% low lower by more than this %%")
+    p.add_argument("--gate", action="store_true", help="exit 1 on a regression")
+    p.add_argument("--write-baseline", action="store_true", help="this run becomes the baseline")
+    p.add_argument("--machine", default=os.environ.get("COMPUTERNAME", os.environ.get("HOSTNAME", "unknown")))
+    p.add_argument("--prefix", default="dveg_", help="the bench scenes' id prefix")
+    p.add_argument("--ms", type=float, default=1000.0 / 300.0)
+    p.set_defaults(fn=cmd_bench)
     p = sub.add_parser("timeline")
     p.add_argument("profile")
     p.add_argument("out")

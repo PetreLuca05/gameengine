@@ -4,7 +4,65 @@
   "shots": 3,
   "_reset": "console lines run before every scene's setup: what a scene's setup may change that the others do not set",
   "reset": ["weather_clouds -1"],
+  "_bench": "perf_bench (docs/PERF_AUDIT.md \"FPS benchmark\"): these scenes back to back on one load of map devroom_vegetation, in this order (dveg_horde last: its zombies stay); camera_ground: the camera keys' y (an orbit's height) is above the ground under the camera",
+  "bench": ["dveg_hall", "dveg_overlook", "dveg_pine", "dveg_broadleaf", "dveg_meadow", "dveg_south", "dveg_horde"],
   "scenes": [
+    {
+      "id": "dveg_hall",
+      "desc": "FPS benchmark: the dev room hall, post corner and firing line with the valley outside (the devroom route)",
+      "map": "devroom_vegetation",
+      "setup": ["time_set 15:00", "time_pause 1", "weather_lock 1", "weather_set little_cloudy 0", "setpos 0 0 20"],
+      "camera_ground": true,
+      "camera": [[0, 1.8, 20, 0, -3], [0, 2.0, 2, -30, -4], [-12, 1.8, -14, -57, -5], [-22, 1.8, -24, -90, -3], [-18, 3.0, -5, -180, -6], [-10, 4, 30, -200, -10], [0, 1.8, 20, -360, -3]]
+    },
+    {
+      "id": "dveg_overlook",
+      "desc": "FPS benchmark: 30 m over the pond trail north of the dev room, panning from the pine to the broadleaf forest (the most foliage in view)",
+      "map": "devroom_vegetation",
+      "setup": ["time_set 15:00", "time_pause 1", "weather_lock 1", "weather_set little_cloudy 0", "setpos 20 5 -110"],
+      "camera_ground": true,
+      "camera": [[20, 30, -110, 30, -12], [20, 30, -110, -15, -12], [20, 30, -110, -60, -12]]
+    },
+    {
+      "id": "dveg_pine",
+      "desc": "FPS benchmark: into the pine forest (density 3.6, the densest zone) along the pond trail, eye height",
+      "map": "devroom_vegetation",
+      "setup": ["time_set 15:00", "time_pause 1", "weather_lock 1", "weather_set little_cloudy 0", "setpos -35 5 -255"],
+      "camera_ground": true,
+      "camera": [[-35, 1.7, -255, 25, -2], [-50, 1.7, -300, 15, -2], [-62, 1.7, -340, -10, -2], [-80, 1.7, -375, 40, -3], [-95, 1.7, -345, 120, -2]]
+    },
+    {
+      "id": "dveg_broadleaf",
+      "desc": "FPS benchmark: through the broadleaf forest (density 3.0, the GPU worst case at Modern), eye height",
+      "map": "devroom_vegetation",
+      "setup": ["time_set 15:00", "time_pause 1", "weather_lock 1", "weather_set little_cloudy 0", "setpos 75 5 -180"],
+      "camera_ground": true,
+      "camera": [[75, 1.7, -180, -75, -2], [115, 1.7, -200, -65, -2], [155, 1.7, -215, -30, -2], [190, 1.7, -240, 20, -2], [170, 1.7, -265, 110, -2]]
+    },
+    {
+      "id": "dveg_meadow",
+      "desc": "FPS benchmark: the meadow south of the broadleaf forest (grass, ground cover, bushes), eye height",
+      "map": "devroom_vegetation",
+      "setup": ["time_set 15:00", "time_pause 1", "weather_lock 1", "weather_set little_cloudy 0", "setpos 100 5 -335"],
+      "camera_ground": true,
+      "camera": [[100, 1.7, -335, -110, -2], [150, 1.7, -370, -100, -2], [200, 1.7, -410, -150, -3], [220, 1.7, -430, -200, -2]]
+    },
+    {
+      "id": "dveg_south",
+      "desc": "FPS benchmark: the south trail into the mixed forest, eye height",
+      "map": "devroom_vegetation",
+      "setup": ["time_set 15:00", "time_pause 1", "weather_lock 1", "weather_set little_cloudy 0", "setpos 0 5 100"],
+      "camera_ground": true,
+      "camera": [[0, 1.7, 100, 135, -2], [-50, 1.7, 150, 140, -2], [-115, 1.7, 225, 165, -2], [-140, 1.7, 270, 200, -2], [-110, 1.7, 300, 240, -2]]
+    },
+    {
+      "id": "dveg_horde",
+      "desc": "FPS benchmark: 300 zombies converging on the player at the pine forest edge (CPU: AI, animation, physics)",
+      "map": "devroom_vegetation",
+      "setup": ["time_set 15:00", "time_pause 1", "weather_lock 1", "weather_set little_cloudy 0", "setpos -35 5 -250", "spawn_horde 300 30 ring", "horde_target players"],
+      "camera_ground": true,
+      "orbit": { "radius": 12, "height": 3, "pitch": -10 }
+    },
     {
       "id": "devroom",
       "desc": "dev room hall, post corner, firing line (the bench_fidelity route)",

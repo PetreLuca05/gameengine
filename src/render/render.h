@@ -621,6 +621,7 @@ float render_fog_extinction(void);
 float render_direct_exposure_ev(void);                        // Engine Fidelity Off: the fixed (metered) exposure as EV100
 float render_stretch_factor(void);                            // r_stretch: horizontal stretch of the 3D view (1 = none)
 float render_gpu_frame_ms(void);                              // whole command buffer, GPU timestamps (last completed frame)
+const char *render_gpu_name(void);                            // the Vulkan device's name
 u64 render_gpu_memory_bytes(void);                            // every VMA allocation (images, buffers, pools)
 void render_graph_trim(void);                                 // drop pooled images the last graph didn't use (level switch)
 typedef struct RenderGraphReport {

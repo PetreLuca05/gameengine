@@ -332,6 +332,44 @@ outside the runs): absolute GPU milliseconds of separate runs varied up to 2x, s
   (the dev room -5 .. -10 %, the meadow -4 %, the pine forest -0.5 .. -5 %), docs/RENDERING_POST.md
   "Async compute".
 
+## FPS benchmark (devroom_vegetation)
+
+The FPS benchmark is **map `devroom_vegetation`** (the dev room by include in the vegetation valley,
+docs/ZOMBIE_MAP.md). The **reference machine** is the developer's PC, a mid-tier one (RTX 3060 Ti): its
+numbers are what an optimization is judged by. Other machines compare only against their own baseline.
+
+- **In the game:** console `perf_bench` (the player's own settings: `levels=current`). Or
+  `perf_bench levels=modern,low frames=600 settle=180 [refs] [quit]`.
+- **Scripted:** `tools/perf_audit/run_bench.sh [levels=modern,low] [frames=600] [--write-baseline | --gate]`.
+  A `--test` run has the default settings. The script runs the tour, then
+  `perf_audit.py bench <dir>` -> `<dir>/bench_report.md`.
+- **The tour** (`assets/perf/scenes.json` "bench", in order, one map load):
+  1. `dveg_hall`: the dev room route.
+  2. `dveg_overlook`: 30 m over the pond trail, panning from the pine to the broadleaf forest.
+  3. `dveg_pine`: the pine forest interior, density 3.6.
+  4. `dveg_broadleaf`: the broadleaf forest, the GPU worst case at Modern.
+  5. `dveg_meadow`.
+  6. `dveg_south`: the south trail into the mixed forest.
+  7. `dveg_horde`: 300 zombies at the pine forest edge (last: they stay).
+
+  The camera keys are heights above the ground (`camera_ground`).
+- **Unlike `perf_audit`:**
+  - The sim runs in real time as in play (no `dev_fixed_fps`: a 60 Hz tick every ~5th frame at 300 fps).
+  - The scenes share one map load.
+  - Each settle lasts at least 3 s, so streaming catches up after a move across the map.
+  - The camera path is indexed by frame, so every run renders the same views whatever its fps.
+- **Output:**
+  - Per scene and over the whole tour: average fps, 1 % low (the fps of the 99th percentile frame
+    time), frame / CPU work / GPU p50 and p99, GPU or CPU bound, and the 300 fps verdict
+    (frame p99 <= 3.33 ms).
+  - The log lines `perf_bench:` and `<dir>/bench.json` hold the same figures.
+  - One profile per scene: `perf_audit.py analyze` and `timeline` work on them.
+- **Baseline:** `docs/perf/bench_baseline.json`, written on the reference machine with
+  `run_bench.sh modern,low 600 --write-baseline` (then committed). `--gate` fails a scene or the tour
+  whose average or 1 % low fps dropped more than 5 %. The nightly CI runs it after the audit.
+- **A / B of one fix:** the `dveg_*` scenes are also `perf_audit` scenes, so
+  `perf_verify PF-xxxx dveg_pine,dveg_broadleaf` works (fixed step, images and state compared).
+
 ## Frame budget (300 fps)
 
 The goal set on 2026-10-22: 300 fps **constant** in dense foliage on the RTX 3060 Ti at the player's own

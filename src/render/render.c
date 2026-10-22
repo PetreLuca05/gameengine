@@ -3176,6 +3176,7 @@ const char *render_pass_name(int i) { return fg_pass_name(i); }
 float render_pass_ms(int i) { return fg_pass_ms(i); }
 u64 render_post_memory(void) { return fg_memory_bytes(); }
 float render_gpu_frame_ms(void) { return g_gpu_frame_ms; }
+const char *render_gpu_name(void) { return R ? R->gpu_props.deviceName : ""; }
 float render_fog_extinction(void) {
     const PostSettings *s = post_settings();
     if (R->env.fog_density <= 0.0f) return 0.0f;   // a level without fog
