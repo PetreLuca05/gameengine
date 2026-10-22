@@ -20,6 +20,7 @@
 #include "assets/assets.h"
 #include "world/season.h"
 #include "ui/globe/globe.h"
+#include "app/video.h"
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdio.h>
@@ -288,6 +289,10 @@ const char *mm_lobby_offline_text(void) {
 
 static void set_tab(int tab) {
     if (tab == M->tab || !tab_allowed(tab, NULL)) return;
+    // The Settings tab is the settings screen: opened (the display's pending state, the resolution
+    // list) and, like the pause menu's, saved when left.
+    if (M->tab == MT_SETTINGS) config_save(video_config_path());
+    if (tab == MT_SETTINGS) settings_open(-1);
     M->tab = tab;
     M->play_page = PP_MAIN;
     gui_set_focus(0);
@@ -297,6 +302,16 @@ static void set_tab(int tab) {
 
 static void draw_tabbar(GuiRect bar) {
     GuiRect tabs = mm_node(&M->shell, "tabs"), power = mm_node(&M->shell, "power");
+    // The tabs centred on the screen (gw_tabbar lays them out from its rect's left): their width
+    // measured like the widget does; the baseline across the whole bar.
+    {
+        GuiText tt = { gui_s(gui_tok("tab_text")), GW_SEMIBOLD, TH->text_dim, GUI_LEFT, TH->tracking_caps * 1.3f, true, false, 0 };
+        float total = 0, gap = gui_s(gui_tok("tab_gap"));
+        for (int i = 0; i < MT_COUNT; i++) total += gd_text_width(&tt, k_tab_names[i]) + (i ? gap : 0);
+        gd_rect(gui_rect(bar.x, tabs.y + tabs.h - 1, bar.w, 1), TH->panel_border);
+        float cx = gui_w() * 0.5f;
+        tabs = gui_rect(cx - total * 0.5f, tabs.y, total, tabs.h);
+    }
     const char *labels[MT_COUNT];
     bool en[MT_COUNT];
     const char *why[MT_COUNT];
@@ -308,7 +323,7 @@ static void draw_tabbar(GuiRect bar) {
     if (t != M->tab) set_tab(t);
     // Power: quit to desktop (confirm). Centred vertically in its column.
     float ps = TOK("mm_power");
-    GuiRect pr = { power.x + power.w - ps, bar.y + (bar.h - ps) * 0.5f, ps, ps };
+    GuiRect pr = { power.x, bar.y + (bar.h - ps) * 0.5f, ps, ps };
     if (gw_power(gui_id("mm_power"), pr, "Quit to desktop")) screens_confirm(CONFIRM_QUIT, "Quit to desktop?", lobby_active() && lobby_count(lobby_get()) > 1 ? "You will leave the party." : "Your settings and profile are saved.", 0);
 }
 

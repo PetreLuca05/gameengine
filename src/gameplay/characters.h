@@ -217,7 +217,8 @@ typedef struct CharPreviewIn {
     float head_top;              // the image height above the head top (fraction; 0 = assets/ui/char_preview.json's framing)
     u8 hold;                     // the held item's pose: 0 = char_preview.json's held.pose, 1 = the hip-fire hold (in game, standing still, looking ahead)
     float item_focus;            // 0..1: the camera blends from the framing to the held item (aimed at its centre, the lens
-    float item_fill;             //       narrowed until it spans item_fill of the image width; 0 = 0.5); the camera doesn't move
+    float item_fill;             //       narrowed until it spans item_fill of the image width; 0 = 0.5); the camera doesn't move;
+                                 //       the character turns so the item lies square to the camera, its barrel to the right
 } CharPreviewIn;
 TextureId chars_preview(World *w, int player_slot, const CharPreviewIn *in);
 TextureId chars_preview_cached(int target);

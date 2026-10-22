@@ -38,6 +38,7 @@ static struct {
     float head_y, bottom_y;    // framing heights of its idle pose (m above the feet)
     float hip_y, knee_y;
     float face_fix;            // turn squaring the idle's stance to the camera (rad)
+    float item_fix;            // turn squaring the held item to the camera at item_focus 1 (rad, learnt frame to frame)
     u64 frame;                 // engine frame of the last request (one evaluation per frame)
     CharPreviewRig rig;
     bool rig_loaded;
@@ -207,7 +208,7 @@ TextureId chars_preview(World *w, int player_slot, const CharPreviewIn *in) {
     c->slot = player_slot;
     if (pc) memcpy(c->parts, pc->parts, sizeof(c->parts));
     memcpy(c->worn, in->worn, sizeof(c->worn));
-    float yaw = rig->turn_deg * DG_DEG2RAD + in->yaw;
+    float yaw = rig->turn_deg * DG_DEG2RAD + in->yaw + PV.item_fix * saturate(in->item_focus);
     const ItemSockets *sock = NULL;
     Xform root = pv_pose(w, in, yaw, &sock);
     if (!PV.framed) return 0;
@@ -226,6 +227,12 @@ TextureId chars_preview(World *w, int player_slot, const CharPreviewIn *in) {
     }
     vec3 mn, mx;
     float f = saturate(in->item_focus);
+    if (held && f >= 0.99f) {
+        // Square the item to the camera: its barrel (-Z) to the image's right (-X, the camera looks
+        // down +Z), learnt over a few frames (the pose follows the turn a frame later).
+        vec3 fw = quat_rotate(iw.r, v3(0, 0, -1));
+        if (fw.x * fw.x + fw.z * fw.z > 1e-4f) PV.item_fix += 0.5f * wrap_angle(atan2f(-1.0f, 0.0f) - atan2f(fw.x, fw.z));
+    }
     if (held && f > 0.0f && item_model_bounds(w->items, in->held_item, &mn, &mx)) {
         // Close on the held item: the camera turns to its centre and the lens narrows until its longest
         // side spans item_fill of the image width (tan-space blend: a steady zoom).

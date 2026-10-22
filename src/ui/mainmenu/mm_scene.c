@@ -87,8 +87,8 @@ static const GameScene k_scene = {
 
 void mm_scene_register(void) { scene_register(&k_scene); }
 
-#define MM_TURN (25.0f * DG_DEG2RAD)   // the character's turn to its left (every tab)
-#define MM_SIDE (-90.0f * DG_DEG2RAD)   // Cosmetics > Items: facing the screen's left, the gun side-on
+#define MM_TURN (10.0f * DG_DEG2RAD)   // the character's turn to its left (every tab)
+#define MM_SIDE (90.0f * DG_DEG2RAD)   // Cosmetics > Items: facing the screen's right (the gun's right side to the camera; char_preview squares it)
 
 // The whole screen, the character centred, the same framing on every tab; Cosmetics > Items turns it
 // to face the left and closes the camera on the SMG (half the screen wide, centred). globe: the
