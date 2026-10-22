@@ -156,6 +156,7 @@ typedef struct HoldPointOutput {
     vec3 cast_from, cast_to;          // world, last collision cast (debug)
     bool cast_hit;
     vec3 sway_hip_rot, sway_hip_pos, sway_ads_rot;   // this tick's global sway (sway_check)
+    vec3 lb_hip_rot, lb_hip_pos, lb_ads_rot;         // its look lag + bob share
 } HoldPointOutput;
 
 void holdpoint_style_defaults(HoldPointStyle *s, const char *style_name);

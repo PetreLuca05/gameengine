@@ -357,15 +357,26 @@ void arms_layer_eval(const ArmsLayerDef *d, ArmsLayerState *st, const ArmsLayerI
     out->sight = in->has_item ? xf_point(item, in->sight) : v3(0, 0, 0);
     // Cosmetic sway (Weapon sway < 1): the pose's sway shown smaller - about the pivot at the hip, about
     // the sight aimed (the hold point turns it there).
+    // With the viewmodel sway on, the pose's look lag + bob are taken out entirely (the rest x the same k).
     mat4 Sw = mat4_identity();
     {
         float k = 1.0f - clampf(in->sway_scale, 0.0f, 1.0f);
-        if (k > 0.0f) {
-            quat rh = quat_conj(hp_euler_deg(v3_scale(in->sway_hip_rot, k * (1.0f - ads))));
-            quat ra = quat_conj(hp_euler_deg(v3_scale(in->sway_ads_rot, k * ads)));
-            Sw = about(pivot, quat_norm(quat_mul(ra, rh)), 1.0f, v3_scale(in->sway_hip_pos, -k * (1.0f - ads)));
+        vec3 hr = v3_scale(in->sway_hip_rot, k), hp = v3_scale(in->sway_hip_pos, k), ar = v3_scale(in->sway_ads_rot, k);
+        if (in->vm_on) {
+            hr = v3_add(hr, v3_scale(in->lb_hip_rot, 1.0f - k));
+            hp = v3_add(hp, v3_scale(in->lb_hip_pos, 1.0f - k));
+            ar = v3_add(ar, v3_scale(in->lb_ads_rot, 1.0f - k));
+        }
+        if (k > 0.0f || in->vm_on) {
+            quat rh = quat_conj(hp_euler_deg(v3_scale(hr, 1.0f - ads)));
+            quat ra = quat_conj(hp_euler_deg(v3_scale(ar, ads)));
+            Sw = about(pivot, quat_norm(quat_mul(ra, rh)), 1.0f, v3_scale(hp, -(1.0f - ads)));
         }
     }
+    // Viewmodel sway: its own rigid move about the pivot (the sight aimed: its ADS multipliers keep the
+    // sight near the centre).
+    mat4 W = mat4_identity();
+    if (in->vm_on) W = about(pivot, hp_euler_deg(in->vm_rot), 1.0f, in->vm_pos);
     // Cosmetic kick: the pose's kick shown smaller (Weapon kick < 1), plus the screen kick towards the eye.
     // Aimed, only the push: the hold point turns the gun about the sight there (and clamps irons), so
     // countering the raw rotation would move the reticle.
@@ -403,7 +414,7 @@ void arms_layer_eval(const ArmsLayerDef *d, ArmsLayerState *st, const ArmsLayerI
         float k = (in->lateral_scale - 1.0f) * cw;
         L = mat4_translate(v3(s.x * k, s.y * k, 0.0f));
     }
-    out->layer = mat4_mul(L, mat4_mul(C, mat4_mul(A, mat4_mul(E, mat4_mul(K, mat4_mul(Sw, mat4_mul(T, P)))))));
+    out->layer = mat4_mul(L, mat4_mul(C, mat4_mul(A, mat4_mul(E, mat4_mul(K, mat4_mul(W, mat4_mul(Sw, mat4_mul(T, P))))))));
     Xform eye = in->pose_eye;
     eye.s = v3(1, 1, 1);
     mat4 inv_eye = mat4_inverse_rigid(mat4_trs(eye.t, eye.r, v3(1, 1, 1)));

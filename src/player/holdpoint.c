@@ -493,6 +493,9 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     out->sway_hip_rot = so.hip_rot;
     out->sway_hip_pos = so.hip_pos;
     out->sway_ads_rot = so.ads_rot;
+    out->lb_hip_rot = so.lb_hip_rot;
+    out->lb_hip_pos = so.lb_hip_pos;
+    out->lb_ads_rot = so.lb_ads_rot;
     vec3 hip_rot = so.hip_rot, hip_pos = so.hip_pos, ads_sway = so.ads_rot;
     // Fire animation (src/anim/fire_anim.c): the gun kick + the screen kick along the view axis.
     float ks = s->kick_scale * (in->static_pose ? 0.0f : 1.0f);

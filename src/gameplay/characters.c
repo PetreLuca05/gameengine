@@ -119,7 +119,7 @@ typedef struct CharGlobals {
         HoldPointOutput hp[2];
         Xform view_cam[2];
         float view_ads[2];
-        vec3 kick_pos[2], kick_rot[2], view_sway_ads[2];
+        vec3 kick_pos[2], kick_rot[2], view_sway_ads[2], view_lb_ads[2];
         bool view_valid;
         u32 tick;
         int item_key;
@@ -1695,6 +1695,7 @@ static void fpd_push(World *w, CharacterInst *c, const ProcInput *pi, Xform root
     CG->fpd.kick_pos[0] = CG->fpd.kick_pos[1];
     CG->fpd.kick_rot[0] = CG->fpd.kick_rot[1];
     CG->fpd.view_sway_ads[0] = CG->fpd.view_sway_ads[1];
+    CG->fpd.view_lb_ads[0] = CG->fpd.view_lb_ads[1];
     CG->fpd.sa[1] = CG->fpd.cap;
     CG->fpd.cap.valid = false;
     root.s = v3s(c->def->scale);
@@ -1705,6 +1706,7 @@ static void fpd_push(World *w, CharacterInst *c, const ProcInput *pi, Xform root
     CG->fpd.kick_pos[1] = pi->item_kick_pos;
     CG->fpd.kick_rot[1] = pi->item_kick_rot;
     CG->fpd.view_sway_ads[1] = c->rt.proc.hp_view_valid ? c->rt.proc.hp_view_out.sway_ads_rot : v3(0, 0, 0);
+    CG->fpd.view_lb_ads[1] = c->rt.proc.hp_view_valid ? c->rt.proc.hp_view_out.lb_ads_rot : v3(0, 0, 0);
     CG->fpd.view_valid = c->rt.proc.hp_view_valid;
     CG->fpd.in = *pi;
     CG->fpd.in.capture = NULL;
@@ -1724,6 +1726,7 @@ static void fpd_push(World *w, CharacterInst *c, const ProcInput *pi, Xform root
         CG->fpd.kick_pos[0] = CG->fpd.kick_pos[1];
         CG->fpd.kick_rot[0] = CG->fpd.kick_rot[1];
         CG->fpd.view_sway_ads[0] = CG->fpd.view_sway_ads[1];
+        CG->fpd.view_lb_ads[0] = CG->fpd.view_lb_ads[1];
     }
     CG->fpd.item_key = pi->item ? pi->item_key : -1;
     CG->fpd.n = DG_MIN(CG->fpd.n + 1, 2);
@@ -2820,6 +2823,7 @@ static struct {
     float view_ads;              // the presentation hold point's ADS weight, interpolated
     vec3 kick_pos, kick_rot;     // the pose's gun kick, interpolated like the hold point (the arms layer's Weapon kick)
     vec3 sway_hip_rot, sway_hip_pos, sway_ads_rot;   // the hold points' sway, interpolated (the arms layer's Weapon sway)
+    vec3 lb_hip_rot, lb_hip_pos, lb_ads_rot;         // its look lag + bob share (the viewmodel sway supersedes it)
     bool view_valid;
     bool anchored[2];            // hand h is on a world anchor (ledge, vehicle control): drawn with the world camera
     float ikw;                   // the hold's hand IK weight this frame (the presentation follows clips below 1)
@@ -2929,6 +2933,9 @@ static void fp_prepare(World *w, CharacterInst *c, float alpha, float yaw, float
             FP.sway_hip_rot = v3_lerp(CG->fpd.hp[0].sway_hip_rot, CG->fpd.hp[1].sway_hip_rot, ht);
             FP.sway_hip_pos = v3_lerp(CG->fpd.hp[0].sway_hip_pos, CG->fpd.hp[1].sway_hip_pos, ht);
             FP.sway_ads_rot = v3_lerp(CG->fpd.view_sway_ads[0], CG->fpd.view_sway_ads[1], ht);
+            FP.lb_hip_rot = v3_lerp(CG->fpd.hp[0].lb_hip_rot, CG->fpd.hp[1].lb_hip_rot, ht);
+            FP.lb_hip_pos = v3_lerp(CG->fpd.hp[0].lb_hip_pos, CG->fpd.hp[1].lb_hip_pos, ht);
+            FP.lb_ads_rot = v3_lerp(CG->fpd.view_lb_ads[0], CG->fpd.view_lb_ads[1], ht);
             FP.view_valid = CG->fpd.view_valid;
         }
         // The interpolated pose is in the 'then' frame (before seat_fix re-attaches it to the vehicle
@@ -3309,6 +3316,9 @@ bool chars_fp_arms(CharsFpArms *o) {
     o->sway_hip_rot = FP.sway_hip_rot;
     o->sway_hip_pos = FP.sway_hip_pos;
     o->sway_ads_rot = FP.sway_ads_rot;
+    o->lb_hip_rot = FP.lb_hip_rot;
+    o->lb_hip_pos = FP.lb_hip_pos;
+    o->lb_ads_rot = FP.lb_ads_rot;
     // presented = move x drawn (proc_presented_move): hip and aimed alike, exactly onto the presented item.
     o->present = proc_presented_move(&FP.st, o->item_cam, FP.ikw);
     o->clip_w = FP.carry;

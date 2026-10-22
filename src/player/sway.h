@@ -59,6 +59,7 @@ typedef struct SwayInput {
 typedef struct SwayOut {
     vec3 hip_rot, hip_pos;            // deg / m (camera space), about the hip sway anchor
     vec3 ads_rot;                     // deg, about the sight (rotation only)
+    vec3 lb_hip_rot, lb_hip_pos, lb_ads_rot;   // the look lag + bob share of the above (the viewmodel sway supersedes it)
 } SwayOut;
 
 void sway_profile_defaults(SwayProfile *p);

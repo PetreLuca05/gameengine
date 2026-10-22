@@ -198,4 +198,8 @@ void sway_eval(SwayState *st, const SwayProfile *p, const SwayInput *in, SwayOut
     vec3 as_land = v3_add(land_rot, v3(-land_pos.y / lever * DG_RAD2DEG * 0.5f, 0, 0));
     float ads_k = optic * st->breath_s * stance * (1.0f + st->shake * 1.5f);
     out->ads_rot = v3_scale(v3_add(v3_add(v3_scale(as_breath, ma[0]), v3_scale(lag_rot, ma[1])), v3_add(v3_scale(as_bob, ma[2]), v3_scale(as_land, ma[3]))), ads_k);
+    // The look lag + bob share (src/player/weapon_sway.c draws its own in the arms layer instead).
+    out->lb_hip_rot = v3_scale(v3_add(v3_scale(lag_rot, mh[1] * gl), v3_scale(bob_rot, mh[2])), stance);
+    out->lb_hip_pos = v3_scale(v3_add(v3_scale(lag_pos, mh[1] * gl), v3_scale(bob_pos, mh[2])), stance);
+    out->lb_ads_rot = v3_scale(v3_add(v3_scale(lag_rot, ma[1]), v3_scale(as_bob, ma[2])), ads_k);
 }
