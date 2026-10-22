@@ -819,7 +819,7 @@ void game_frame(float dt) {
     handpose_system_poll();
     blender_open_poll();   // blender_open's output -> the console (game_blender.c)
     game_items_poll();     // a mesh exported from Blender -> reloaded (game_items.c)
-    if (!G->world) return;
+    if (!G->world || G->menu_world) return;   // the main menu's world stands still
     game_fire_frame();   // fire_compare driver
     bool ui_blocking = G->menu_open || G->inventory_open || G->container_open || G->bench_open || console_is_open();
     InputFrame f = input_frame();
@@ -924,14 +924,20 @@ static bool load_map(World *w, const char *map) {
 bool game_host(const char *map) { return game_host_ex(map, 0); }
 
 // flags: GH_KEEP_NET (a lobby session is starting its game: the connected players stay connected and
-// are welcomed after the load), GH_NO_AUTOHOST (main menu background: not reachable on the LAN).
+// are welcomed after the load), GH_NO_AUTOHOST (not reachable on the LAN), GH_MENU (the main menu: an
+// empty world - no level, never simulated or drawn - holding the local player for the menu's
+// character render and the lobby to host from).
 bool game_host_ex(const char *map, u32 flags) {
     if (!(flags & GH_KEEP_NET)) net_stop();
     destroy_world();
     G->world = world_create(true, &G->items);
     revive_world_reset(G->world);
     dg_strcpy(G->map, sizeof(G->map), map);
-    if (!load_map(G->world, map)) {
+    G->menu_world = (flags & GH_MENU) != 0;
+    if (G->menu_world) {
+        foliage_level_reset();
+        render_vgeo_set_level(NULL, 0);
+    } else if (!load_map(G->world, map)) {
         log_error("game: failed to load map '%s', falling back to devroom", map);
         destroy_world();
         G->world = world_create(true, &G->items);

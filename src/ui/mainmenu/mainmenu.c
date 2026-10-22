@@ -407,12 +407,12 @@ void mainmenu_lobby_settings_changed(void) {
 
 void mainmenu_enter(const char *message) {
     if (!M->inited) return;
-    // The background world: a local dev room nobody can join (the lobby hosts from it when asked).
+    // The menu's world: empty (no level, not simulated or drawn), nobody can join it; it holds the
+    // local player for the character render and the lobby hosts from it when asked.
     Game *g = game();
-    // A world a session played on is never reused: the menu always starts on a fresh dev room.
-    bool have_bg = !M->bg_played && g && g->world && g->mode == GM_HOST && !strcmp(g->map, "devroom") && net_role() != NET_CLIENT && lobby_state() != LS_IN_GAME;
+    bool have_bg = !M->bg_played && g && g->world && g->menu_world && g->mode == GM_HOST && net_role() != NET_CLIENT && lobby_state() != LS_IN_GAME;
     menus_close_all();
-    if (!have_bg) game_host_ex("devroom", GH_NO_AUTOHOST);
+    if (!have_bg) game_host_ex("menu", GH_NO_AUTOHOST | GH_MENU);
     M->bg_played = false;
     mm_scene_enter();
     screens_push(SCR_MAINMENU);

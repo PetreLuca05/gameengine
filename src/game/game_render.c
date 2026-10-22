@@ -874,6 +874,11 @@ static void flashlights_render(World *w, const RenderCamera *cam, const Player *
 
 void game_render(void) {
     World *w = G->world;
+    if (w && G->menu_world) {   // the main menu: its own backdrop + character render, no world
+        menus_draw();
+        console_draw();
+        return;
+    }
     if (!w) {
         ui_text_shadow(ui_width() * 0.5f, ui_height() * 0.45f, FONT_LARGE, UI_RGBA(230, 230, 230, 255), UI_ALIGN_CENTER,
                        net_role() == NET_CLIENT ? "Connecting..." : "No world loaded");

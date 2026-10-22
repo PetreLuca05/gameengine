@@ -26,7 +26,9 @@ launch ── splash (1.6 s, any key / click skips) ──▶ MAIN MENU
   background: a pale blue backdrop and your character alone on it (chars_preview, the inventory's
               studio render over the whole screen: your cosmetics and worn gear, the SMG in the
               hip-fire hold; mm_scene.c mm_background_draw), centred, turned 25 deg to its left, the
-              same on every tab; the dev room world runs under it, a fresh one after every session
+              same on every tab; no world behind it: the menu holds an empty world (game_host_ex
+              GH_MENU: no level, not simulated, not drawn) with the local player for the render and
+              for the lobby to host from
   top bar:  Play · Player · Cosmetics · Maps · Settings · Patch notes · Credits   account  [⏻]
             Q / E · LB / RB · 1-7 · mouse                         ⏻ ─▶ CONFIRM "Quit to desktop?"
             account: avatar · name · phone glyph + status (click: the Connect portal) · Online /

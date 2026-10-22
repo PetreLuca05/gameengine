@@ -31,6 +31,7 @@ typedef struct HurtMarker { vec3 from; float time; } HurtMarker;
 typedef struct Game {
     GameMode mode;
     World *world;
+    bool menu_world;          // GH_MENU: the main menu's empty world (no level; not simulated or drawn)
     int local_slot;
     char map[64];
     BasicMeshes meshes;
@@ -126,7 +127,7 @@ void game_config_loaded(void);   // after the config file: one-time settings mig
 void game_fidelity_settings_loaded(bool first_run);   // Engine Fidelity: after the config, before scripts
 void game_shutdown(void);
 bool game_host(const char *map);
-enum { GH_KEEP_NET = 1u << 0, GH_NO_AUTOHOST = 1u << 1 };
+enum { GH_KEEP_NET = 1u << 0, GH_NO_AUTOHOST = 1u << 1, GH_MENU = 1u << 2 };
 bool game_host_ex(const char *map, u32 flags);
 void game_frame(float dt);
 void game_render(void);
