@@ -171,6 +171,10 @@ typedef struct AttachmentDef {
     vec3 glass_tint;
     float dust, fresnel;
     float chromatic;          // scopes: edge chromatic aberration (pixels at the rim)
+    // Red dot window: refraction (deviation at the rim, mrad: lens power, edge distortion; ground
+    // bevel width as a fraction of the radius; dispersion: blue vs red), coating sheen, dot glow.
+    float power_mrad, edge_mrad, bevel, dispersion;
+    float coating, glow, glow_scatter;
     float dof_near_blur;      // ADS: near-field (weapon) blur, CoC pixels
     float pip_resolution;     // scopes: PiP resolution x r_scope_pip_scale, bounded by the fidelity level (docs/ATTACHMENTS.md)
     // Modifiers (applied by the host and by the predicting client from the same inventory).

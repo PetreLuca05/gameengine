@@ -1,10 +1,12 @@
 // Shared by the weapon sight shaders (src/render/post/post_sights.c, struct SightGpu).
-// Bindings: 0 viewmodel depth, 1 scope picture-in-picture, 2 noise, 13 sight params, 14 exposure.
+// Bindings: 0 viewmodel depth, 1 scope picture-in-picture, 2 noise, 3 scene colour (red dot glass:
+// what is behind the window, refracted), 13 sight params, 14 exposure.
 #include "post_common.glsl"
 
 layout(set = 0, binding = 0) uniform sampler2D vm_depth;
 layout(set = 0, binding = 1) uniform sampler2D pip_tex;
 layout(set = 0, binding = 2) uniform sampler2D noise_tex;
+layout(set = 0, binding = 3) uniform sampler2D scene_tex;
 layout(std430, set = 0, binding = 13) readonly buffer SightParams {
     vec4 lens;          // view-space lens centre, radius
     vec4 fwd;           // optic forward, kind (1 red dot, 2 scope PiP, 3 scope full screen)
@@ -21,6 +23,8 @@ layout(std430, set = 0, binding = 13) readonly buffer SightParams {
     vec4 vmdepth;       // vm proj m10, m14, debug view, ffp
     vec4 misc;          // tan(sight fov / 2), aspect, time, output height
     vec4 render;        // render w, h, output w, h
+    vec4 refr;          // red dot window: power (mrad at the rim), edge distortion (mrad), bevel width, dispersion
+    vec4 coat;          // red dot window: coating sheen, dot glow, glow scatter, -
     mat4 pip_from_view;
 } S;
 layout(std430, set = 0, binding = 14) readonly buffer Exposure { float e[16]; } X;

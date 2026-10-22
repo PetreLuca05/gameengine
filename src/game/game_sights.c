@@ -219,6 +219,13 @@ void sights_frame(const RenderCamera *cam, bool first_person) {
             rs->dust = a->dust;
             rs->fresnel = a->fresnel;
             rs->chromatic = a->chromatic;
+            rs->power_mrad = a->power_mrad;
+            rs->edge_mrad = a->edge_mrad;
+            rs->bevel = a->bevel;
+            rs->dispersion = a->dispersion;
+            rs->coating = a->coating;
+            rs->glow = a->glow;
+            rs->glow_scatter = a->glow_scatter;
             rs->zoom = a->zoom;
             rs->eye_box = a->eye_box;
             rs->eye_box_depth = a->eye_box_depth;
@@ -695,7 +702,7 @@ void sights_register(void) {
     S.pip_scale = cvar_reg_float("r_scope_pip_scale", 1.0f, 0.2f, 2.0f, CVAR_TIER, "scope picture-in-picture resolution (fraction of the render height x the sight's pip_resolution; > 1 supersamples, max 2048 px)");
     S.brightness = cvar_reg_float("sight_brightness", 1.0f, 0.25f, 2.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "red dot / illuminated reticle brightness");
     S.ads_debug = cvar_reg_bool("ads_debug", false, CVAR_LOCKED, "ADS overlay: the sight socket projected against the exact screen centre, world / hands FOV, sight zoom, sensitivity");
-    S.sight_debug = cvar_reg_int("sight_debug", 0, 0, 6, CVAR_LOCKED, "sight shader views: 1 lens mask, 2 PiP raw, 3 eye box, 4 reticle only, 5 glass only");
+    S.sight_debug = cvar_reg_int("sight_debug", 0, 0, 7, CVAR_LOCKED, "sight shader views: 1 lens mask, 2 PiP raw, 3 eye box, 4 reticle only, 5 glass only, 6 lens test, 7 red dot refraction (red) / bevel (green)");
     S.sens_mode = cvar_reg_string("ads_sens_mode", "monitor_distance", CVAR_ARCHIVE | CVAR_EDITABLE, "ADS sensitivity scaling: monitor_distance | fov_ratio | off");
     S.sens_coef = cvar_reg_float("ads_sens_coef", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "ADS sensitivity coefficient (monitor distance: fraction of the half screen height; fov_ratio: multiplier)");
     S.ads_dof = cvar_reg_bool("ads_dof", true, CVAR_TIER, "ADS depth of field once fully aimed: the world stays sharp, the weapon gets a slight blur");

@@ -1,8 +1,9 @@
 // Weapon sights after the depth of field (sharp, excluded from DoF) and before bloom (the
 // emissive dot / illuminated reticle blooms): shaders/sights/*.frag, fullscreen triangles
 // scissored to the lens.
-//   red dot   glass.frag (multiply: glass tint)  ->  reddot.frag (add: collimated MOA dot,
-//             fresnel reflection, dust)
+//   red dot   glass.frag (opaque, full screen into a copy of the scene: the window refracts what
+//             is behind it, edge distortion, dispersion, coating, fresnel / sun reflections, dust)
+//             ->  reddot.frag (add: collimated MOA dot, its glow and the LED light in the glass)
 //   scope     scope.frag (premultiplied over): the picture-in-picture image magnified through the
 //             ocular (chromatic aberration, eye box / scope shadow, reticle FFP / SFP). The
 //             magnification exists only there: the main view stays at the base FOV.
@@ -30,6 +31,8 @@ typedef struct SightGpu {
     vec4 vmdepth;       // vm proj m10, m14, debug view, ffp
     vec4 misc;          // tan(full-screen sight FOV / 2), aspect, time, output height
     vec4 render;        // render w, h, output w, h
+    vec4 refr;          // red dot window: power (mrad at the rim), edge distortion (mrad), bevel width, dispersion
+    vec4 coat;          // red dot window: coating sheen, dot glow, glow scatter, -
     mat4 pip_from_view; // main view space -> PiP clip
 } SightGpu;
 
@@ -40,7 +43,7 @@ static struct {
     float pip_fov;
     GpuBuffer buf[FRAMES_IN_FLIGHT];
     bool buf_ok;
-    FgRes target;
+    FgRes target, scene;   // scene: the red dot glass pass's input (the target is its copy)
     VkRect2D scissor;
     bool full;
 } SG;
@@ -100,22 +103,24 @@ void post_sights_shutdown(void) {
     SG.buf_ok = false;
 }
 
-static void bind_common(VkCommandBuffer cmd) {
+static void bind_common(VkCommandBuffer cmd, FgRes scene) {
     PostBind b = { 0 };
     pb_ubo(&b);
     pb_tex_fg(&b, 0, P.in.vm_depth, P.point);
     if (SG.pip >= 0) pb_tex_fg(&b, 1, SG.pip, P.linear);
     else pb_tex(&b, 1, P.black, P.linear);
     pb_tex(&b, 2, P.noise, P.linear_repeat);
+    if (scene >= 0) pb_tex_fg(&b, 3, scene, P.linear);
+    else pb_tex(&b, 3, P.black, P.linear);
     pb_buf(&b, 13, SG.buf[R->frame_slot].buffer, sizeof(SightGpu), false);
     pb_buf(&b, 14, P.exposure_buf.buffer, 64, false);
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_GRAPHICS);
 }
 
-static void draw_sight(VkCommandBuffer cmd, const char *frag, int blend) {
+static void draw_sight(VkCommandBuffer cmd, const char *frag, int blend, FgRes scene) {
     VkPipeline pipe = post_graphics_pipe(frag, VK_FORMAT_R16G16B16A16_SFLOAT, blend);
     if (!pipe) return;
-    bind_common(cmd);
+    bind_common(cmd, scene);
     u32 w, h;
     fg_extent(SG.target, &w, &h);
     VkRenderingAttachmentInfo ca = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
@@ -132,15 +137,17 @@ static void draw_sight(VkCommandBuffer cmd, const char *frag, int blend) {
     vkCmdBeginRendering(cmd, &ri);
     VkViewport vp = { 0, 0, (float)w, (float)h, 0, 1 };
     vkCmdSetViewport(cmd, 0, 1, &vp);
-    vkCmdSetScissor(cmd, 0, 1, &SG.scissor);
+    // The glass pass writes every pixel of the copy (outside the window: the scene unchanged).
+    VkRect2D full = { { 0, 0 }, { w, h } };
+    vkCmdSetScissor(cmd, 0, 1, scene >= 0 ? &full : &SG.scissor);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
     vkCmdDraw(cmd, 3, 1, 0, 0);
     vkCmdEndRendering(cmd);
 }
 
-static void exec_glass(VkCommandBuffer cmd, void *u) { (void)u; draw_sight(cmd, "sights/glass", 3); }
-static void exec_reddot(VkCommandBuffer cmd, void *u) { (void)u; draw_sight(cmd, "sights/reddot", 1); }
-static void exec_scope(VkCommandBuffer cmd, void *u) { (void)u; draw_sight(cmd, "sights/scope", 2); }
+static void exec_glass(VkCommandBuffer cmd, void *u) { (void)u; draw_sight(cmd, "sights/glass", 0, SG.scene); }
+static void exec_reddot(VkCommandBuffer cmd, void *u) { (void)u; draw_sight(cmd, "sights/reddot", 1, -1); }
+static void exec_scope(VkCommandBuffer cmd, void *u) { (void)u; draw_sight(cmd, "sights/scope", 2, -1); }
 
 // Lens bounds on screen (viewmodel projection) -> scissor; false if behind / off screen.
 static bool lens_scissor(const SightGpu *g, u32 w, u32 h) {
@@ -200,19 +207,29 @@ FgRes post_sights_build(FgRes color) {
     fg_extent(color, &w, &h);
     g->misc = v4(tanf(fmaxf(s->sight_fov, 0.5f) * 0.5f * DG_DEG2RAD), (float)w / (float)DG_MAX(1u, h), P.in.time, (float)h);
     g->render = v4((float)P.in.render_w, (float)P.in.render_h, (float)w, (float)h);
+    g->refr = v4(s->power_mrad, s->edge_mrad, s->bevel, s->dispersion);
+    g->coat = v4(s->coating, s->glow, s->glow_scatter, 0.0f);
     g->pip_from_view = SG.pip_from_view;
     SG.target = color;
+    SG.scene = -1;
     // Full screen: the raw PiP debug view.
     SG.full = s->debug == 2;
     if (SG.full) SG.scissor = (VkRect2D){ { 0, 0 }, { w, h } };
     else if (!lens_scissor(g, w, h)) return color;
     if (s->kind == RSIGHT_REDDOT) {
+        // Refraction needs what is behind the window: the glass pass reads the scene and writes a copy.
+        FgTexDesc od = { "sight_out", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_ABS, w, h, 1, 0, 0 };
+        SG.scene = color;
+        SG.target = fg_texture(&od);
         int p0 = fg_pass("sight_glass", exec_glass, NULL);
         fg_read(p0, P.in.vm_depth, FG_SAMPLED);
-        fg_write(p0, color, FG_COLOR);
+        fg_read(p0, color, FG_SAMPLED);
+        fg_write(p0, SG.target, FG_COLOR);
         int p1 = fg_pass("sight_reddot", exec_reddot, NULL);
         fg_read(p1, P.in.vm_depth, FG_SAMPLED);
-        fg_write(p1, color, FG_COLOR);
+        fg_write(p1, SG.target, FG_COLOR);
+        if (p0 < 0 || p1 < 0) return color;
+        return SG.target;
     } else {
         int p0 = fg_pass("sight_scope", exec_scope, NULL);
         fg_read(p0, P.in.vm_depth, FG_SAMPLED);

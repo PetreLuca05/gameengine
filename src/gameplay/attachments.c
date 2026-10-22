@@ -121,6 +121,13 @@ static void parse_attachment(AttachmentDef *a, const cJSON *j, const char *file)
     a->dust = jnum(l, "dust", 0.25f);
     a->fresnel = jnum(l, "fresnel", 0.04f);
     a->chromatic = jnum(l, "chromatic", 1.5f);
+    a->power_mrad = jnum(l, "power_mrad", 3.0f);
+    a->edge_mrad = jnum(l, "edge_mrad", 8.0f);
+    a->bevel = clampf(jnum(l, "bevel", 0.12f), 0.01f, 0.5f);
+    a->dispersion = clampf(jnum(l, "dispersion", 0.08f), 0.0f, 0.5f);
+    a->coating = clampf(jnum(l, "coating", 0.5f), 0.0f, 1.0f);
+    a->glow = jnum(r, "glow", 1.0f);
+    a->glow_scatter = jnum(r, "glow_scatter", 1.0f);
     a->dof_near_blur = jnum(j, "ads_dof_near_blur", a->slot == ATT_OPTIC ? 4.0f : 0.0f);
     a->pip_resolution = clampf(jnum(j, "pip_resolution", 1.0f), 0.1f, 4.0f);
     const cJSON *m = cJSON_GetObjectItemCaseSensitive(j, "modifiers");

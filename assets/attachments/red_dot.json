@@ -17,6 +17,8 @@
     "moa": 2.0,
     "color": [1.0, 0.05, 0.02],
     "brightness": 1.0,
+    "glow": 1.0,
+    "glow_scatter": 1.0,
     "parallax_m": 50
   },
   "lens": {
@@ -24,7 +26,12 @@
     "radius": 0.0105,
     "tint": [0.88, 0.96, 1.0],
     "dust": 0.3,
-    "fresnel": 0.05
+    "fresnel": 0.05,
+    "power_mrad": 3.0,
+    "edge_mrad": 8.0,
+    "bevel": 0.12,
+    "dispersion": 0.08,
+    "coating": 0.5
   },
   "ads_dof_near_blur": 3.5,
   "modifiers": {

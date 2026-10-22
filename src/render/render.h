@@ -622,6 +622,8 @@ typedef struct RenderSight {
     // Glass
     vec3 tint;
     float dust, fresnel, chromatic;
+    float power_mrad, edge_mrad, bevel, dispersion;   // red dot window refraction (glass.frag)
+    float coating, glow, glow_scatter;                // red dot coating sheen, dot halo, LED light in the glass
     // Scopes
     float zoom;                   // magnification inside the lens (relative to the base FOV)
     float base_fov;               // the world camera's base FOV (sv_fov): the zoom reference

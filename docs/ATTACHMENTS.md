@@ -57,6 +57,7 @@ Attachment space uses the item convention: -Z points forward (along the barrel),
 | `ffp` | First focal plane |
 | `illuminated` | Illuminated reticle |
 | `parallax_m` | Red dot: the parallax-free distance |
+| `glow`, `glow_scatter` | Red dot: the dot's halo / starburst, and the LED light picked up by the glass (red veil, lit dust); 1 = default |
 
 `lens` keys:
 
@@ -67,6 +68,10 @@ Attachment space uses the item convention: -Z points forward (along the barrel),
 | `eye_box`, `eye_box_depth` | Scope eye-box tolerances, lateral and along the axis, in metres |
 | `tint`, `dust`, `fresnel` | Glass |
 | `chromatic` | Rim chromatic aberration in pixels |
+| `power_mrad`, `edge_mrad` | Red dot window refraction: deviation at the rim in mrad from the lens power (linear in the height, Prentice's rule) and from the edge distortion (grows as r^5; 3x that across the bevel) |
+| `bevel` | Red dot: the ground edge band, a fraction of the radius (strong bending, dark edge, sun glint) |
+| `dispersion` | Red dot: blue bends this much more than green, red this much less (colour fringes at the rim) |
+| `coating` | Red dot: thin-film sheen on the reflections (hue slides with the angle), 0..1 |
 
 `modifiers` keys: `ads_time`, `sway_scale`, `recoil_vertical`, `recoil_horizontal`,
 `camera_kick`, `viewmodel_kick`, `spread_hip`, `spread_ads`, `damage`, `range`, `mag_size`,
@@ -275,14 +280,14 @@ The lens is analytic, one fullscreen triangle per pass, scissored to the lens:
 
 | Shader | What it draws |
 |---|---|
-| `glass.frag` | Multiply blend: the window's coated-glass tint, dust specks dimming it |
-| `reddot.frag` | Additive: a collimated MOA dot, the fresnel sky reflection, lit dust |
+| `glass.frag` | Opaque, full screen into a copy of the scene (`sight_out`): the window refracts what is behind it (lens power, edge distortion, the ground bevel, dispersion), two-face fresnel transmission through the coating tint (longer path at grazing angles and through the rim, dark ground edge), sky and sun reflections with a thin-film sheen, dust |
+| `reddot.frag` | Additive: a collimated MOA dot with a hot core, its glow (halo, faint starburst) and the LED light in the glass (red veil, dust lit red); not refracted (the coating reflects it) |
 | `scope.frag` | Premultiplied over: the PiP image, or the full-screen vignette |
 
 **The red dot** is aimed at the convergence point (lens + axis × `parallax_m`). Any eye position
 sees it on the same target point, which makes it parallax-free at that distance. It is sized in
 MOA, drawn at least about 2.3 px wide with its energy spread, and emissive in exposed units. Its
-brightness is `sight_brightness`.
+brightness is `sight_brightness`. Its glow is additive in exposed units, so it reads in the dark.
 
 **The scope** maps each main-view direction at tangent `t` from the optic axis to `t / k` in the
 scope image, where `k = zoom · tan(main/2) / tan(base/2)`. Effects:
@@ -388,7 +393,7 @@ ADS DoF switches on exactly while the aim is complete (`ads_dof`):
 | `attach [slot] [id/none]` | Equipped weapon; no arguments lists the slots and options |
 | `bench` | Toggle the bench UI |
 | `ads_debug 1` | The sight socket projected against the exact screen centre (px, mm off axis, degrees, eye relief), world / hands FOV, sight zoom, PiP FOV, PiP size and the screen pixels it covers, sensitivity, DoF mode |
-| `sight_debug 1..6` | 1 lens mask, 2 raw PiP, 3 eye box, 4 reticle only, 5 glass only, 6 lens hit / occlusion |
+| `sight_debug 1..7` | 1 lens mask, 2 raw PiP, 3 eye box, 4 reticle only, 5 glass only, 6 lens hit / occlusion, 7 red dot refraction (red) / bevel (green) |
 | `cl_fov` | World camera vertical FOV (50..120, default 75; Settings "Field of view") |
 | `cl_ads_world_zoom` | ADS world zoom of the irons / red dots against the ADS base (tangent ratio 1..1.5, default 1.15, not saved, no Settings slider); sights override it with `world_zoom` |
 | `sv_fov`, `sv_fov_max`, `sv_fov_max_aspect` | Host override of every player's FOV (0 = off), cap of `cl_fov` (0 = none), the widest Hor+ aspect (16:9; 0 = unlimited); replicated |
