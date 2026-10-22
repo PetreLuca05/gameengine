@@ -10,7 +10,7 @@
         { "id": "world", "label": "World", "prefixes": ["map", "world_", "time_", "tod_", "weather", "season", "sky_", "env_", "foliage_", "wind_", "water_", "swim_", "buoy_", "ow_", "poi_", "scene", "despawn", "spawn", "grass_", "terrain_", "ground_"] },
         { "id": "rendering", "label": "Rendering", "prefixes": ["r_", "post_", "look", "fidelity", "screenshot", "photomode", "nightvision", "bake_", "perf_", "prof_", "shadow_", "shadows_", "sun_shadow", "light_shadow", "classic_", "lod_", "tex_", "item_"] },
         { "id": "vfx", "label": "Effects", "prefixes": ["vfx_", "fx_", "gore_", "flesh_"] },
-        { "id": "animation", "label": "Animation", "prefixes": ["anim_", "char_", "character_", "hitbox_", "ragdoll"] },
+        { "id": "animation", "label": "Animation", "prefixes": ["anim_", "char_", "character_", "hitbox_", "ragdoll", "skin_"] },
         { "id": "zombies", "label": "Zombies", "prefixes": ["horde_", "zombie_"] },
         { "id": "vehicles", "label": "Vehicles", "prefixes": ["vehicle", "veh_"] },
         { "id": "network", "label": "Network", "prefixes": ["net_", "sv_", "lobby", "connect", "host", "disconnect", "lan_"] },

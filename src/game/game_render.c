@@ -248,6 +248,7 @@ void game_render_init(void) {
     ground_ref_register();
     fp_framing_register();
     char_preview_register();
+    skin_audit_register();
     items_game_register();
     blender_open_register();
     weather_register();

@@ -249,7 +249,7 @@ static Xform file_bind(const SkmBone *b) { return b->has_fix ? xf_mul(b->bind_de
 // the ground. With the skeleton's joint positions instead, a longer or shorter segment pinched or
 // overlapped at every joint (elbows, knees, shoulders, hips). Bones the mesh lacks use the skeleton's
 // own offsets.
-static void proportioned_world(const SkeletalMesh *m, const SkeletonInstance *si, Xform *out) {
+void skm_proportioned_world(const SkeletalMesh *m, const SkeletonInstance *si, Xform *out) {
     const Skeleton *s = si->asset ? &si->asset->skel : NULL;
     int n = si->count;
     if (!s) { memcpy(out, si->world, sizeof(Xform) * (size_t)n); return; }
@@ -302,7 +302,7 @@ int skm_gather_palette(const SkeletalMesh *m, const SkeletonInstance *si, const 
     Xform mo[SKM_MAX_BONES];
     if (per_bone(m)) {
         static DG_THREAD_LOCAL Xform pw[ANIM_MAX_BONES];
-        proportioned_world(m, si, pw);
+        skm_proportioned_world(m, si, pw);
         for (int j = 0; j < m->bone_count; j++) {
             const SkmBone *b = &m->bones[j];
             mo[j] = b->skel >= 0 && b->skel < si->count ? pw[b->skel] : mesh_only_world(m, pw, leaf_local, mo, j);
@@ -336,7 +336,7 @@ Xform skm_bone_world(const SkeletalMesh *m, const SkeletonInstance *si, int mesh
     Xform mo[SKM_MAX_BONES];
     static DG_THREAD_LOCAL Xform pw[ANIM_MAX_BONES];
     const Xform *world = si->world;
-    if (per_bone(m)) { proportioned_world(m, si, pw); world = pw; }
+    if (per_bone(m)) { skm_proportioned_world(m, si, pw); world = pw; }
     for (int j = 0; j <= mesh_bone && j < m->bone_count; j++) {
         if (m->bones[j].skel >= 0) mo[j] = world[m->bones[j].skel];
         else mo[j] = mesh_only_world(m, world, NULL, mo, j);

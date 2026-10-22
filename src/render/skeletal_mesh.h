@@ -117,6 +117,9 @@ int skm_gather_palette(const SkeletalMesh *m, const SkeletonInstance *si, const 
 bool skm_palette_equal(const SkeletalMesh *a, const SkeletalMesh *b);
 // World transform of a mesh bone (skeleton bones: the instance's; mesh-only: through their parents).
 Xform skm_bone_world(const SkeletalMesh *m, const SkeletonInstance *si, int mesh_bone);
+// A per-bone retarget mesh's bone world transforms in its own proportions (the skeleton's rotations, the
+// mesh's bone lengths, the arms reaching the skeleton's hands); other meshes: the skeleton's.
+void skm_proportioned_world(const SkeletalMesh *m, const SkeletonInstance *si, Xform *out);
 // Mesh-local socket ("backpack" on one jacket) in world space.
 bool skm_socket_world(const SkeletalMesh *m, const SkeletonInstance *si, const char *name, Xform *out);
 
