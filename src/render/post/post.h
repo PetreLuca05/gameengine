@@ -52,6 +52,9 @@ void post_volumetrics(void);                       // volumetric froxels (they s
 void post_sky(void);                               // after the opaque scene: procedural sky on empty pixels
 void post_scope_sky(FgRes color, FgRes depth, mat4 inv_vp, vec3 cam);
 void post_view_sky(int view, FgRes color, FgRes depth, mat4 inv_vp, vec3 cam);   // phone camera views   // the same sky into the scope PiP target
+// The thermal scope sensor (post_thermal.c, docs/NIGHT_OPTICS.md) on the thermal PiP (radiance + depth):
+// returns the display image (palette, OSD) that replaces the PiP.
+FgRes post_thermal_build(FgRes pip, FgRes depth, mat4 inv_vp, vec3 cam);
 // Weapon sight of this frame (post_sights.c): drawn after the DoF, before bloom.
 void post_set_sight(const RenderSight *s, FgRes pip, mat4 pip_from_view, mat4 vm_proj, float pip_fov);
 bool post_sights_ads_dof(float *focus, float *fstop, float *near_blur);   // ADS depth of field active (complete aim)

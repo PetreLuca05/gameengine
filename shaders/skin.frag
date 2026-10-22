@@ -15,6 +15,7 @@ layout(location = 10) flat in uint v_normal_scale;
 #define PBR_PARAMS uvec4(v_normal_scale, floatBitsToUint(1.0), 0x00FFFFFFu, 0u)   // AO byte 0 (render/material_ao.h)
 #define PBR_MAPS
 
+#define LIT_THERMAL_BODY   // thermal scope: a character's surface comes from its heat volumes
 #define MAT_COLOR v_mat_color
 #define MAT_PARAMS vec4(v_mat_params.xyz, 1.0)
 #define MAT_FLAGS v_mat_flags

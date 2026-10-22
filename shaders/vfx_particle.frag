@@ -9,6 +9,7 @@
 #include "common.glsl"
 #define VFX_SET 1
 #include "vfx_common.glsl"
+#include "thermal.glsl"
 
 layout(push_constant) uniform Push { uint mode; uint pad0, pad1, pad2; } pc;   // pad0 = 1: scope picture-in-picture
 layout(location = 0) in vec3 v_uv_a;
@@ -109,6 +110,24 @@ void main() {
     if (mode != RM_DISTORT && e.tex_uv.z > e.tex_uv.x) {
         vec3 straight = tex.a > 1e-4 ? tex.rgb / tex.a : vec3(0);
         tex.rgb = pow(straight, vec3(2.2)) * tex.a;
+    }
+    // Thermal scope PiP (docs/NIGHT_OPTICS.md): additive light (flashes, sparks, flames) is hot gas,
+    // alpha particles (smoke, dust, mist) sit at the air temperature and are mostly transparent in LWIR
+    // (thin smoke passes; a dense cloud still hides); emissive ones (fire) are hot.
+    if (frame.thermal.x > 0.5) {
+        if (mode == RM_DISTORT) discard;
+        if (mode == RM_ADD) {
+            float a = clamp(dot(tex.rgb, vec3(0.33)) * v_color.a * fade * emissive * 0.15, 0.0, 1.0);
+            out_color = vec4(th_radiance(900.0) * a, 0.0, 0.0, 0.0);
+            return;
+        }
+        float ta = tex.a * v_color.a * fade;
+        if (ta < 0.002) discard;
+        float hot = clamp(emissive * 0.5, 0.0, 1.0);
+        float t = mix(frame.thermal.y, 650.0, hot);
+        ta *= mix(0.3, 1.0, hot);
+        out_color = vec4(th_radiance(t) * ta, 0.0, 0.0, ta);
+        return;
     }
     if (mode == RM_DISTORT) {
         vec2 n = tex.rg * 2.0 - 1.0;

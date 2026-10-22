@@ -35,6 +35,7 @@ static struct {
     FgRes color, normal, nir, flux, halo, hist_in, hist_out, tube, out;
     FgRes nir_img;                     // this frame's near-IR image
     float gain, f_out, f_flux, halo_uv[2];
+    float stretch;                     // the field's horizontal stretch to the screen's width
     int quality;
     u32 frame;
     Cvar *quality_cv;
@@ -111,7 +112,7 @@ static void exec_reduce(VkCommandBuffer cmd, void *u) {
     pb_buf(&b, 13, N.buf.buffer, 64, false);
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
     NvgVariant v = var();
-    float p[8] = { N.f_flux, (float)v.tubes, v.circle_deg, v.tube_sep_deg, v.ebi };
+    float p[8] = { N.f_flux, (float)v.tubes, v.circle_deg, v.tube_sep_deg, v.ebi, N.stretch };
     push(cmd, p, 8, NULL, 0);
     post_dispatch(cmd, "nvg_reduce", 16, 16, 1, 16);
     post_buffer_barrier(cmd);
@@ -182,7 +183,7 @@ static void exec_display(VkCommandBuffer cmd, void *u) {
         N.f_out, (float)v.tubes, v.circle_deg, v.tube_sep_deg,
         v.phosphor[0], v.phosphor[1], v.phosphor[2], P.set.nvg.floor,
         P.set.nvg.amount, mtf, N.quality >= 1 ? 1.0f : 0.0f, fg_valid(N.normal) ? 1.0f : 0.0f,
-        (float)(3 + (P.set.nvg.seed % 5u)), per * (N.quality >= 3 ? 1.0f : 1.0f), 0.0f, 0.0f,
+        (float)(3 + (P.set.nvg.seed % 5u)), per, N.stretch, 0.0f,
     };
     u32 uu[4] = { P.set.nvg.seed };
     push(cmd, p, 16, uu, 4);
@@ -235,6 +236,7 @@ FgRes post_nvg_build(FgRes color, FgRes nir, FgRes normal) {
     // the tube's internal resolution: tube_px across one circle (less at Low), never above the output
     u32 ow = P.in.output_w, oh = P.in.output_h;
     N.f_out = P.in.proj.m[0] * (float)ow * 0.5f;
+    N.stretch = nvg_stretch(&v, (float)ow, 2.0f * atanf(1.0f / fmaxf(P.in.proj.m[0], 1e-4f)) * 57.29578f);
     float circle_px = 2.0f * N.f_out * tanf(v.circle_deg * 0.5f * 0.017453293f);
     float tube_px = v.tube_px * (N.quality == 0 ? 0.5f : N.quality == 1 ? 0.75f : 1.0f);
     float scale = DG_CLAMP(tube_px / fmaxf(circle_px, 1.0f), 0.25f, 1.0f);

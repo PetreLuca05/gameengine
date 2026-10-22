@@ -431,6 +431,7 @@ bool post_init(void) {
     post_textures_init();
     post_looks_init();
     post_nvg_init();
+    post_thermal_init();
     post_settings_default(&P.set);
     P.pending = P.set;
     P.ok = true;
@@ -452,6 +453,7 @@ void post_shutdown(void) {
     post_weather_shutdown();
     post_looks_shutdown();
     post_nvg_shutdown();
+    post_thermal_shutdown();
     post_textures_shutdown();
     vkDestroySampler(R->device, P.linear, NULL);
     vkDestroySampler(R->device, P.linear_repeat, NULL);

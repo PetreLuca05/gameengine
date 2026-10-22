@@ -1,0 +1,59 @@
+#version 450
+// Thermal scope sensor, the core (docs/NIGHT_OPTICS.md "Thermal sensor"), at the microbolometer's
+// resolution (384 x 288 / 640 x 512 core: its centre square):
+//   sky          empty pixels: the apparent sky temperature along the ray (cold at the zenith)
+//   optics       germanium lens blur (lambda ~10 um: a larger Airy disc than visible light)
+//   DDE          digital detail enhancement: the bright / dark edge halo of thermal cores
+//   NETD         temporal noise (~45 mK)
+//   fixed pattern  per-pixel and column offsets that drift since the last NUC
+//   smear        the bolometer's time constant: hot moving things drag a trail
+//   NUC          while the shutter calibrates, the last image holds
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+#include "thermal_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D pip_tex;
+layout(set = 0, binding = 1) uniform sampler2D depth_tex;
+layout(set = 0, binding = 2) uniform sampler2D history_tex;
+layout(set = 0, binding = 8, r32f) uniform writeonly image2D dst;
+
+float fetch(ivec2 p, ivec2 size) {
+    p = clamp(p, ivec2(0), size - 1);
+    float d = texelFetch(depth_tex, p, 0).r;
+    if (d < 1.0) return texelFetch(pip_tex, p, 0).r;
+    vec2 uv = (vec2(p) + 0.5) / vec2(size);
+    vec4 w = T.inv_vp * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+    vec3 dir = normalize(w.xyz / w.w - T.cam.xyz);
+    float t = dir.y <= 0.0 ? T.head.z : T.head.z - T.head.x * pow(dir.y, T.head.y);
+    return tc_radiance(t);
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(dst);
+    if (p.x >= size.x || p.y >= size.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(size);
+    float prev = texelFetch(history_tex, p, 0).r;
+    if (T.flags.x > 0.5 && T.flags.z > 0.5) { imageStore(dst, p, vec4(prev)); return; }   // NUC: frozen
+    // lens blur (3 x 3) and a wider box for the detail enhancement
+    float b3 = 0.0, w3 = 0.0, b5 = 0.0;
+    for (int j = -2; j <= 2; j++)
+        for (int i = -2; i <= 2; i++) {
+            float v = fetch(p + ivec2(i, j), size);
+            b5 += v;
+            if (abs(i) <= 1 && abs(j) <= 1) { float w = exp(-0.7 * float(i * i + j * j)); b3 += v * w; w3 += w; }
+        }
+    b3 /= w3;
+    b5 /= 25.0;
+    float s = b3 + 0.6 * (b3 - b5);
+    float k = tc_dldt(b3);
+    // NETD + fixed pattern (per pixel and per column, growing with the drift since the NUC)
+    vec3 r = tc_rand3(uvec3(p, uint(U.depthp.w)));   // per frame
+    float g = sqrt(-2.0 * log(max(r.x, 1e-7))) * cos(6.2831853 * r.y);
+    uint seed = uint(T.core.z);
+    float fp = (tc_rand3(uvec3(p, seed)).x - 0.5) * 0.6 + (tc_rand3(uvec3(p.x, 7u, seed)).x - 0.5) * 0.5;
+    s += k * (T.sens.z * g + fp * (0.04 + 0.5 * T.sens.w));
+    // smear: first-order response with tau
+    if (T.flags.z > 0.5) s = mix(prev, s, 1.0 - exp(-T.sens.x / max(T.sens.y, 1e-4)));
+    imageStore(dst, p, vec4(s));
+}

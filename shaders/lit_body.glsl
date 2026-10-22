@@ -1,6 +1,7 @@
 // Shared lit shading (lit.frag, skin.frag). The includer defines MAT_COLOR, MAT_PARAMS, MAT_FLAGS;
 // PBR_MAPS adds the glTF material maps (shaders/pbr_maps.glsl), LIT_ALPHA_MASK the alphaMode MASK test.
 #include "weather.glsl"
+#include "thermal.glsl"
 // LIT_CUSTOM_INPUTS: the includer provides v_world, v_normal, v_uv, v_color and LIT_FRONT_FACING
 // itself (the vgeo lit resolve decodes them per pixel, shaders/vg_lit.frag).
 #ifndef LIT_CUSTOM_INPUTS
@@ -197,6 +198,19 @@ void main() {
 #ifdef LIT_BASE_HOOK
     LIT_BASE_HOOK
 #endif
+    // Thermal scope PiP: radiance by temperature, no lighting (thermal.glsl). LIT_THERMAL_BODY: skinned
+    // characters (their surface is their heat volumes').
+    if (frame.thermal.x > 0.5) {
+        float t_metal = vertex_pbr ? v_uv.y : MAT_PARAMS.y, t_rough = vertex_pbr ? v_uv.x : MAT_PARAMS.x;
+        float t_sun = (flags & MAT_NO_RECEIVE) == 0u ? shadow_factor(v_world, n) : 1.0;
+#ifdef LIT_THERMAL_BODY
+        const bool t_body = true;
+#else
+        const bool t_body = false;
+#endif
+        out_color = thermal_shade(flags, ao_b, v_world, n, base.rgb, t_metal, t_rough, MAT_PARAMS.z, t_body, t_sun);
+        return;
+    }
 
     vec3 color;
     if ((flags & MAT_UNLIT) != 0u) {

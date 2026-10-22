@@ -1,0 +1,53 @@
+#version 450
+// Thermal scope AGC metering: a log histogram of the core image -> the 0.5 % and 99.9 % radiance points
+// (what the AGC stretches the palette over: a hot muzzle flash or fire widens it) and the centre spot
+// (3 x 3, the spot meter's reading). One workgroup; read back two frames late (post_thermal.c).
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+#include "thermal_common.glsl"
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(set = 0, binding = 0) uniform sampler2D core_tex;
+layout(std430, set = 0, binding = 13) buffer Out { float v[16]; } O;
+
+shared uint s_hist[256];
+shared float s_spot;
+
+void main() {
+    uint t = gl_LocalInvocationIndex;
+    s_hist[t] = 0u;
+    barrier();
+    ivec2 size = textureSize(core_tex, 0);
+    float l0 = log2(max(T.lut[0], 1e-6)), l1 = log2(T.lut[255]);
+    float zoom = max(T.agc.z, 1.0);
+    // what the display shows: the zoom's crop
+    vec2 c = vec2(size) * 0.5, half_ = vec2(size) * 0.5 / zoom;
+    ivec2 a = ivec2(c - half_), b = ivec2(c + half_);
+    for (int y = a.y + int(gl_LocalInvocationID.y); y < b.y; y += 16)
+        for (int x = a.x + int(gl_LocalInvocationID.x); x < b.x; x += 16) {
+            float v = texelFetch(core_tex, ivec2(x, y), 0).r;
+            int bin = int(clamp((log2(max(v, 1e-6)) - l0) / (l1 - l0), 0.0, 0.9999) * 256.0);
+            atomicAdd(s_hist[bin], 1u);
+        }
+    barrier();
+    if (t == 0u) {
+        uint total = 0u;
+        for (int i = 0; i < 256; i++) total += s_hist[i];
+        uint lo_n = uint(float(total) * 0.005), hi_n = uint(float(total) * 0.999);
+        uint acc = 0u;
+        int lo = 0, hi = 255;
+        bool lo_set = false;
+        for (int i = 0; i < 256; i++) {
+            acc += s_hist[i];
+            if (!lo_set && acc > lo_n) { lo = i; lo_set = true; }
+            if (acc >= hi_n) { hi = i; break; }
+        }
+        O.v[0] = exp2(l0 + (float(lo) + 0.5) / 256.0 * (l1 - l0));
+        O.v[1] = exp2(l0 + (float(hi) + 0.5) / 256.0 * (l1 - l0));
+        float sp = 0.0;
+        ivec2 m = size / 2;
+        for (int j = -1; j <= 1; j++)
+            for (int i = -1; i <= 1; i++) sp += texelFetch(core_tex, m + ivec2(i, j), 0).r;
+        O.v[2] = sp / 9.0;
+        O.v[3] = float(total);
+    }
+}

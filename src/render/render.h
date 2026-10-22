@@ -624,6 +624,37 @@ typedef struct RenderSight {
     int debug;                    // sight_debug view
 } RenderSight;
 void render_set_sight(const RenderSight *s);   // every frame (kind NONE = no sight)
+// Thermal scope (docs/NIGHT_OPTICS.md): the PiP renders 8..14 um radiance (lit_body.glsl thermal_shade)
+// and the sensor model (post_thermal.c) turns it into the palette image with its OSD. The game fills the
+// temperature state each frame (game_thermal.c); on = false: the PiP is optical.
+#define RT_VOLUMES 64
+#define RT_OSD_CHARS 96
+typedef struct RenderThermal {
+    bool on;
+    float air, ground, bulb;            // C
+    float sky_depression, sky_exponent, wetness;
+    float cls[16][4];                   // per class: C now, emissivity, sunlit facing C, sky-facing night loss C
+    int vol_count;
+    struct { vec3 pos; float radius, temp; int kind; float core; } vol[RT_VOLUMES];   // kind 0 surfaces, 1 body, 2 ground
+    // sensor
+    int core_w, core_h;                 // microbolometer core (thermal_sensor.h)
+    int zoom;                           // digital zoom 1..4
+    int palette;                        // index into the palette table (render_thermal_palettes)
+    float agc_lo, agc_hi;               // radiance range shown (game_thermal: the AGC model)
+    float drift;                        // fixed-pattern drift 0..1 since the last NUC
+    bool frozen;                        // NUC shutter: hold the last image
+    bool dead;                          // no battery: black + OSD
+    u32 seed;                           // fixed pattern / per-scope
+    char osd[RT_OSD_CHARS];             // OSD lines separated by '\n' (top-left, top-right, bottom ...)
+    float spot_e;                       // spot meter emissivity
+} RenderThermal;
+void render_set_thermal(const RenderThermal *t);
+const RenderThermal *render_thermal(void);
+// Palettes: up to 8 x 256 RGB (uploaded once, again when changed).
+void render_thermal_palettes(const u8 (*rgb)[256][3], int count);
+// The sensor's measurements of the last frames (readback, two frames late): radiance percentiles of
+// the image (AGC input) and the centre 3 x 3 (spot meter); false before the first.
+bool render_thermal_measure(float *lo, float *hi, float *spot);
 const RenderSight *render_sight(void);         // what was set this frame
 float render_scope_pip_fov(void);              // last PiP camera FOV (deg), 0 = none
 u32 render_scope_pip_px(float pip_scale);      // PiP target size (px) for a RenderSight.pip_scale: x the render height, 128..2048

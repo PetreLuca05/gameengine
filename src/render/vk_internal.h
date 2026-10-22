@@ -13,6 +13,7 @@
 #include "core/cvar.h"
 
 #define FRAMES_IN_FLIGHT 2
+#define THERMAL_VOLUMES 64   // heat volumes per frame (FrameData.thermal_vol, render.h RenderThermal)
 #define MAX_SWAP_IMAGES 8
 #define MAX_MESHES 16384
 #define MAX_TEXTURES 1024
@@ -245,6 +246,18 @@ typedef struct FrameData {
     vec4 arms_shoulder_prev[2];
     vec4 arms_seam;
     vec4 arms_eye;        // xyz the arms camera's eye in pose space (the arms layer's view vectors)
+    // Thermal scope PiP (docs/NIGHT_OPTICS.md "Thermal render pass", lit_body.glsl thermal_shade): x on
+    // (this camera renders 8..14 um radiance instead of light), y air C, z the ground's temperature (what
+    // surfaces facing down reflect), w a lamp bulb's C. thermal_sky: x zenith depression C (clouds folded
+    // in), y its exponent, z wetness, w heat volume count. Per class (world/thermal.h): x C now, y
+    // emissivity, z C extra facing the sun (sunlit), w C lost facing the sky at night. The band radiance LUT
+    // (THERMAL_LUT_N: -60 C + 6.5 C steps). Heat volumes: pos radius, x C y kind (0 surfaces, 1 a body,
+    // 2 the ground) z core fraction.
+    vec4 thermal;
+    vec4 thermal_sky;
+    vec4 thermal_cls[16];
+    vec4 thermal_lut[64];
+    vec4 thermal_vol[THERMAL_VOLUMES * 2];
 } FrameData;
 
 typedef struct PushLit {
@@ -500,6 +513,7 @@ typedef struct Renderer {
     bool fx_ads;
     float fx_ads_focus;
     RenderSight sight;                          // this frame's weapon sight (render_set_sight)
+    RenderThermal thermal;                      // this frame's thermal scope state (render_set_thermal)
     float pip_fov;                              // scope PiP camera FOV (deg)
     u32 pip_size;                               // scope PiP target size (px, 0 = none this frame)
     float pip_screen_frac;                      // the PiP picture's extent on screen (fraction of the view height)

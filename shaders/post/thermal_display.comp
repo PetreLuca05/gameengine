@@ -1,0 +1,84 @@
+#version 450
+// Thermal scope display (docs/NIGHT_OPTICS.md "Thermal sensor"): the microdisplay behind the eyepiece.
+//   digital zoom   a centred crop of the core, nearest-neighbour: real pixelation at 3x / 4x
+//   AGC            the radiance range (CPU: fast attack, slow release) onto the palette
+//   palette        White Hot / Black Hot / Red Hot / Ironbow / Rainbow (256 entries)
+//   OSD            drawn digitally at the display's resolution: palette, zoom, battery, the spot
+//                  temperature, a crosshair; sharp regardless of the core
+// The image enters the HDR chain before exposure (post_sights.c): it is divided by the exposure so the
+// display reads at its own brightness.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+#include "thermal_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D core_tex;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
+layout(std430, set = 0, binding = 13) readonly buffer Exposure { float e[16]; } X;
+
+vec3 srgb_to_linear(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c)); }
+
+// 1 where an OSD glyph pixel is at p (display px), with a 1 px dark outline (the second value).
+vec2 osd(vec2 p, float scale) {
+    int n = int(T.flags.w);
+    // lines: 0 top, 1 under it, 2 bottom, 3 above the bottom (centred)
+    const float ys[4] = float[](0.17, 0.225, 0.80, 0.745);
+    float on = 0.0, edge = 0.0;
+    int line = 0, start = 0;
+    for (int i = 0; i <= n && line < 4; i++) {
+        uint ch = i < n ? T.osd[i] : 10u;
+        if (ch != 10u) continue;
+        int len = i - start;
+        float gw = 6.0 * scale, w = float(len) * gw;
+        vec2 o = vec2(T.core.y * 0.5 - w * 0.5, T.core.y * ys[line]);
+        vec2 q = (p - o) / scale;
+        if (q.y >= -1.0 && q.y < 7.0 && q.x >= -1.0 && q.x < float(len) * 6.0 + 1.0) {
+            for (int dy = -1; dy <= 1; dy++)
+                for (int dx = -1; dx <= 1; dx++) {
+                    ivec2 g = ivec2(floor(q)) + ivec2(dx, dy);
+                    int k = g.x / 6, gx = g.x - k * 6;
+                    if (g.x < 0 || g.y < 0 || g.y > 5 || k >= len || gx > 4) continue;
+                    uint c = T.osd[start + k];
+                    if (c >= 97u && c <= 122u) c -= 32u;
+                    if (c < 32u || c > 90u) continue;
+                    bool bit = ((FONT[c - 32u] >> uint(g.y * 5 + gx)) & 1u) != 0u;
+                    if (!bit) continue;
+                    if (dx == 0 && dy == 0) on = 1.0; else edge = 1.0;
+                }
+        }
+        line++;
+        start = i + 1;
+    }
+    return vec2(on, edge);
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(dst);
+    if (p.x >= size.x || p.y >= size.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(size);
+    ivec2 cs = textureSize(core_tex, 0);
+    float zoom = max(T.agc.z, 1.0);
+    vec2 cp = vec2(cs) * 0.5 + (uv - 0.5) * vec2(cs) / zoom;
+    float l = texelFetch(core_tex, clamp(ivec2(floor(cp)), ivec2(0), cs - 1), 0).r;
+    float x = clamp((l - T.agc.x) / max(T.agc.y - T.agc.x, 1e-6), 0.0, 1.0);
+    uint pi = uint(T.agc.w) * 256u + uint(x * 255.0 + 0.5);
+    uint c = T.pal[pi];
+    vec3 rgb = srgb_to_linear(vec3(c & 255u, (c >> 8u) & 255u, (c >> 16u) & 255u) / 255.0);
+    float r = length(uv - 0.5) * 2.0;
+    rgb *= 1.0 - 0.22 * r * r;   // lens vignette
+    if (T.flags.y > 0.5) rgb = vec3(0.0);   // no battery
+    // OSD: light grey with a dark outline; the crosshair
+    float scale = max(floor(T.core.y / 220.0), 1.0);
+    vec2 o = osd(vec2(p), scale);
+    vec2 d = abs(vec2(p) - vec2(size) * 0.5);
+    float lw = scale * 0.5, gap = scale * 4.0, arm = scale * 16.0;
+    bool cross = (d.y <= lw && d.x >= gap && d.x <= arm) || (d.x <= lw && d.y >= gap && d.y <= arm) || (d.x <= lw && d.y <= lw);
+    bool cross_edge = (d.y <= lw + 1.0 && d.x >= gap - 1.0 && d.x <= arm + 1.0) || (d.x <= lw + 1.0 && d.y >= gap - 1.0 && d.y <= arm + 1.0);
+    if (T.flags.y < 0.5) {
+        if (cross_edge || o.y > 0.5) rgb = vec3(0.01);
+        if (cross || o.x > 0.5) rgb = vec3(0.85);
+    } else if (o.x > 0.5) {
+        rgb = vec3(0.6);
+    }
+    imageStore(dst, p, vec4(rgb * T.head.w / max(X.e[0], 1e-6), 1.0));
+}

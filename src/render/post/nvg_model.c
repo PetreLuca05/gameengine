@@ -236,9 +236,15 @@ static float circle(float x, float y, float f, float cx, float r) {
     return v * v * v;
 }
 
+float nvg_stretch(const NvgVariant *v, float w, float hfov_deg) {
+    float f = (w * 0.5f) / tanf(hfov_deg * 0.5f * 0.017453293f);
+    float reach = f * tanf(DG_MIN(v->circle_deg * 0.5f * NVG_VIG_OUTER + (v->tubes > 1 ? v->tube_sep_deg : 0.0f), 85.0f) * 0.017453293f);
+    return DG_MAX((w * 0.5f) / DG_MAX(reach, 1.0f), 1.0f);
+}
+
 float nvg_mask(const NvgVariant *v, float px, float py, float w, float h, float hfov_deg) {
     float f = (w * 0.5f) / tanf(hfov_deg * 0.5f * 0.017453293f);
-    float x = px - w * 0.5f, y = py - h * 0.5f;
+    float x = (px - w * 0.5f) / nvg_stretch(v, w, hfov_deg), y = py - h * 0.5f;
     float r = v->circle_deg * 0.5f;
     if (v->tubes < 2) return circle(x, y, f, 0.0f, r);
     return DG_MAX(circle(x, y, f, -v->tube_sep_deg, r), circle(x, y, f, v->tube_sep_deg, r));

@@ -1,5 +1,6 @@
 // Shared declarations. Must match FrameData / push structs in src/render/render_types.h.
 #define MAX_POINT_LIGHTS 64
+#define THERMAL_VOLUMES 64
 
 #define MAT_GRID       1u
 #define MAT_UNLIT      2u
@@ -159,6 +160,12 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 arms_shoulder_prev[2];
     vec4 arms_seam;
     vec4 arms_eye;        // the arms camera's eye in pose space (view vectors of the arms layer)
+    // Thermal scope PiP (src/render/vk_internal.h FrameData, thermal.glsl)
+    vec4 thermal;         // x on, y air C, z ground C, w bulb C
+    vec4 thermal_sky;     // x zenith depression C, y exponent, z wetness, w heat volume count
+    vec4 thermal_cls[16]; // per thermal class: C now, emissivity, sunlit facing C, sky-facing night loss C
+    vec4 thermal_lut[64]; // band radiance, 256 entries (-60 C, 6.5 C steps)
+    vec4 thermal_vol[THERMAL_VOLUMES * 2];   // pos radius; C, kind (0 surfaces, 1 body, 2 ground), core fraction
 } frame;
 
 // Where a world point lies in the screen-space inputs (AO, contact, SSR, SSGI, froxels): this

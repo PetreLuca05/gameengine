@@ -104,9 +104,12 @@ float nvg_noise_sample(const NvgVariant *v, float phi, float dt, Rng *rng);
 float nvg_halo_px(const NvgVariant *v, float hfov_deg, float width_px);
 // Tube field at a pixel: no hard rim but an extreme vignette (1 inside NVG_VIG_INNER of the radius,
 // falling to 0 at NVG_VIG_OUTER; the dual tube's figure 8 is the union of two).
+// The field is stretched horizontally to the screen's width (nvg_stretch: black reached at the side
+// edges), the vertical keeps the tube's angle.
 #define NVG_VIG_INNER 0.35f
 #define NVG_VIG_OUTER 1.15f
 float nvg_mask(const NvgVariant *v, float px, float py, float w, float h, float hfov_deg);
+float nvg_stretch(const NvgVariant *v, float w, float hfov_deg);   // horizontal stretch of the field (>= 1)
 // Angle (deg) of a pixel from the view centre along x / y (same focal length for both axes).
 void nvg_pixel_angles(float px, float py, float w, float h, float hfov_deg, float *ax, float *ay);
 

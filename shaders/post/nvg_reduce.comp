@@ -10,7 +10,7 @@
 layout(local_size_x = 16, local_size_y = 16) in;
 layout(set = 0, binding = 0) uniform sampler2D flux_tex;
 layout(std430, set = 0, binding = 13) buffer Nvg { float v[16]; } N;
-// pc.p0.x focal length (flux px), p0.y tubes, p0.z circle deg, p0.w tube separation deg; p1.x ebi
+// pc.p0.x focal length (flux px), p0.y tubes, p0.z circle deg, p0.w tube separation deg; p1.x ebi, p1.y horizontal stretch
 
 shared float s_sum[256], s_max[256], s_n[256], s_lin[256];
 
@@ -22,7 +22,7 @@ void main() {
     for (int y = int(gl_LocalInvocationID.y) * 2; y < size.y; y += 32) {
         for (int x = int(gl_LocalInvocationID.x) * 2; x < size.x; x += 32) {
             vec2 xy = vec2(x, y) + 1.0 - vec2(size) * 0.5;
-            if (nvg_mask(xy, pc.p0.x, pc.p0.y, pc.p0.z, pc.p0.w) < 0.5) continue;
+            if (nvg_mask(vec2(xy.x / pc.p1.y, xy.y), pc.p0.x, pc.p0.y, pc.p0.z, pc.p0.w) < 0.5) continue;
             float f = 0.25 * (texelFetch(flux_tex, ivec2(x, y), 0).r + texelFetch(flux_tex, min(ivec2(x + 1, y), size - 1), 0).r +
                               texelFetch(flux_tex, min(ivec2(x, y + 1), size - 1), 0).r + texelFetch(flux_tex, min(ivec2(x + 1, y + 1), size - 1), 0).r);
             sum += log2(f + pc.p1.x);

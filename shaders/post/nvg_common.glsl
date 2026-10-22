@@ -18,7 +18,8 @@ float nvg_circle(vec2 xy, float f, float cx_deg, float r_deg) {
     return v * v * v;
 }
 
-// One circle, or two overlapping ones (dual tube: a figure 8). xy from the view centre in pixels.
+// One circle, or two overlapping ones (dual tube: a figure 8). xy from the view centre in pixels,
+// x already divided by the horizontal stretch (the field spans the screen's width).
 float nvg_mask(vec2 xy, float f, float tubes, float circle_deg, float sep_deg) {
     float r = circle_deg * 0.5;
     if (tubes < 1.5) return nvg_circle(xy, f, 0.0, r);

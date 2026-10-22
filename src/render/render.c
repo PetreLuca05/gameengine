@@ -7,6 +7,7 @@
 #include "render/arms_layer.h"
 #include "vk_internal.h"
 #include "post/post.h"
+#include "world/thermal.h"
 #include "sky/sky.h"
 #include "graph/fg.h"
 #include "skeletal_mesh.h"
@@ -1839,6 +1840,7 @@ static void compute_matrices(FrameData *fd) {
         bool seam = a->valid && a->seam_r1 > 0.0f && v3_dist(ae, R->cam.pos) < 0.3f;
         fd->arms_seam = v4(a->seam_r0, fmaxf(a->seam_r1, a->seam_r0 + 0.01f), seam ? 1.0f : 0.0f, a->valid ? fmaxf(a->arm_cut, 0.0f) : 0.0f);
     }
+    fd->thermal = v4(0, 0, 0, 0);   // only the thermal scope's PiP copy renders radiance (setup_scope_pip)
     fd->shadow_vp = R->shadow_vp;
     memcpy(fd->shadow_vps, R->shadow_vps, sizeof(fd->shadow_vps));
     fd->shadow_splits = R->shadow_splits;
@@ -2518,6 +2520,25 @@ bool render_scope_view(vec3 *eye, vec3 *fwd, float *tan_half, float *size_px) {
     return true;
 }
 
+// The thermal scope's frame block (FrameData.thermal*, shaders/thermal.glsl): the game's temperature
+// state, the band radiance LUT, the heat volumes.
+_Static_assert(RT_VOLUMES == THERMAL_VOLUMES, "RenderThermal volumes = FrameData.thermal_vol");
+static void thermal_frame(FrameData *pd) {
+    const RenderThermal *t = &R->thermal;
+    pd->thermal = v4(1.0f, t->air, t->ground, t->bulb);
+    int nv = DG_CLAMP(t->vol_count, 0, THERMAL_VOLUMES);
+    pd->thermal_sky = v4(t->sky_depression, t->sky_exponent, t->wetness, (float)nv);
+    for (int c = 0; c < 16; c++) pd->thermal_cls[c] = v4(t->cls[c][0], t->cls[c][1], t->cls[c][2], t->cls[c][3]);
+    memcpy(pd->thermal_lut, thermal_lut(), sizeof(pd->thermal_lut));
+    for (int i = 0; i < nv; i++) {
+        pd->thermal_vol[i * 2] = v4(t->vol[i].pos.x, t->vol[i].pos.y, t->vol[i].pos.z, t->vol[i].radius);
+        pd->thermal_vol[i * 2 + 1] = v4(t->vol[i].temp, (float)t->vol[i].kind, t->vol[i].core, 0.0f);
+    }
+}
+
+void render_set_thermal(const RenderThermal *t) { R->thermal = *t; }
+const RenderThermal *render_thermal(void) { return &R->thermal; }
+
 // PiP camera + its frame UBO; returns false when no PiP is needed this frame.
 static bool setup_scope_pip(FrameData *fd) {
     const RenderSight *s = &R->sight;
@@ -2542,6 +2563,8 @@ static bool setup_scope_pip(FrameData *fd) {
     // The resolution is per sight (game_sights.c: r_scope_pip_scale x the optic's pip_resolution,
     // bounded by the fidelity level). The picture spans 2 tan_half x k main-view tangents on screen.
     u32 n = render_scope_pip_px(s->pip_scale);
+    // A thermal core renders at its own resolution (the centre square of the microbolometer).
+    if (R->thermal.on) n = (u32)DG_CLAMP(DG_MIN(R->thermal.core_w, R->thermal.core_h), 64, 2048);
     static u32 logged;
     if (n != logged) log_debug("scope: PiP %ux%u (pip_scale %.3f x render height %u)", n, n, (double)s->pip_scale, R->hdr.h);
     logged = n;
@@ -2576,6 +2599,7 @@ static bool setup_scope_pip(FrameData *fd) {
     pd->ss_info = v4(1, 0, 0, 0);
     pd->camera_pos = v4(s->objective_pos.x, s->objective_pos.y, s->objective_pos.z, fd->camera_pos.w);
     pd->screen = v4((float)n, (float)n, 1.0f / (float)n, 1.0f / (float)n);
+    if (R->thermal.on) thermal_frame(pd);
     F.pip_view = view;
     F.pip_proj = proj;
     F.pip_vp = vp;
@@ -2806,7 +2830,16 @@ static void build_frame_graph(FrameData *fd) {
         if (F.lit.ssr_on) fg_read(p, F.lit.ssr, FG_SAMPLED);
         if (F.lit.ssgi_on) fg_read(p, F.lit.ssgi, FG_SAMPLED);
         if (p < 0) F.pip_color = FG_NONE;
-        else {
+        else if (R->thermal.on) {
+            // Thermal: radiance only (no decals, the sky is the sensor pass's, particles thermal_particle);
+            // the sensor model makes the display image (post_thermal.c).
+            p = fg_pass("scope_pip_fx", exec_scope_pip_fx, NULL);
+            fg_write(p, F.pip_color, FG_COLOR);
+            fg_read(p, F.pip_depth, FG_DEPTH_READ);
+            fg_read(p, F.depth, FG_SAMPLED);
+            fg_read(p, post_froxels(), FG_SAMPLED);
+            F.pip_color = post_thermal_build(F.pip_color, F.pip_depth, mat4_inverse(F.pip_vp), R->sight.objective_pos);
+        } else {
             p = fg_pass("scope_pip_decals", exec_scope_pip_decals, NULL);
             fg_write(p, F.pip_color, FG_COLOR);
             fg_read(p, F.pip_depth, FG_DEPTH_READ);

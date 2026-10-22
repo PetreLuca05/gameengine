@@ -147,6 +147,9 @@ u32 post_bloom_mips(void);
 void post_buffers_init_build(void);
 // post_nvg.c: night vision goggles (docs/NIGHT_OPTICS.md). The intensifier from the linear HDR (+ the
 // near-IR image) to the display-linear output; normal = this frame's normal output (the flip), or none.
+// post_thermal.c: the thermal scope sensor on the thermal PiP (radiance + depth) -> the display image.
+void post_thermal_init(void);
+void post_thermal_shutdown(void);
 void post_nvg_init(void);
 void post_nvg_shutdown(void);
 FgRes post_nvg_build(FgRes color, FgRes nir, FgRes normal);
