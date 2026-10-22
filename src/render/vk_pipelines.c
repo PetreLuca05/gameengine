@@ -111,9 +111,9 @@ bool vkp_create_layouts(void) {
     VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &R->mat_layout));
 
     VkDescriptorPoolSize sizes[3] = {
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 24 },   // 5 frame sets per frame slot (FRAME_SET_COUNT)
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 32 },   // 6 frame sets per frame slot (FRAME_SET_COUNT)
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_TEXTURES + 512 + MAX_MAT_SETS * 4 },   // frame sets: 23 samplers each; 256 alpha masks
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 100 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 128 },
     };
     VkDescriptorPoolCreateInfo pi = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
     pi.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;

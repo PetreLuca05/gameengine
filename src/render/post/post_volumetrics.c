@@ -92,7 +92,7 @@ static void exec_fog_apply(VkCommandBuffer cmd, void *u);
 
 // Sky targets: the main HDR (+ depth) or the scope picture-in-picture.
 typedef struct SkyTarget { FgRes color, depth; mat4 inv_vp; vec3 cam; } SkyTarget;
-static SkyTarget g_sky_main, g_sky_pip, g_sky_view[2];
+static SkyTarget g_sky_main, g_sky_pip, g_sky_view[3];
 
 static void exec_sky(VkCommandBuffer cmd, void *u) {
     const SkyTarget *t = (const SkyTarget *)u;
@@ -149,9 +149,11 @@ void post_scope_sky(FgRes color, FgRes depth, mat4 inv_vp, vec3 cam) {
 // The same sky into a phone camera view (src/render/phone_view.c).
 void post_view_sky(int view, FgRes color, FgRes depth, mat4 inv_vp, vec3 cam) {
     if (!P.ok || (!P.in.sky_on && !sky_active()) || color < 0) return;
-    SkyTarget *t = &g_sky_view[view & 1];
+    static const char *names[3] = { "phone_sky0", "phone_sky1", "phone_sky2" };
+    view = DG_CLAMP(view, 0, 2);
+    SkyTarget *t = &g_sky_view[view];
     *t = (SkyTarget){ color, depth, inv_vp, cam };
-    int p = fg_pass(view ? "phone_sky1" : "phone_sky0", exec_sky, t);
+    int p = fg_pass(names[view], exec_sky, t);
     fg_read(p, depth, FG_SAMPLED);
     fg_write(p, color, FG_STORAGE);
 }

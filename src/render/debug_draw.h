@@ -31,7 +31,12 @@ void dbg_capsule(vec3 bottom, float radius, float height, u32 color, float durat
 void dbg_set_shape_depth(bool depth);
 void dbg_capsule_axis(vec3 a, vec3 b, float radius, u32 color, float duration);
 void dbg_text(vec3 pos, const char *text, u32 color, float size, float duration);
-// Flushes lines/text to the renderer and ages timed primitives.
+// The view the next primitives go to: 0 the main view (default), 1 the second window's scene
+// (render_set_3d_view; the hand pose editor's rig in its own window). Its text faces that view's
+// camera (dbg_set_view_camera); without the second window its primitives are dropped.
+void dbg_set_view(int view);
+void dbg_set_view_camera(int view, vec3 cam_pos, vec3 cam_right, vec3 cam_up);
+// Flushes lines/text to the renderer and ages timed primitives (cam_*: the main view's camera).
 void dbg_submit(float dt, vec3 cam_pos, vec3 cam_right, vec3 cam_up);
 void dbg_clear(void);
 

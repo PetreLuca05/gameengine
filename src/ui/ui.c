@@ -23,6 +23,11 @@ typedef struct UiSystem {
     u32 hud_icount;
     float scale;
     Cvar *ui_scale;
+    // The second window (ui_window2_*).
+    struct nk_context ctx2;
+    SDL_Window *win2;
+    bool close2;
+    u32 bg2;
 } UiSystem;
 
 #define U (g_engine.ui)
@@ -87,6 +92,7 @@ bool ui_init(void) {
 
 void ui_shutdown(void) {
     if (!U) return;
+    ui_window2_close();
     nk_buffer_free(&U->cmds);
     nk_buffer_free(&U->vbuf);
     nk_buffer_free(&U->ibuf);
@@ -110,17 +116,25 @@ void ui_set_text_input(bool on) {
     else SDL_StopTextInput(g_engine.window);
 }
 
-void ui_input_begin(void) { nk_input_begin(&U->ctx); }
-void ui_input_end(void) { nk_input_end(&U->ctx); }
+void ui_input_begin(void) {
+    nk_input_begin(&U->ctx);
+    if (U->win2) nk_input_begin(&U->ctx2);
+}
+void ui_input_end(void) {
+    nk_input_end(&U->ctx);
+    if (U->win2) nk_input_end(&U->ctx2);
+}
 
 static float pixel_density(void) {
     float d = g_engine.window ? SDL_GetWindowPixelDensity(g_engine.window) : 1.0f;
     return d > 0 ? d : 1.0f;
 }
 
-void ui_handle_event(const SDL_Event *ev) {
-    struct nk_context *ctx = &U->ctx;
-    float pd = pixel_density();
+static void nk_feed(struct nk_context *ctx, const SDL_Event *ev, float pd);
+
+void ui_handle_event(const SDL_Event *ev) { nk_feed(&U->ctx, ev, pixel_density()); }
+
+static void nk_feed(struct nk_context *ctx, const SDL_Event *ev, float pd) {
     switch (ev->type) {
     case SDL_EVENT_MOUSE_MOTION:
         nk_input_motion(ctx, (int)(ev->motion.x * pd), (int)(ev->motion.y * pd));
@@ -249,6 +263,36 @@ float ui_textf(float x, float y, FontSize f, u32 color, int align, const char *f
 
 // ------------------------------------------------------------------ flush
 
+// The second window: its background image (ui_window2_set_background) as a full-window quad under
+// the Nuklear output (a Nuklear window there would count as UI under the mouse).
+static void submit_window2(const UiVertex *verts, u32 vcount, const u32 *indices, u32 icount, const UiDrawCmd *cmds, u32 ccount) {
+    if (!U->bg2) { render_window2_ui(verts, vcount, indices, icount, cmds, ccount); return; }
+    UiVertex *v = (UiVertex *)malloc(sizeof(UiVertex) * (vcount + 4));
+    u32 *ix = (u32 *)malloc(sizeof(u32) * (icount + 6));
+    UiDrawCmd *c = (UiDrawCmd *)malloc(sizeof(UiDrawCmd) * (ccount + 1));
+    if (!v || !ix || !c) { free(v); free(ix); free(c); return; }
+    float w = ui_window2_width(), h = ui_window2_height();
+    v[0] = (UiVertex){ v2(0, 0), v2(0, 0), 0xFFFFFFFFu };
+    v[1] = (UiVertex){ v2(w, 0), v2(1, 0), 0xFFFFFFFFu };
+    v[2] = (UiVertex){ v2(w, h), v2(1, 1), 0xFFFFFFFFu };
+    v[3] = (UiVertex){ v2(0, h), v2(0, 1), 0xFFFFFFFFu };
+    static const u32 q[6] = { 0, 1, 2, 0, 2, 3 };
+    memcpy(ix, q, sizeof(q));
+    if (vcount) memcpy(v + 4, verts, sizeof(UiVertex) * vcount);
+    for (u32 i = 0; i < icount; i++) ix[6 + i] = indices[i] + 4;
+    c[0] = (UiDrawCmd){ 0, 6, (TextureId)U->bg2, 0, 0, (int)w, (int)h };
+    for (u32 i = 0; i < ccount; i++) {
+        c[1 + i] = cmds[i];
+        c[1 + i].index_offset += 6;
+    }
+    render_window2_ui(v, vcount + 4, ix, icount + 6, c, ccount + 1);
+    free(v);
+    free(ix);
+    free(c);
+}
+
+static void nk_submit(struct nk_context *ctx, bool window2);
+
 void ui_render(void) {
     int sw = render_width(), sh = render_height();
     if (U->hud_icount) {
@@ -258,6 +302,17 @@ void ui_render(void) {
     U->hud_vcount = U->hud_icount = 0;
     menus_frame_end();   // the game UI (src/ui/gui) between the HUD batch and Nuklear
 
+    nk_submit(&U->ctx, false);
+    nk_clear(&U->ctx);
+    if (U->win2) {
+        nk_submit(&U->ctx2, true);
+        nk_clear(&U->ctx2);
+        U->bg2 = 0;
+    }
+}
+
+// Converts a Nuklear context's output and hands it to the renderer: the main UI or the second window.
+static void nk_submit(struct nk_context *ctx, bool window2) {
     static const struct nk_draw_vertex_layout_element layout[] = {
         { NK_VERTEX_POSITION, NK_FORMAT_FLOAT, offsetof(UiVertex, pos) },
         { NK_VERTEX_TEXCOORD, NK_FORMAT_FLOAT, offsetof(UiVertex, uv) },
@@ -282,14 +337,14 @@ void ui_render(void) {
     nk_buffer_clear(&U->cmds);
     nk_buffer_clear(&U->vbuf);
     nk_buffer_clear(&U->ibuf);
-    nk_convert(&U->ctx, &U->cmds, &U->vbuf, &U->ibuf, &cfg);
+    nk_convert(ctx, &U->cmds, &U->vbuf, &U->ibuf, &cfg);
     u32 vcount = (u32)(U->vbuf.needed / sizeof(UiVertex));
     u32 icount = (u32)(U->ibuf.needed / sizeof(u32));
     if (vcount && icount) {
         UiDrawCmd cmds[1024];
         u32 ccount = 0, offset = 0;
         const struct nk_draw_command *c;
-        nk_draw_foreach(c, &U->ctx, &U->cmds) {
+        nk_draw_foreach(c, ctx, &U->cmds) {
             if (!c->elem_count) continue;
             if (ccount < 1024) {
                 UiDrawCmd *d = &cmds[ccount++];
@@ -304,7 +359,81 @@ void ui_render(void) {
             }
             offset += c->elem_count;
         }
-        render_ui((const UiVertex *)nk_buffer_memory_const(&U->vbuf), vcount, (const u32 *)nk_buffer_memory_const(&U->ibuf), icount, cmds, ccount);
+        if (window2) submit_window2((const UiVertex *)nk_buffer_memory_const(&U->vbuf), vcount, (const u32 *)nk_buffer_memory_const(&U->ibuf), icount, cmds, ccount);
+        else render_ui((const UiVertex *)nk_buffer_memory_const(&U->vbuf), vcount, (const u32 *)nk_buffer_memory_const(&U->ibuf), icount, cmds, ccount);
     }
-    nk_clear(&U->ctx);
 }
+
+// ------------------------------------------------------------------ second window
+
+bool ui_window2_open(const char *title) {
+    if (U->win2) return true;
+    // 1600 x 900 (or 90 % of the game window's display), centred on that display.
+    SDL_DisplayID disp = SDL_GetDisplayForWindow(g_engine.window);
+    SDL_Rect usable = { 0, 0, 1920, 1080 };
+    SDL_GetDisplayUsableBounds(disp, &usable);
+    int w = DG_MIN(1600, usable.w * 9 / 10), h = DG_MIN(900, usable.h * 9 / 10);
+    SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, title);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, w);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, h);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, SDL_WINDOWPOS_CENTERED_DISPLAY(disp));
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, SDL_WINDOWPOS_CENTERED_DISPLAY(disp));
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    SDL_Window *win = SDL_CreateWindowWithProperties(props);
+    SDL_DestroyProperties(props);
+    if (!win) { log_error("ui: second window: %s", SDL_GetError()); return false; }
+    if (!render_window2_open(win)) { SDL_DestroyWindow(win); return false; }
+    U->win2 = win;
+    U->close2 = false;
+    U->bg2 = 0;
+    nk_init_default(&U->ctx2, font_nk(FONT_UI));
+    apply_style(&U->ctx2);
+    nk_input_begin(&U->ctx2);   // inside this frame's input (ui_input_end closes it)
+    SDL_StartTextInput(win);    // typed values (double-click a field)
+    SDL_RaiseWindow(win);
+    return true;
+}
+
+void ui_window2_close(void) {
+    if (!U || !U->win2) return;
+    render_window2_close();
+    SDL_StopTextInput(U->win2);
+    SDL_DestroyWindow(U->win2);
+    U->win2 = NULL;
+    nk_free(&U->ctx2);
+    if (g_engine.window) SDL_RaiseWindow(g_engine.window);
+}
+
+bool ui_window2_is_open(void) { return U && U->win2; }
+struct nk_context *ui_window2_nk(void) { return U->win2 ? &U->ctx2 : &U->ctx; }
+
+bool ui_window2_handle_event(const SDL_Event *ev) {
+    if (!U || !U->win2 || SDL_GetWindowFromEvent(ev) != U->win2) return false;
+    if (ev->type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) U->close2 = true;
+    float pd = SDL_GetWindowPixelDensity(U->win2);
+    nk_feed(&U->ctx2, ev, pd > 0 ? pd : 1.0f);
+    return true;
+}
+
+float ui_window2_width(void) {
+    int w = 0, h = 0;
+    if (U->win2) SDL_GetWindowSizeInPixels(U->win2, &w, &h);
+    return (float)w;
+}
+
+float ui_window2_height(void) {
+    int w = 0, h = 0;
+    if (U->win2) SDL_GetWindowSizeInPixels(U->win2, &w, &h);
+    return (float)h;
+}
+
+bool ui_window2_focused(void) { return U->win2 && SDL_GetKeyboardFocus() == U->win2; }
+
+bool ui_window2_close_requested(void) {
+    bool r = U->close2;
+    U->close2 = false;
+    return r;
+}
+
+void ui_window2_set_background(u32 texture) { U->bg2 = texture; }

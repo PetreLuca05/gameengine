@@ -20,6 +20,9 @@ typedef struct GameScene {
     void (*draw)(void);        // Nuklear panels (after the world, before menus / console)
     bool free_cursor;          // the panels need the mouse (the game loses look / move input)
     bool hide_hud;
+    // Optional: true while the scene's panels are in their own OS window (ui_window2_*): the game
+    // window keeps its HUD, mouse and input (free_cursor / hide_hud / the Nuklear events don't apply).
+    bool (*own_window)(void);
 } GameScene;
 
 void scenes_init(void);                       // the scene command (game_init)

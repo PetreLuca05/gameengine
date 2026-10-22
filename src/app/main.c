@@ -98,8 +98,11 @@ static bool boot_commands_connect(int argc, char **argv) {
 }
 
 static void handle_event(const SDL_Event *ev) {
+    // The second window (the hand pose editor's own window): its events are its own, never the game's.
+    if (ui_window2_handle_event(ev)) return;
     switch (ev->type) {
     case SDL_EVENT_QUIT: g_engine.quit = true; return;
+    case SDL_EVENT_WINDOW_CLOSE_REQUESTED: g_engine.quit = true; return;   // the game window (no SDL_EVENT_QUIT while a second window is open)
     case SDL_EVENT_WINDOW_FOCUS_GAINED: g_engine.has_focus = true; break;
     case SDL_EVENT_WINDOW_FOCUS_LOST:
         g_engine.has_focus = false;

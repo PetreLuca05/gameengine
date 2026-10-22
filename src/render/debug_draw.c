@@ -8,14 +8,16 @@
 #define MAX_TIMED_LINES 65536
 #define MAX_TEXTS 1024
 
-typedef struct TimedLine { vec3 a, b; u32 color; float ttl; bool depth; } TimedLine;
-typedef struct DbgText { vec3 pos; char text[64]; u32 color; float size, ttl; } DbgText;
+typedef struct TimedLine { vec3 a, b; u32 color; float ttl; bool depth; u8 view; } TimedLine;
+typedef struct DbgText { vec3 pos; char text[64]; u32 color; float size, ttl; u8 view; } DbgText;
 
 typedef struct DebugDraw {
     TimedLine *lines;
     int line_count;
     DbgText texts[MAX_TEXTS];
     int text_count;
+    int view;                      // dbg_set_view
+    vec3 cam[2][3];                // per view: position, right, up (text billboards)
 } DebugDraw;
 
 #define D (g_engine.debug)
@@ -41,7 +43,16 @@ void dbg_clear(void) {
 void dbg_line(vec3 a, vec3 b, u32 color, float duration, bool depth) {
     if (!D || D->line_count >= MAX_TIMED_LINES) return;
     TimedLine *l = &D->lines[D->line_count++];
-    l->a = a; l->b = b; l->color = color; l->ttl = duration; l->depth = depth;
+    l->a = a; l->b = b; l->color = color; l->ttl = duration; l->depth = depth; l->view = (u8)D->view;
+}
+
+void dbg_set_view(int view) { if (D) D->view = view == 1 ? 1 : 0; }
+
+void dbg_set_view_camera(int view, vec3 cam_pos, vec3 cam_right, vec3 cam_up) {
+    if (!D || view < 0 || view > 1) return;
+    D->cam[view][0] = cam_pos;
+    D->cam[view][1] = cam_right;
+    D->cam[view][2] = cam_up;
 }
 
 void dbg_arrow(vec3 a, vec3 b, u32 color, float duration) {
@@ -142,38 +153,57 @@ void dbg_text(vec3 pos, const char *text, u32 color, float size, float duration)
     t->color = color;
     t->size = size;
     t->ttl = duration;
+    t->view = (u8)D->view;
 }
 
-void dbg_submit(float dt, vec3 cam_pos, vec3 cam_right, vec3 cam_up) {
-    if (!D) return;
+// One view's lines and text into the renderer's buffers for it.
+static void submit_view(int view) {
     int n_depth = 0, n_overlay = 0;
     for (int i = 0; i < D->line_count; i++) {
+        if (D->lines[i].view != view) continue;
         if (D->lines[i].depth) n_depth++;
         else n_overlay++;
     }
+    render_set_3d_view(view);
     LineVertex *vd = n_depth ? render_lines_alloc((u32)n_depth * 2, true) : NULL;
     LineVertex *vo = n_overlay ? render_lines_alloc((u32)n_overlay * 2, false) : NULL;
     int id = 0, io = 0;
-    int keep = 0;
     for (int i = 0; i < D->line_count; i++) {
         TimedLine *l = &D->lines[i];
+        if (l->view != view) continue;
         LineVertex *dst = l->depth ? (vd ? vd + 2 * id++ : NULL) : (vo ? vo + 2 * io++ : NULL);
         if (dst) {
             dst[0].pos = l->a; dst[0].color = l->color;
             dst[1].pos = l->b; dst[1].color = l->color;
         }
+    }
+    const vec3 *cam = D->cam[view];
+    for (int i = 0; i < D->text_count; i++) {
+        DbgText *t = &D->texts[i];
+        if (t->view != view) continue;
+        if (v3_dist(t->pos, cam[0]) < 60.0f) font_text3d_billboard(t->pos, cam[1], cam[2], t->size, t->color, t->text);
+    }
+    render_set_3d_view(0);
+}
+
+void dbg_submit(float dt, vec3 cam_pos, vec3 cam_right, vec3 cam_up) {
+    if (!D) return;
+    dbg_set_view_camera(0, cam_pos, cam_right, cam_up);
+    submit_view(0);
+    if (render_window2_active()) submit_view(1);
+    int keep = 0;
+    for (int i = 0; i < D->line_count; i++) {
+        TimedLine *l = &D->lines[i];
         l->ttl -= dt;
         if (l->ttl > 0.0f) D->lines[keep++] = *l;
     }
     D->line_count = keep;
-
     keep = 0;
     for (int i = 0; i < D->text_count; i++) {
         DbgText *t = &D->texts[i];
-        float dist = v3_dist(t->pos, cam_pos);
-        if (dist < 60.0f) font_text3d_billboard(t->pos, cam_right, cam_up, t->size, t->color, t->text);
         t->ttl -= dt;
         if (t->ttl > 0.0f) D->texts[keep++] = *t;
     }
     D->text_count = keep;
+    D->view = 0;
 }

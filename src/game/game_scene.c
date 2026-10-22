@@ -20,9 +20,10 @@ void scene_register(const GameScene *s) {
 }
 
 const GameScene *scene_active(void) { return SC.active; }
-bool scene_wants_mouse(void) { return SC.active && SC.active->free_cursor; }
-bool scene_has_panels(void) { return SC.active && SC.active->draw; }
-bool scene_hides_hud(void) { return SC.active && SC.active->hide_hud; }
+static bool own_window(void) { return SC.active && SC.active->own_window && SC.active->own_window(); }
+bool scene_wants_mouse(void) { return SC.active && SC.active->free_cursor && !own_window(); }
+bool scene_has_panels(void) { return SC.active && SC.active->draw && !own_window(); }
+bool scene_hides_hud(void) { return SC.active && SC.active->hide_hud && !own_window(); }
 
 void scene_leave(void) {
     const GameScene *s = SC.active;

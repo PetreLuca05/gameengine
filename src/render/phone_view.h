@@ -7,14 +7,17 @@
 // A UI-only view (the phone's home screen, portal, gallery) skips the scene pass: the overlay is
 // composited over black.
 // View 0 is the local player's phone, view 1 a nearby remote phone (rendered at a low rate by the
-// game). A view rendered this frame is sampled from the next frame on (its passes run after the
-// viewmodel); CPU copies complete two frames later and never stall the render thread.
+// game), view 2 the scene of the second window (the hand pose editor's own window, docs/HANDPOSE.md:
+// lines on, its scene image drawn by that window's UI in the same frame). A view rendered this frame
+// is sampled from the next frame on (its passes run after the viewmodel); CPU copies complete two
+// frames later and never stall the render thread.
 #ifndef DG_PHONE_VIEW_H
 #define DG_PHONE_VIEW_H
 
 #include "render/render.h"
 
-#define RENDER_PHONE_VIEWS 2
+#define RENDER_PHONE_VIEWS 3
+#define RENDER_PHONE_VIEW_WINDOW2 2   // the second window's scene
 
 typedef struct RenderPhoneView {
     int view;                 // 0 .. RENDER_PHONE_VIEWS - 1
@@ -31,10 +34,16 @@ typedef struct RenderPhoneView {
     bool ui_only;             // no lens view: the screen is the overlay alone (opaque UI apps)
     int panel_w, panel_h;     // the HUD panel image size in pixels (0 = no panel image)
     float panel_radius;       // its corner radius in pixels
+    float znear;              // near plane (m, 0 = 0.05)
+    bool lines;               // draw the second window's 3D lines / text after the sky (render_set_3d_view)
 } RenderPhoneView;
+
+// The view's projection x view (the lens camera with its target's aspect): picking against it.
+mat4 render_phone_view_proj(const RenderPhoneView *v);
 
 void render_phone_view(const RenderPhoneView *v);   // this frame (call between begin / end frame)
 TextureId render_phone_screen(int view);            // 0 until the view has been rendered once
+TextureId render_phone_scene(int view);             // the clean sRGB image as a texture (UI: the second window), 0 until rendered
 TextureId render_phone_panel(int view);             // the panel image (sRGB, rounded alpha), 0 until rendered
 // The newest completed CPU copy (RGBA8 sRGB, top row first, stride w * 4). The pointer stays
 // valid for one frame. *serial increases with every new copy; returns false if there is none.
@@ -47,5 +56,6 @@ void phone_view_build(struct FrameData *fd);        // build_frame_graph: after 
 void phone_view_frame_begin(int frame_slot);        // after the slot's fence: harvest readbacks
 void phone_view_shutdown(void);
 bool phone_view_pending(void);                      // a view was requested this frame
+int phone_view_scene_res(int view);                 // this frame's scene image (FgRes; FG_NONE: not rendered this frame)
 
 #endif

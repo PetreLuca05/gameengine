@@ -1133,6 +1133,7 @@ static float g_host_ms;
 void chars_host_stats(int *evaluated, float *ms) { if (evaluated) *evaluated = g_host_evals; if (ms) *ms = g_host_ms; }
 bool g_chars_frozen;
 bool g_chars_player_frozen;
+bool g_chars_held_self;
 
 // Hand IK options (src/anim): read by every arm solve this frame.
 static void sync_anim_cvars(void) {
@@ -3178,7 +3179,9 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
     if (FP.has_item && (c->item_weapon || c->item_def)) {
         hands_set_draw_scale(c->rt.proc.item_scale);
         hands_set_fire_mech(false, g_fp_fire_frame.slide, g_fp_fire_frame.wobble_rot);
+        render_mark_self(g_chars_held_self);   // the hand pose editor's window: the item where the body holds it
         hands_draw_held_att(c->item_weapon, c->item_weapon ? NULL : c->item_def, c->item_att, item_w.t, item_w.r, MAT_SHADOW_ONLY);
+        render_mark_self(false);
         hands_set_draw_scale(1.0f);
     }
     if (!have_t) return;

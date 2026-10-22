@@ -30,6 +30,7 @@
 #include "gameplay/weapons.h"
 #include "player/hands.h"
 #include "render/debug_draw.h"
+#include "render/phone_view.h"
 #include "render/render.h"
 #include "ui/ui.h"
 #include "world/time_of_day.h"
@@ -135,10 +136,23 @@ static struct {
     Pose fz_pose;                    // the local player's pose (its clips hold still too)
     bool fz_pose_ok;
     double last_time;
+    // Own window (docs/HANDPOSE.md "Own window"): the panels and the orbit view in a second OS window,
+    // the game window keeps the first-person view, the HUD and its input.
+    Cvar *win_cvar;
+    bool win;
+    bool win_vp_valid;
+    mat4 win_vp;                     // its scene camera (phone view 2): picking / the gizmo
+    vec2 win_size;
 } E = { .active = HP_RIG_IK(1), .hover = -1, .cat = -1, .yaw = 2.4f, .pitch = -0.25f, .dist = 0.9f, .fov = 45.0f, .tool = TOOL_MOVE, .orient = HPX_LOCAL,
         .pivot = HPX_PIVOT_MEDIAN, .neutral_light = true, .onion = true, .mz_show = true };
 
 static float S(float v) { return v * ui_scale(); }
+
+// The panels' window: the editor's own (ui_window2) or the game window.
+static bool own_window(void) { return E.win && ui_window2_is_open(); }
+static struct nk_context *nk(void) { return own_window() ? ui_window2_nk() : ui_nk(); }
+static float view_w(void) { return own_window() ? ui_window2_width() : ui_width(); }
+static float view_h(void) { return own_window() ? ui_window2_height() : ui_height(); }
 static HandPoseDB *db(void) { return g_engine.anim ? &g_engine.anim->handposes : NULL; }
 static int sel_entry_index(void) { return db() ? handpose_find_hash(db(), E.sel_entry) : -1; }
 static int sel_case_index(void) { return db() ? handpose_case_find_hash(db(), E.sel_case) : -1; }
@@ -557,7 +571,13 @@ static bool build_ctx(HpRigCtx *ctx) {
 
 static bool project(void *ctx, vec3 p, vec2 *px) {
     (void)ctx;
-    return render_world_to_screen(p, px);
+    if (!own_window()) return render_world_to_screen(p, px);
+    if (!E.win_vp_valid) return false;
+    vec4 c = mat4_mul_v4(E.win_vp, v4(p.x, p.y, p.z, 1.0f));
+    if (c.w <= 0.01f) return false;
+    px->x = (c.x / c.w * 0.5f + 0.5f) * E.win_size.x;
+    px->y = (c.y / c.w * 0.5f + 0.5f) * E.win_size.y;
+    return true;
 }
 
 static float seg_dist(vec2 p, vec2 a, vec2 b) {
@@ -919,7 +939,7 @@ static void draw_muzzle(void) {
 
 static float muzzle_pick_dist(vec2 m) {
     vec2 s;
-    if (!E.mz_valid || !E.mz_show || !render_world_to_screen(E.mz_world, &s)) return 1e9f;
+    if (!E.mz_valid || !E.mz_show || !project(NULL, E.mz_world, &s)) return 1e9f;
     return sqrtf((m.x - s.x) * (m.x - s.x) + (m.y - s.y) * (m.y - s.y));
 }
 
@@ -1209,32 +1229,63 @@ static bool scene_cam(World *w, RenderCamera *cam) {
     E.ctx_valid = build_ctx(&E.ctx);
     if (E.mz_sel && !muzzle_weapon()) E.mz_sel = false;   // the target is no gun any more
     muzzle_frame();
+    bool win = own_window();
     if (E.ctx_valid) {
         if (hpx_active(&E.xf)) hp_rig_world(db(), E.xf_target, &E.ctx, &E.defs, E.world);
         else hp_rig_world(db(), t, &E.ctx, &E.defs, E.world);
+        dbg_set_view(win ? 1 : 0);   // the rig is drawn in the editor's view only
         draw_rig();
         draw_muzzle();
         draw_onion();
         draw_gizmo();
+        dbg_set_view(0);
     }
     CharacterInst *ch = local_char();
-    if (E.fp_view || !ch) { E.cam_valid = false; return false; }
+    if ((E.fp_view && !win) || !ch) { E.cam_valid = false; E.win_vp_valid = false; return false; }
     vec3 ctrl_p = E.mz_sel && E.mz_valid ? E.mz_world : (E.active >= 0 ? E.world[E.active].t : E.world[HP_RIG_IK(1)].t);
     vec3 focus = E.ctx_valid ? (E.focus == 1 ? E.world[HP_RIG_ROOT].t : ctrl_p) : ch->root.t;
     Player *p = game_local_player();
     float yaw = p->sim.move.yaw + E.yaw;
     vec3 fwd = dir_from_angles(yaw, E.pitch);
-    cam->pos = v3_madd(focus, fwd, -E.dist);
-    cam->yaw = yaw;
-    cam->pitch = E.pitch;
-    cam->roll = 0;
-    cam->fov_deg = E.fov;
-    cam->vm_fov_deg = E.fov;
-    cam->ads_t = 0;
-    cam->znear = fminf(cam->znear > 0 ? cam->znear : 0.05f, 0.02f);
-    E.cam = *cam;
+    RenderCamera oc = *cam;
+    oc.pos = v3_madd(focus, fwd, -E.dist);
+    oc.yaw = yaw;
+    oc.pitch = E.pitch;
+    oc.roll = 0;
+    oc.fov_deg = E.fov;
+    oc.vm_fov_deg = E.fov;
+    oc.ads_t = 0;
+    oc.znear = fminf(oc.znear > 0 ? oc.znear : 0.05f, 0.02f);
+    E.cam = oc;
     E.cam_valid = true;
-    return true;
+    if (!win) {
+        *cam = oc;
+        return true;
+    }
+    // Own window: the orbit camera is phone view 2 (the scene with the local body in this frame's
+    // pose and the held item where it holds it, the rig over it), shown under the panels. The game
+    // window keeps its first-person camera and sees the same edits at once.
+    int ww = (int)ui_window2_width(), wh = (int)ui_window2_height();
+    E.win_vp_valid = false;
+    if (ww < 16 || wh < 16) return false;
+    RenderPhoneView v;
+    memset(&v, 0, sizeof(v));
+    v.view = RENDER_PHONE_VIEW_WINDOW2;
+    v.pos = oc.pos;
+    v.rot = quat_euler(oc.yaw, oc.pitch, 0.0f);
+    v.fov_deg = oc.fov_deg;
+    v.width = ww;
+    v.height = wh;
+    v.znear = oc.znear;
+    v.lines = true;
+    render_phone_view(&v);
+    E.win_vp = render_phone_view_proj(&v);
+    E.win_size = v2((float)ww, (float)wh);
+    E.win_vp_valid = true;
+    vec3 right = right_from_yaw(oc.yaw);
+    dbg_set_view_camera(1, oc.pos, right, v3_cross(right, fwd));
+    ui_window2_set_background(render_phone_scene(v.view));
+    return false;
 }
 
 // ------------------------------------------------------------------ input
@@ -1341,7 +1392,7 @@ static void handle_keys(struct nk_context *ctx) {
 static void handle_mouse(struct nk_context *ctx) {
     const struct nk_input *in = &ctx->input;
     if (!E.mouse_inject) E.mouse = v2(in->mouse.pos.x, in->mouse.pos.y);
-    bool over_ui = ui_mouse_over_window();
+    bool over_ui = nk_window_is_any_hovered(ctx);
     bool ctrl = key_down(SDL_SCANCODE_LCTRL) || key_down(SDL_SCANCODE_RCTRL);
     bool shift = key_down(SDL_SCANCODE_LSHIFT) || key_down(SDL_SCANCODE_RSHIFT);
     bool alt = key_down(SDL_SCANCODE_LALT) || key_down(SDL_SCANCODE_RALT);
@@ -1513,7 +1564,7 @@ static bool entry_dirty(int i) {
 
 static void draw_list(struct nk_context *ctx) {
     HandPoseDB *d = db();
-    float h = ui_height() * 0.52f;
+    float h = view_h() * 0.52f;
     if (nk_begin(ctx, "HAND POSES", nk_rect(S(8), S(8), S(270), h), NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_MINIMIZABLE)) {
         nk_layout_row_dynamic(ctx, S(22), 2);
         if (nk_option_label(ctx, "Grips", E.list_tab == 0)) E.list_tab = 0;
@@ -1578,8 +1629,8 @@ static void outliner_row(struct nk_context *ctx, int i, int depth) {
 }
 
 static void draw_outliner(struct nk_context *ctx) {
-    float y = ui_height() * 0.52f + S(16);
-    float h = ui_height() - y - S(8);
+    float y = view_h() * 0.52f + S(16);
+    float h = view_h() - y - S(8);
     if (nk_begin(ctx, "OUTLINER", nk_rect(S(8), y, S(270), h), NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_MINIMIZABLE)) {
         nk_layout_row_dynamic(ctx, S(16), 1);
         HpTarget t = target();
@@ -1630,7 +1681,7 @@ static void draw_outliner(struct nk_context *ctx) {
 }
 
 static void draw_toolbar(struct nk_context *ctx) {
-    float x = S(286), w = ui_width() - S(286) - S(348);
+    float x = S(286), w = view_w() - S(286) - S(348);
     if (nk_begin(ctx, "hp_toolbar", nk_rect(x, S(8), w, S(64)), NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR)) {
         nk_layout_row_dynamic(ctx, S(24), 8);
         for (int t = 0; t < 4; t++) if (nk_option_label(ctx, k_tool_names[t], E.tool == t)) E.tool = t;
@@ -1721,7 +1772,7 @@ static void draw_muzzle_panel(struct nk_context *ctx) {
 static void draw_npanel(struct nk_context *ctx) {
     HandPoseDB *d = db();
     float w = S(340);
-    if (nk_begin(ctx, "ITEM / TRANSFORM", nk_rect(ui_width() - w - S(8), S(8), w, ui_height() - S(16)),
+    if (nk_begin(ctx, "ITEM / TRANSFORM", nk_rect(view_w() - w - S(8), S(8), w, view_h() - S(16)),
                  NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_MINIMIZABLE)) {
         char b[260];
         HpTarget t = target();
@@ -1905,8 +1956,13 @@ static void draw_npanel(struct nk_context *ctx) {
         }
         if (nk_tree_push(ctx, NK_TREE_TAB, "View", NK_MINIMIZED)) {
             nk_layout_row_dynamic(ctx, S(22), 2);
-            if (nk_option_label(ctx, "orbit", !E.fp_view)) E.fp_view = false;
-            if (nk_option_label(ctx, "first person", E.fp_view)) E.fp_view = true;
+            if (own_window()) {
+                nk_label(ctx, "orbit", NK_TEXT_LEFT);
+                nk_label(ctx, "first person: the game", NK_TEXT_LEFT);
+            } else {
+                if (nk_option_label(ctx, "orbit", !E.fp_view)) E.fp_view = false;
+                if (nk_option_label(ctx, "first person", E.fp_view)) E.fp_view = true;
+            }
             if (nk_option_label(ctx, "focus control", E.focus == 0)) E.focus = 0;
             if (nk_option_label(ctx, "focus root", E.focus == 1)) E.focus = 1;
             nk_layout_row_dynamic(ctx, S(20), 2);
@@ -1931,8 +1987,8 @@ static void draw_timeline(struct nk_context *ctx) {
     if (!E.case_mode || ci < 0) return;
     HandPoseCase *c = &d->c[ci];
     const HpCaseState *cs = hp_case_state();
-    float x = S(286), w = ui_width() - S(286) - S(348), h = S(178);
-    if (nk_begin(ctx, "TIMELINE", nk_rect(x, ui_height() - h - S(8), w, h), NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_MINIMIZABLE)) {
+    float x = S(286), w = view_w() - S(286) - S(348), h = S(178);
+    if (nk_begin(ctx, "TIMELINE", nk_rect(x, view_h() - h - S(8), w, h), NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_MINIMIZABLE)) {
         char b[200];
         nk_layout_row_dynamic(ctx, S(24), 9);
         if (nk_button_label(ctx, "|<")) hp_case_set_time(0);
@@ -2004,9 +2060,13 @@ static void draw_timeline(struct nk_context *ctx) {
 
 static void scene_draw_ui(void) {
     if (!db() || !game() || !game()->world) return;
-    struct nk_context *ctx = ui_nk();
+    if (E.win && (!ui_window2_is_open() || ui_window2_close_requested())) {   // its close button: leave
+        scene_leave();
+        return;
+    }
+    struct nk_context *ctx = nk();
     handle_mouse(ctx);
-    handle_keys(ctx);
+    if (!own_window() || ui_window2_focused()) handle_keys(ctx);
     if (!nk_input_is_mouse_down(&ctx->input, NK_BUTTON_LEFT) && !hpx_active(&E.xf)) hp_undo_break(&E.undo);   // one undo step per drag
     draw_list(ctx);
     draw_outliner(ctx);
@@ -2036,6 +2096,10 @@ static bool scene_enter_fn(void) {
     }
     select_only(HP_RIG_IK(1));
     freeze_world(true);
+    E.win = E.win_cvar && E.win_cvar->i && ui_window2_open("Deadground - Hand pose editor");
+    if (E.win_cvar && E.win_cvar->i && !E.win) log_warn("scene handpose: no own window (see above), the panels are in the game window");
+    E.win_vp_valid = false;
+    g_chars_held_self = E.win;   // the held item shows in the editor's view (phone view 2)
     return true;
 }
 
@@ -2045,6 +2109,9 @@ static void scene_leave_fn(void) {
     if (g) hp_case_leave(g->world);
     restore_slot();
     freeze_world(false);
+    if (E.win) ui_window2_close();
+    E.win = E.win_vp_valid = false;
+    g_chars_held_self = false;
     cvar_set_int(cvar_find("holdpoint_force_state"), E.saved_force);
     cvar_set_int(cvar_find("holdpoint_static"), E.saved_static);
     E.case_mode = false;
@@ -2063,6 +2130,7 @@ static const GameScene k_scene = {
     .draw = scene_draw_ui,
     .free_cursor = true,
     .hide_hud = true,
+    .own_window = own_window,
 };
 
 // ------------------------------------------------------------------ hpe command (scripts / tests)
@@ -2205,7 +2273,7 @@ static void cmd_hpe(int argc, const char **argv) {
     if (!d || argc < 2) {
         log_info("hpe select <grip> | case <id> | ctrl <name> [add] | key <name>... | xform move|rotate|scale [x|y|z|-x|...] <value> | local <loc|rot|scale> x [y z] | "
                  "clear g|r|s | time <s> | play | stop | keyframe | mirror on|off | tool <name> | orient <name> | pivot <name> | light neutral|world | save | undo | redo | "
-                 "view orbit|fp|root|ctrl|<yaw> <pitch> <dist> | freeze begin|check | dump | "
+                 "view orbit|fp|root|ctrl|<yaw> <pitch> <dist> | freeze begin|check | dump | window <png> | "
                  "muzzle [<x> <y> <z>|select|deselect|bore|tip|default|revert|save|show on|off]");
         return;
     }
@@ -2234,13 +2302,13 @@ static void cmd_hpe(int argc, const char **argv) {
             if (sc >= 0) E.key_inject[E.key_inject_n++] = (u8)sc;
         }
         // Applied directly (the injected presses act now, before the next frame).
-        struct nk_context *ctx = ui_nk();
+        struct nk_context *ctx = nk();
         if (ctx) handle_keys(ctx);
         E.key_inject_n = 0;
         return;
     }
     if (!strcmp(c, "mouse") && argc > 3) {
-        E.mouse = v2((float)atof(argv[2]) * ui_width(), (float)atof(argv[3]) * ui_height());
+        E.mouse = v2((float)atof(argv[2]) * view_w(), (float)atof(argv[3]) * view_h());
         E.mouse_inject = true;
         if (hpx_active(&E.xf)) xform_update(E.mouse, false);
         return;
@@ -2307,6 +2375,11 @@ static void cmd_hpe(int argc, const char **argv) {
         return;
     }
     if (!strcmp(c, "freeze") && argc > 2) { freeze_snapshot(!strcmp(argv[2], "check")); return; }
+    if (!strcmp(c, "window") && argc > 2) {   // a screenshot of the editor's own window (the next frame it draws)
+        if (!own_window()) { log_warn("hpe window: the editor has no own window (handpose_editor_window 0?)"); return; }
+        render_window2_screenshot(argv[2]);
+        return;
+    }
     if (!strcmp(c, "clear") && argc > 2) {
         int ch = argv[2][0] == 'g' ? HPA_T : argv[2][0] == 'r' ? HPA_R : HPA_S;
         HpTarget t = target();
@@ -2332,6 +2405,8 @@ static void cmd_hpe(int argc, const char **argv) {
 
 void hp_editor_register(void) {
     scene_register(&k_scene);
+    E.win_cvar = cvar_reg_bool("handpose_editor_window", true, CVAR_LOCKED,
+                               "hand pose editor: the panels and the orbit view in their own window (the game window keeps its first-person view and HUD); 0 = in the game window");
     E.save_dir = cvar_reg_string("handpose_editor_dir", "", CVAR_LOCKED, "hand pose editor: save into this directory only (tests); empty = assets/handposes in the source tree + the runtime copy");
     cmd_register("hpe", cmd_hpe, "hand pose editor (scene handpose) commands for scripts: hpe with no arguments lists them");
 }

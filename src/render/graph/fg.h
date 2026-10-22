@@ -93,6 +93,7 @@ VkCommandBuffer fg_exec_rest(void);
 // The last graphics batch also waits `wait` (binary, at wait_stage), signals `signal` (binary) and
 // `fence`.
 void fg_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal, VkFence fence);
+void fg_submit_extra(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal);   // the next fg_submit's last graphics batch also waits / signals these (the second window)
 
 // Inside exec callbacks (and after fg_execute for debug views).
 VkImageView fg_view(FgRes r);

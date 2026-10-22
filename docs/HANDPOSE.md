@@ -174,6 +174,33 @@ Root (item root / case anchor)          translate / rotate / scale (scale: grips
 the selected grip's item (the primary slot, restored on leave), the hold point has no sway, and the
 view is an orbit camera (or first person).
 
+### Own window
+
+By default (`handpose_editor_window 1`) the editor opens in a second OS window ("Deadground - Hand
+pose editor", 1600 x 900, resizable) with every panel and the orbit view. The game window stays as
+it is: the first-person view, the HUD, its mouse and input. It updates every frame, so each edit
+(grip, root, fingers, preview state, muzzle) shows at once in the first-person view. The world is
+frozen as before. Closing the editor window leaves the scene, like **Leave**. Closing the game window quits.
+
+- Input: the editor window's events never reach the game. Its keys act only while it has the
+  keyboard focus; in the game window the keys are the game's. Clicking into the game window
+  captures the mouse as usual (look around to check the grip at any pitch); Alt+Tab or Esc frees it.
+- The orbit view is phone camera view 2 (`render/phone_view.h`). It is the scene from the editor's
+  camera, forward lit, with the sky and the light post (the main view's exposure). It shows the local
+  body in this frame's first-person pose (head included: the selfie body, `MAT_SELF`) and the held
+  item where the body holds it (`g_chars_held_self`). It is drawn under the panels. The rig, gizmo, muzzle and onion
+  skin are drawn into that view only (`dbg_set_view(1)` -> `render_set_3d_view(1)`), never in the game.
+- The first-person view option is the game window itself (the View tab says so). `hpe view fp`
+  has no effect there.
+- Renderer: `src/render/vk_window2.c` owns the second surface and swapchain (same format as the main
+  one, mailbox / immediate). Its image is acquired without waiting and its UI pass is recorded after
+  the final pass in the same frame graph and submit. Both swapchains are presented together, and a
+  frame with no free image skips the editor window only.
+- `handpose_editor_window 0`: the panels and the orbit camera in the game window, as before (the
+  fallback when the second window can't be created, logged).
+- Tests: `hpe window <png>` captures the editor window (the next frame it draws);
+  `tools/tests/hp_window.cfg` takes both windows before / after an edit and in a case.
+
 ### Panels
 
 - **HAND POSES** (left top): Grips / Cases tabs, a category filter (grips), a text filter,
@@ -319,7 +346,7 @@ hpe local loc|rot|scale x [y z]       hpe clear g|r|s
 hpe time <s> | play | stop | keyframe
 hpe tool <name> | orient <name> | pivot individual|median|active | mirror on|off | onion on|off
 hpe light neutral|world | state <hold state> | view orbit|fp|root|ctrl|<yaw> <pitch> <dist>
-hpe save | undo | redo | dump | freeze begin|check
+hpe save | undo | redo | dump | freeze begin|check | window <png>
 hpe muzzle [<x> <y> <z> | select | deselect | bore | tip | default | revert | save | show on|off]
 ```
 

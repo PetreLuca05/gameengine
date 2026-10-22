@@ -27,7 +27,21 @@ float ui_text(float x, float y, FontSize f, u32 color, int align, const char *te
 float ui_textf(float x, float y, FontSize f, u32 color, int align, const char *fmt, ...);
 float ui_text_shadow(float x, float y, FontSize f, u32 color, int align, const char *text);
 
-void ui_render(void);  // flushes HUD + Nuklear output to the renderer
+void ui_render(void);  // flushes HUD + Nuklear output to the renderer (and the second window's)
+
+// Second window (dev tools: the hand pose editor's own window, docs/HANDPOSE.md "Own window"): an OS
+// window with its own Nuklear context (same font, style and scale). Its events never reach the game
+// or the main UI; coordinates are its own pixels. render.h "Second window" draws it.
+bool ui_window2_open(const char *title);          // false: it couldn't be created (logged)
+void ui_window2_close(void);
+bool ui_window2_is_open(void);
+struct nk_context *ui_window2_nk(void);
+bool ui_window2_handle_event(const union SDL_Event *ev);   // true: the event is its own (consumed)
+float ui_window2_width(void);
+float ui_window2_height(void);
+bool ui_window2_focused(void);                    // it has the keyboard focus
+bool ui_window2_close_requested(void);            // its close button since the last call
+void ui_window2_set_background(u32 texture);      // this frame: a TextureId over the whole window under the panels (0 = none)
 float ui_width(void);
 float ui_height(void);
 float ui_scale(void);

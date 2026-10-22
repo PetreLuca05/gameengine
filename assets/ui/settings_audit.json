@@ -679,6 +679,12 @@
    "reason": "Hand pose editor / hands rig tuning: dev tools.",
    "category": "camera"
   },
+  "handpose_editor_window": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Hand pose editor in its own window: dev tools.",
+   "category": "camera"
+  },
   "handpose_watch": {
    "class": "LOCKED",
    "ui": "—",

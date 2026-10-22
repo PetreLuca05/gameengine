@@ -209,7 +209,7 @@ static void create_frames(void) {
         VK_CHECK(vkCreateSemaphore(R->device, &sci, NULL, &f->image_available));
         f->ubo = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         f->ubo_pip = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
-        for (int k = 0; k < 2; k++) f->ubo_phone[k] = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
+        for (int k = 0; k < 3; k++) f->ubo_phone[k] = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         f->ubo_preview = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         f->dyn = vkr_buffer_create(DYN_BUFFER_SIZE, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, true);
         f->instances = vkr_buffer_create(sizeof(GpuSkinInstance) * MAX_SKIN_DRAWS * 8, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // main + shadow + 5 culled shadow (PF-0011) + vm / phone / preview
@@ -221,12 +221,12 @@ static void create_frames(void) {
         ai.pSetLayouts = &R->frame_layout;
         VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &f->frame_set));
         VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &f->frame_set_pip));
-        for (int k = 0; k < 2; k++) VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &f->frame_set_phone[k]));
+        for (int k = 0; k < 3; k++) VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &f->frame_set_phone[k]));
         VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &f->frame_set_preview));
         // The PiP / phone / preview sets: their own frame UBO, the same skinning / previous-model buffers.
         VkDescriptorSet sets[FRAME_SET_COUNT];
         frame_sets_of(f, sets);
-        GpuBuffer *ubos[FRAME_SET_COUNT] = { &f->ubo, &f->ubo_pip, &f->ubo_phone[0], &f->ubo_phone[1], &f->ubo_preview };
+        GpuBuffer *ubos[FRAME_SET_COUNT] = { &f->ubo, &f->ubo_pip, &f->ubo_phone[0], &f->ubo_phone[1], &f->ubo_preview, &f->ubo_phone[2] };
         for (int s = 0; s < FRAME_SET_COUNT; s++) {
             VkDescriptorBufferInfo bi = { ubos[s]->buffer, 0, sizeof(FrameData) };
             VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
@@ -288,7 +288,7 @@ static void destroy_frames(void) {
         vkr_flush_deferred(f);
         vkr_buffer_destroy_now(&f->ubo);
         vkr_buffer_destroy_now(&f->ubo_pip);
-        for (int k = 0; k < 2; k++) vkr_buffer_destroy_now(&f->ubo_phone[k]);
+        for (int k = 0; k < 3; k++) vkr_buffer_destroy_now(&f->ubo_phone[k]);
         vkr_buffer_destroy_now(&f->ubo_preview);
         vkr_buffer_destroy_now(&f->dyn);
         vkr_buffer_destroy_now(&f->bones);   // a no-op unless made (bind_bones)
@@ -351,6 +351,8 @@ bool render_init(SDL_Window *window) {
     R->line_cpu[1] = (LineVertex *)malloc(sizeof(LineVertex) * R->line_cap);
     R->text_cap = 196608;
     R->text_cpu = (TextVertex *)malloc(sizeof(TextVertex) * R->text_cap);
+    for (int k = 0; k < 2; k++) R->w2_line_cpu[k] = (LineVertex *)malloc(sizeof(LineVertex) * W2_LINE_CAP);
+    R->w2_text_cpu = (TextVertex *)malloc(sizeof(TextVertex) * W2_TEXT_CAP);
     R->ui_vcap = 524288; R->ui_icap = 1572864; R->ui_ccap = 12288;   // the screen's layers + an offscreen layer (gui_draw.c)
     R->ui_verts = (UiVertex *)malloc(sizeof(UiVertex) * R->ui_vcap);
     R->ui_indices = (u32 *)malloc(sizeof(u32) * R->ui_icap);
@@ -398,6 +400,7 @@ void render_shutdown(void) {
         vkx_shutdown();
         vkw_shutdown();
         render_ui_shutdown();
+        vkw2_shutdown();
         phone_view_shutdown();
         char_preview_view_shutdown();
         vkr_target_destroy(&R->occl);
@@ -419,6 +422,7 @@ void render_shutdown(void) {
     free(R->draws); free(R->vm_draws);
     free(R->skin_draws); free(R->skin_bones); free(R->prev_bones); free(R->prev_models_cpu); free(R->obj_slots);
     free(R->line_cpu[0]); free(R->line_cpu[1]); free(R->text_cpu);
+    free(R->w2_line_cpu[0]); free(R->w2_line_cpu[1]); free(R->w2_text_cpu);
     free(R->ui_verts); free(R->ui_indices); free(R->ui_cmds);
     free(R);
     g_engine.render = NULL;
@@ -503,6 +507,9 @@ bool render_begin_frame(void) {
     R->skin_epoch++;
     R->line_count[0] = R->line_count[1] = 0;
     R->text_count = 0;
+    R->w2_line_count[0] = R->w2_line_count[1] = R->w2_text_count = 0;
+    R->w2_ui_ccount = 0;
+    R->view3d = 0;
     R->ui_vcount = R->ui_icount = R->ui_ccount = 0;
     R->ui_off_count = R->ui_off_ccount = 0;
     memset(&R->sight, 0, sizeof(R->sight));   // the game sets this frame's sight (render_set_sight)
@@ -788,8 +795,16 @@ static void write_cookie_binding(void) {
     R->spot_cookie_bound = t;
 }
 
+void render_set_3d_view(int view) { R->view3d = view == 1 ? 1 : 0; }
+
 LineVertex *render_lines_alloc(u32 count, bool depth_test) {
     int k = depth_test ? 0 : 1;
+    if (R->view3d) {
+        if (R->w2_line_count[k] + count > W2_LINE_CAP) return NULL;
+        LineVertex *v = R->w2_line_cpu[k] + R->w2_line_count[k];
+        R->w2_line_count[k] += count;
+        return v;
+    }
     if (R->line_count[k] + count > R->line_cap) return NULL;
     LineVertex *v = R->line_cpu[k] + R->line_count[k];
     R->line_count[k] += count;
@@ -797,6 +812,12 @@ LineVertex *render_lines_alloc(u32 count, bool depth_test) {
 }
 
 TextVertex *render_text_alloc(u32 count) {
+    if (R->view3d) {
+        if (R->w2_text_count + count > W2_TEXT_CAP) return NULL;
+        TextVertex *v = R->w2_text_cpu + R->w2_text_count;
+        R->w2_text_count += count;
+        return v;
+    }
     if (R->text_count + count > R->text_cap) {
         static int warned;
         if (!warned++) log_warn("render: 3D text buffer full (%u verts)", R->text_cap);
@@ -819,6 +840,29 @@ void render_ui(const UiVertex *verts, u32 vcount, const u32 *indices, u32 icount
         UiDrawCmd c = cmds[i];
         c.index_offset += ibase;
         R->ui_cmds[R->ui_ccount++] = c;
+    }
+    R->ui_vcount += vcount;
+    R->ui_icount += icount;
+}
+
+// The second window's UI (vk_window2.c): like an offscreen job, one per frame.
+void render_window2_ui(const UiVertex *verts, u32 vcount, const u32 *indices, u32 icount, const UiDrawCmd *cmds, u32 ccount) {
+    if (!render_window2_active() || R->w2_ui_ccount) return;
+    if (R->ui_vcount + vcount > R->ui_vcap || R->ui_icount + icount > R->ui_icap || R->ui_ccount + R->ui_off_ccount + ccount > R->ui_ccap) {
+        static int warned;
+        if (!warned++) log_warn("render: second window UI dropped (%u verts, %u indices, %u cmds over the UI budget)", vcount, icount, ccount);
+        return;
+    }
+    u32 vbase = R->ui_vcount, ibase = R->ui_icount;
+    memcpy(R->ui_verts + vbase, verts, sizeof(UiVertex) * vcount);
+    for (u32 i = 0; i < icount; i++) R->ui_indices[ibase + i] = indices[i] + vbase;
+    R->ui_off_ccount += ccount;
+    R->w2_ui_first = R->ui_ccap - R->ui_off_ccount;
+    R->w2_ui_ccount = ccount;
+    for (u32 i = 0; i < ccount; i++) {
+        UiDrawCmd c = cmds[i];
+        c.index_offset += ibase;
+        R->ui_cmds[R->w2_ui_first + i] = c;
     }
     R->ui_vcount += vcount;
     R->ui_icount += icount;
@@ -1936,6 +1980,7 @@ static struct {
     SkinPass *skin_main, *skin_vm, *skin_phone, *skin_preview;
     bool any_skin_vm;
     VkDeviceSize line_off[2], text_off, ui_voff, ui_ioff;
+    VkDeviceSize w2_line_off[2], w2_text_off;   // phone view 2's lines / text (the second window)
     FgRes hdr, depth, vm_depth, normal, material, velocity, swap, scene_copy, ldr;
     int shadows;            // the shadow maps' marker pass (render_end_frame records them there)
     PostLitInputs lit;
@@ -2321,7 +2366,7 @@ static void exec_scope_pip_fx(VkCommandBuffer cmd, void *u) {
 // no screen-space inputs). The local player's phone, hands and held items are in the viewmodel
 // list and never drawn here.
 typedef struct AltScene { FgRes color, depth; u32 w, h; vec4 frustum[6]; int slot; } AltScene;
-static AltScene g_alt[2];
+static AltScene g_alt[3];
 
 static void exec_alt_scene(VkCommandBuffer cmd, void *u) {
     const AltScene *a = (const AltScene *)u;
@@ -2370,12 +2415,13 @@ static void exec_alt_scene(VkCommandBuffer cmd, void *u) {
 // Registers a scene pass for phone view `slot` (its frame UBO = this frame's with the view's
 // camera). Returns the pass index (< 0 when disabled).
 int render_alt_scene_pass(int slot, const char *name, FgRes color, FgRes depth, u32 w, u32 h, mat4 view, mat4 proj, vec3 cam, FrameData *fd) {
-    AltScene *a = &g_alt[slot & 1];
+    slot = DG_CLAMP(slot, 0, 2);
+    AltScene *a = &g_alt[slot];
     a->color = color;
     a->depth = depth;
     a->w = w;
     a->h = h;
-    a->slot = slot & 1;
+    a->slot = slot;
     mat4 vp = mat4_mul(proj, view);
     extract_frustum(vp, a->frustum);
     FrameData *pd = (FrameData *)F.f->ubo_phone[a->slot].mapped;
@@ -2394,6 +2440,59 @@ int render_alt_scene_pass(int slot, const char *name, FgRes color, FgRes depth, 
     fg_write(p, color, FG_COLOR);
     fg_write(p, depth, FG_DEPTH);
     return p;
+}
+
+// The second window's 3D lines / text (render_set_3d_view(1): the hand pose editor's rig, gizmo and
+// labels) over phone view 2 after its sky: depth tested ones against its depth, then the overlay
+// ones and the text without, as the main view draws its own.
+static void exec_alt_lines(VkCommandBuffer cmd, void *u) {
+    const AltScene *a = (const AltScene *)u;
+    FrameResources *f = F.f;
+    VkDescriptorSet set = f->frame_set_phone[a->slot];
+    VkRenderingAttachmentInfo ca = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    ca.imageView = fg_view(a->color);
+    ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    ca.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    da.imageView = fg_view(a->depth);
+    da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
+    da.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    da.storeOp = VK_ATTACHMENT_STORE_OP_NONE;
+    VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+    ri.renderArea.extent.width = a->w;
+    ri.renderArea.extent.height = a->h;
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments = &ca;
+    ri.pDepthAttachment = &da;
+    vkCmdBeginRendering(cmd, &ri);
+    set_viewport(cmd, a->w, a->h);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &set, 0, NULL);
+    for (int k = 0; k < 2; k++) {
+        if (!R->w2_line_count[k] || F.w2_line_off[k] == (VkDeviceSize)-1) continue;
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[k ? PIPE_LINES_OVERLAY : PIPE_LINES]);
+        vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buffer, &F.w2_line_off[k]);
+        vkCmdDraw(cmd, R->w2_line_count[k], 1, 0, 0);
+        R->stats.draw_calls++;
+    }
+    if (R->w2_text_count && F.w2_text_off != (VkDeviceSize)-1) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_TEXT]);
+        TextureId atlas = R->textures[R->text_atlas].ready ? R->text_atlas : R->white_tex;
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[atlas].set, 0, NULL);
+        vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buffer, &F.w2_text_off);
+        vkCmdDraw(cmd, R->w2_text_count, 1, 0, 0);
+        R->stats.draw_calls++;
+    }
+    vkCmdEndRendering(cmd);
+}
+
+void render_alt_lines_pass(int slot, const char *name) {
+    AltScene *a = &g_alt[DG_CLAMP(slot, 0, 2)];
+    if (!R->w2_line_count[0] && !R->w2_line_count[1] && !R->w2_text_count) return;
+    int p = fg_pass(name, exec_alt_lines, a);
+    fg_write(p, a->color, FG_COLOR);
+    fg_read(p, a->depth, FG_DEPTH_READ);
 }
 
 // The inventory character preview (char_preview_view.c, docs/CHARACTERS.md "Character preview"): its
@@ -2828,6 +2927,7 @@ static void build_frame_graph(FrameData *fd) {
         static int warned;
         if (!warned++) log_warn("render: the final pass can't be disabled (black frame)");
     }
+    vkw2_build();   // the second window (its UI over phone view 2's scene)
 }
 
 // The sun's casters into one cascade tile (k 0..3) or the moon map (k 4): raster draws (culled
@@ -2921,6 +3021,7 @@ static void record_rain_occlusion(VkCommandBuffer cmd, FrameResources *f) {
 
 void render_end_frame(void) {
     if (!R->frame_active) return;
+    vkw2_frame_begin();   // the second window's image (resize / acquire first: may wait for the GPU)
     write_cookie_binding();
     write_weather_bindings();
     vks_write_bindings();
@@ -2961,6 +3062,8 @@ void render_end_frame(void) {
     for (int k = 0; k < 2; k++)
         if (R->line_count[k]) F.line_off[k] = dyn_push(f, R->line_cpu[k], sizeof(LineVertex) * R->line_count[k]);
     F.text_off = R->text_count ? dyn_push(f, R->text_cpu, sizeof(TextVertex) * R->text_count) : 0;
+    for (int k = 0; k < 2; k++) F.w2_line_off[k] = R->w2_line_count[k] ? dyn_push(f, R->w2_line_cpu[k], sizeof(LineVertex) * R->w2_line_count[k]) : (VkDeviceSize)-1;
+    F.w2_text_off = R->w2_text_count ? dyn_push(f, R->w2_text_cpu, sizeof(TextVertex) * R->w2_text_count) : (VkDeviceSize)-1;
     {
         static int warned;
         if (F.text_off == (VkDeviceSize)-1 && !warned++)
@@ -3245,6 +3348,7 @@ void render_end_frame(void) {
                           VK_PIPELINE_STAGE_2_NONE, 0, 1);
     }
 
+    vkw2_finish(cmd);
     arena_pop_to(skin_mark);
     vkp_scope_end(cmd);
     if (g_frame_qp) {
@@ -3253,28 +3357,46 @@ void render_end_frame(void) {
     }
     // Every batch of both queues (one graphics batch without async compute); the last graphics batch
     // waits for the swapchain image, signals the present and the slot's fence.
+    {
+        VkSemaphore w2_wait, w2_signal;
+        vkw2_semaphores(&w2_wait, &w2_signal);
+        fg_submit_extra(w2_wait, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, w2_signal);
+    }
     fg_submit(f->image_available, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, R->render_done[R->image_index], f->fence);
 
+    // One present for the main swapchain and the second window's (when it drew this frame).
+    VkSwapchainKHR pres_sc[2] = { R->swapchain, VK_NULL_HANDLE };
+    u32 pres_idx[2] = { R->image_index, 0 };
+    VkSemaphore pres_wait[2] = { R->render_done[R->image_index], VK_NULL_HANDLE };
+    u32 pres_n = vkw2_present(pres_sc, pres_idx, pres_wait);
+    VkResult pres_res[2] = { VK_SUCCESS, VK_SUCCESS };
     VkPresentInfoKHR pi = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
-    pi.waitSemaphoreCount = 1;
-    pi.pWaitSemaphores = &R->render_done[R->image_index];
-    pi.swapchainCount = 1;
-    pi.pSwapchains = &R->swapchain;
-    pi.pImageIndices = &R->image_index;
+    pi.waitSemaphoreCount = pres_n;
+    pi.pWaitSemaphores = pres_wait;
+    pi.swapchainCount = pres_n;
+    pi.pSwapchains = pres_sc;
+    pi.pImageIndices = pres_idx;
+    pi.pResults = pres_res;
     PROF_WAIT_BEGIN(PW_PRESENT);
     VkResult pres = vkQueuePresentKHR(R->queue, &pi);
     PROF_WAIT_END();
+    if (pres_n > 1) {
+        pres = pres_res[0];
+        vkw2_present_result(pres_res[1]);
+    }
     if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) R->swap_dirty = true;
     else if (pres != VK_SUCCESS) log_error("present failed %d", (int)pres);
 
     bool want_exr = post_exr_capture_armed();
     bool want_ui = render_ui_wants_wait();
-    if (want_shot || want_exr || want_ui) {
+    bool want_w2 = vkw2_shot_pending();
+    if (want_shot || want_exr || want_ui || want_w2) {
         PROF_WAIT_BEGIN(PW_READBACK);
         VK_CHECK(vkWaitForFences(R->device, 1, &f->fence, VK_TRUE, UINT64_MAX));
         PROF_WAIT_END();
     }
     render_ui_frame_done();
+    vkw2_shot_finish();
     if (want_shot) {
         vmaInvalidateAllocation(R->vma, shot.alloc, 0, VK_WHOLE_SIZE);
         save_screenshot(&shot, R->swap_extent.width, R->swap_extent.height);

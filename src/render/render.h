@@ -543,6 +543,19 @@ void render_ui3d_target_destroy(TextureId t);
 void render_ui3d(const RenderUi3dView *v);   // this frame, before the UI
 void render_end_frame(void);
 
+// Second window (dev tools: the hand pose editor's own window, docs/HANDPOSE.md "Own window"): an
+// SDL window the caller creates, with its own swapchain on the same device, presented with the main
+// one. Each frame it shows its UI (render_window2_ui) over a dark clear; the scene in it is phone
+// view 2 (render/phone_view.h), drawn by that UI as an image. Its 3D lines / text are separate from
+// the main view's: render_set_3d_view(1) routes render_lines_alloc / render_text_alloc to them.
+bool render_window2_open(struct SDL_Window *window);   // false: no presentable surface in the main format (logged)
+void render_window2_close(void);
+bool render_window2_active(void);
+void render_window2_size(int *w, int *h);              // its swapchain in pixels (0 x 0: closed / minimised)
+void render_window2_ui(const UiVertex *verts, u32 vcount, const u32 *indices, u32 icount, const UiDrawCmd *cmds, u32 ccount);   // this frame's, once
+void render_window2_screenshot(const char *path);      // the next frame it draws, as PNG
+void render_set_3d_view(int view);                     // 0: the main view (default each frame), 1: the second window's scene
+
 // ------------------------------------------------------------------ VFX (src/render/vk_vfx.c)
 // GPU particle simulation (compute), sorted / additive / distortion particle passes, decals and
 // bloom. The game layer (src/vfx/vfx.c) feeds one RenderVfxFrame per rendered frame.

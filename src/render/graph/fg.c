@@ -963,6 +963,15 @@ VkCommandBuffer fg_exec_rest(void) {
     return G.batch[0].cmd;
 }
 
+static VkSemaphore g_extra_wait, g_extra_signal;
+static VkPipelineStageFlags2 g_extra_stage;
+
+void fg_submit_extra(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal) {
+    g_extra_wait = wait;
+    g_extra_stage = wait_stage;
+    g_extra_signal = signal;
+}
+
 void fg_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal, VkFence fence) {
     PROF_BEGIN("fg:submit");
     int lg = 0, la = -1;
@@ -976,7 +985,7 @@ void fg_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore s
     // One vkQueueSubmit2 per queue, each queue's batches in order (timeline semaphores allow a wait
     // submitted before its signal: the graphics queue goes first, its pre batch starts at once).
     VkSubmitInfo2 si[2][FG_MAX_BATCHES];
-    VkSemaphoreSubmitInfo ws[FG_MAX_BATCHES][3], ss[FG_MAX_BATCHES][2];
+    VkSemaphoreSubmitInfo ws[FG_MAX_BATCHES][4], ss[FG_MAX_BATCHES][3];
     VkCommandBufferSubmitInfo cb[FG_MAX_BATCHES];
     u32 nsi[2] = { 0, 0 };
     for (int b = 0; b < G.batch_n; b++) {
@@ -990,10 +999,13 @@ void fg_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore s
             if (la >= 0)
                 ws[b][nw++] = (VkSemaphoreSubmitInfo){ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, NULL, G.timeline[1], G.batch[la].value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0 };
             if (wait) ws[b][nw++] = (VkSemaphoreSubmitInfo){ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, NULL, wait, 0, wait_stage, 0 };
+            if (g_extra_wait) ws[b][nw++] = (VkSemaphoreSubmitInfo){ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, NULL, g_extra_wait, 0, g_extra_stage, 0 };
         }
         if (bt->signal)
             ss[b][ns++] = (VkSemaphoreSubmitInfo){ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, NULL, G.timeline[bt->queue], bt->value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0 };
         if (b == lg && signal) ss[b][ns++] = (VkSemaphoreSubmitInfo){ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, NULL, signal, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0 };
+        if (b == lg && g_extra_signal)
+            ss[b][ns++] = (VkSemaphoreSubmitInfo){ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, NULL, g_extra_signal, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0 };
         cb[b] = (VkCommandBufferSubmitInfo){ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, NULL, bt->cmd, 0 };
         VkSubmitInfo2 *i = &si[bt->queue][nsi[bt->queue]++];
         *i = (VkSubmitInfo2){ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
@@ -1005,6 +1017,7 @@ void fg_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore s
         i->pSignalSemaphoreInfos = ss[b];
     }
     VK_CHECK(vkQueueSubmit2(R->queue, nsi[0], si[0], fence));
+    g_extra_wait = g_extra_signal = VK_NULL_HANDLE;   // one submit
     if (nsi[1]) VK_CHECK(vkQueueSubmit2(G.async_kind == 1 ? R->compute_queue : R->gfx_queue2, nsi[1], si[1], VK_NULL_HANDLE));
     PROF_END();
 }

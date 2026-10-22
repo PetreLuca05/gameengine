@@ -14,6 +14,8 @@
 
 #define FRAMES_IN_FLIGHT 2
 #define MAX_SWAP_IMAGES 8
+#define W2_LINE_CAP 65536   // the second window's 3D line vertices (each of depth tested / overlay)
+#define W2_TEXT_CAP 32768   // and text vertices
 #define MAX_MESHES 16384
 #define MAX_TEXTURES 1024
 #define MAX_MAT_SETS 256
@@ -115,8 +117,8 @@ typedef struct FrameResources {
     VkDescriptorSet frame_set;
     GpuBuffer ubo_pip;    // scope picture-in-picture camera (same layout as ubo)
     VkDescriptorSet frame_set_pip;
-    GpuBuffer ubo_phone[2];   // phone camera views (src/render/phone_view.c)
-    VkDescriptorSet frame_set_phone[2];
+    GpuBuffer ubo_phone[3];   // phone camera views (src/render/phone_view.c; view 2: the second window's scene)
+    VkDescriptorSet frame_set_phone[3];
     GpuBuffer ubo_preview;    // the inventory character preview (src/render/char_preview_view.c)
     VkDescriptorSet frame_set_preview;
     GpuBuffer dyn;        // host-visible: lines, text, ui
@@ -131,13 +133,14 @@ typedef struct FrameResources {
 
 // Every frame descriptor set of a frame slot (main, scope PiP, phone views, character preview):
 // bindings shared by all of them (shadow map, sky, weather, cookie) are written to each.
-#define FRAME_SET_COUNT 5
+#define FRAME_SET_COUNT 6
 DG_INLINE void frame_sets_of(const FrameResources *f, VkDescriptorSet *out) {
     out[0] = f->frame_set;
     out[1] = f->frame_set_pip;
     out[2] = f->frame_set_phone[0];
     out[3] = f->frame_set_phone[1];
     out[4] = f->frame_set_preview;
+    out[5] = f->frame_set_phone[2];
 }
 
 // Must match shaders/common.glsl (std140).
@@ -437,6 +440,13 @@ typedef struct Renderer {
     u32 line_cap;
     TextVertex *text_cpu;
     u32 text_count, text_cap;
+    // The second window's scene (phone view 2) has its own 3D lines / text: render_set_3d_view(1).
+    int view3d;
+    LineVertex *w2_line_cpu[2];
+    u32 w2_line_count[2];
+    TextVertex *w2_text_cpu;
+    u32 w2_text_count;
+    u32 w2_ui_first, w2_ui_ccount;   // the second window's UI commands (the end of ui_cmds, like ui_off)
     UiVertex *ui_verts; u32 ui_vcount, ui_vcap;
     u32 *ui_indices; u32 ui_icount, ui_icap;
     UiDrawCmd *ui_cmds; u32 ui_ccount, ui_ccap;
@@ -604,6 +614,17 @@ TextureId vkr_texture_wrap(VkImage image, VkImageView view, u32 w, u32 h, VkForm
 void vkr_texture_rewrap(TextureId id, VkImage image, VkImageView view, u32 w, u32 h);
 void vkr_texture_unwrap(TextureId id);
 void vkr_destroy_all_resources(void);
+
+// vk_window2.c: the second window's swapchain (render.h "Second window"), hooked into render_end_frame.
+void vkw2_frame_begin(void);                  // before recording: resize, acquire (never waits)
+void vkw2_build(void);                        // build_frame_graph, after the final pass
+void vkw2_finish(VkCommandBuffer cmd);        // after the graph: to the present layout (+ screenshot copy)
+void vkw2_semaphores(VkSemaphore *wait, VkSemaphore *signal);
+u32 vkw2_present(VkSwapchainKHR *swapchains, u32 *indices, VkSemaphore *waits);   // [1] = its image; returns the count
+void vkw2_present_result(VkResult r);
+bool vkw2_shot_pending(void);
+void vkw2_shot_finish(void);                  // after the frame's fence
+void vkw2_shutdown(void);
 
 // vk_pipelines.c
 bool vkp_create_layouts(void);

@@ -7,8 +7,8 @@
 #include "core/log.h"
 
 typedef struct PhoneTarget {
-    RenderTarget scene, screen, panel;   // persistent (scene: storage + transfer src, screen / panel: storage + sampled)
-    TextureId screen_tex, panel_tex;
+    RenderTarget scene, screen, panel;   // persistent (scene: storage + transfer src + sampled, screen / panel: storage + sampled)
+    TextureId scene_tex, screen_tex, panel_tex;
     int w, h, pw, ph;
 } PhoneTarget;
 
@@ -33,6 +33,15 @@ static struct {
 } PV;
 
 int render_alt_scene_pass(int slot, const char *name, FgRes color, FgRes depth, u32 w, u32 h, mat4 view, mat4 proj, vec3 cam, struct FrameData *fd);
+void render_alt_lines_pass(int slot, const char *name);
+
+// Pass names per view (the GPU timings find a view's passes by the last character).
+static const char *k_scene_name[RENDER_PHONE_VIEWS] = { "phone_scene0", "phone_scene1", "phone_scene2" };
+static const char *k_lines_name[RENDER_PHONE_VIEWS] = { "phone_lines0", "phone_lines1", "phone_lines2" };
+static const char *k_post_name[RENDER_PHONE_VIEWS] = { "phone_post0", "phone_post1", "phone_post2" };
+static const char *k_panel_name[RENDER_PHONE_VIEWS] = { "phone_panel0", "phone_panel1", "phone_panel2" };
+static const char *k_copy_name[RENDER_PHONE_VIEWS] = { "phone_copy0", "phone_copy1", "phone_copy2" };
+static const char *k_ready_name[RENDER_PHONE_VIEWS] = { "phone_ready0", "phone_ready1", "phone_ready2" };
 
 static void pv_init(void) {
     if (PV.init) return;
@@ -51,6 +60,30 @@ void render_phone_view(const RenderPhoneView *v) {
 TextureId render_phone_screen(int view) {
     if (!PV.init || view < 0 || view >= RENDER_PHONE_VIEWS) return 0;
     return PV.t[view].screen_tex;
+}
+
+TextureId render_phone_scene(int view) {
+    if (!PV.init || view < 0 || view >= RENDER_PHONE_VIEWS) return 0;
+    return PV.t[view].scene_tex;
+}
+
+int phone_view_scene_res(int view) {
+    if (!PV.init || view < 0 || view >= RENDER_PHONE_VIEWS) return FG_NONE;
+    return PV.scene_res[view];
+}
+
+static void view_matrices(const RenderPhoneView *rq, int w, int h, mat4 *view, mat4 *proj) {
+    // Lens camera: -Z forward, +Y up of rq->rot.
+    vec3 fwd = quat_rotate(rq->rot, v3(0, 0, -1)), up = quat_rotate(rq->rot, v3(0, 1, 0));
+    *view = mat4_look_at(rq->pos, v3_add(rq->pos, fwd), up);
+    float aspect = (float)w / (float)h;
+    *proj = mat4_perspective(clampf(rq->fov_deg, 2.0f, 120.0f) * DG_DEG2RAD, aspect, rq->znear > 0.0f ? rq->znear : 0.05f, R->cam.zfar);
+}
+
+mat4 render_phone_view_proj(const RenderPhoneView *v) {
+    mat4 view, proj;
+    view_matrices(v, DG_MAX(v->width, 1), DG_MAX(v->height, 1), &view, &proj);
+    return mat4_mul(proj, view);
 }
 
 TextureId render_phone_panel(int view) {
@@ -80,6 +113,7 @@ float render_phone_gpu_ms(int view) {
 }
 
 static void destroy_target(PhoneTarget *t) {
+    if (t->scene_tex) vkr_texture_unwrap(t->scene_tex);
     if (t->screen_tex) vkr_texture_unwrap(t->screen_tex);
     if (t->scene.image) vkr_defer_image(t->scene.image, t->scene.view, t->scene.alloc);
     if (t->screen.image) vkr_defer_image(t->screen.image, t->screen.view, t->screen.alloc);
@@ -115,9 +149,10 @@ static bool ensure_target(PhoneTarget *t, int w, int h) {
     t->screen = vkr_target_create((u32)w, (u32)h, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
     if (!t->scene.image || !t->screen.image) return false;
     t->screen_tex = vkr_texture_wrap(t->screen.image, t->screen.view, t->screen.w, t->screen.h, t->screen.format);
+    t->scene_tex = vkr_texture_wrap(t->scene.image, t->scene.view, t->scene.w, t->scene.h, t->scene.format);
     t->w = w;
     t->h = h;
-    return t->screen_tex != 0;
+    return t->screen_tex != 0 && t->scene_tex != 0;
 }
 
 static void exec_post(VkCommandBuffer cmd, void *u) {
@@ -199,21 +234,19 @@ void phone_view_build(struct FrameData *fd) {
         hd.name = "phone_depth";
         hd.format = R->depth.format;
         PV.depth[v] = fg_texture(&hd);
-        // Lens camera: -Z forward, +Y up of rq->rot.
-        vec3 fwd = quat_rotate(rq->rot, v3(0, 0, -1)), up = quat_rotate(rq->rot, v3(0, 1, 0));
-        mat4 view = mat4_look_at(rq->pos, v3_add(rq->pos, fwd), up);
-        float aspect = (float)t->w / (float)t->h;
-        mat4 proj = mat4_perspective(clampf(rq->fov_deg, 2.0f, 120.0f) * DG_DEG2RAD, aspect, 0.05f, R->cam.zfar);
-        int p = render_alt_scene_pass(v, v == 0 ? "phone_scene0" : "phone_scene1", PV.hdr[v], PV.depth[v], (u32)t->w, (u32)t->h, view, proj, rq->pos, fd);
+        mat4 view, proj;
+        view_matrices(rq, t->w, t->h, &view, &proj);
+        int p = render_alt_scene_pass(v, k_scene_name[v], PV.hdr[v], PV.depth[v], (u32)t->w, (u32)t->h, view, proj, rq->pos, fd);
         if (p < 0) continue;
         post_view_sky(v, PV.hdr[v], PV.depth[v], mat4_inverse(mat4_mul(proj, view)), rq->pos);
+        if (rq->lines) render_alt_lines_pass(v, k_lines_name[v]);
         }
-        int q = fg_pass(v == 0 ? "phone_post0" : "phone_post1", exec_post, (void *)(intptr_t)v);
+        int q = fg_pass(k_post_name[v], exec_post, (void *)(intptr_t)v);
         if (!rq->ui_only) fg_read(q, PV.hdr[v], FG_SAMPLED);
         fg_write(q, PV.scene_res[v], FG_STORAGE);
         fg_write(q, PV.screen_res[v], FG_STORAGE);
         if (panel) {
-            int pp = fg_pass(v == 0 ? "phone_panel0" : "phone_panel1", exec_panel, (void *)(intptr_t)v);
+            int pp = fg_pass(k_panel_name[v], exec_panel, (void *)(intptr_t)v);
             fg_read(pp, PV.screen_res[v], FG_SAMPLED);
             fg_write(pp, PV.panel_res[v], FG_STORAGE);
         }
@@ -225,7 +258,7 @@ void phone_view_build(struct FrameData *fd) {
                 r->buf[PV.slot] = vkr_buffer_create_readback(need);
                 if (r->ready_slot == PV.slot) r->ready_slot = -1;
             }
-            int c = fg_pass(v == 0 ? "phone_copy0" : "phone_copy1", exec_copy, (void *)(intptr_t)v);
+            int c = fg_pass(k_copy_name[v], exec_copy, (void *)(intptr_t)v);
             fg_read(c, PV.scene_res[v], FG_TRANSFER_SRC);
             if (c >= 0) {
                 r->pending[PV.slot] = true;
@@ -234,7 +267,7 @@ void phone_view_build(struct FrameData *fd) {
             }
         }
         // The screen texture is sampled by next frame's draws (lit pipeline: SHADER_READ_ONLY).
-        int s = fg_pass(v == 0 ? "phone_ready0" : "phone_ready1", exec_none, NULL);
+        int s = fg_pass(k_ready_name[v], exec_none, NULL);
         fg_read(s, PV.screen_res[v], FG_SAMPLED);
         fg_read(s, PV.scene_res[v], FG_SAMPLED);
         if (panel) fg_read(s, PV.panel_res[v], FG_SAMPLED);
@@ -264,6 +297,7 @@ void phone_view_shutdown(void) {
     if (!PV.init) return;
     for (int v = 0; v < RENDER_PHONE_VIEWS; v++) {
         PhoneTarget *t = &PV.t[v];
+        if (t->scene_tex) vkr_texture_unwrap(t->scene_tex);
         if (t->screen_tex) vkr_texture_unwrap(t->screen_tex);
         if (t->panel_tex) vkr_texture_unwrap(t->panel_tex);
         vkr_target_destroy(&t->scene);
