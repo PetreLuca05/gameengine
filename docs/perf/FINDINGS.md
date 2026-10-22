@@ -38,6 +38,7 @@ Generated from `docs/perf/fixes.json` by `tools/perf_audit/perf_audit.py finding
 | PF-0041 | 300 fps plan (2026-10-22): the classic culling ran inside render:prepare on the main thread right after compute_matrices; the rest of the frame's preparation (skinned passes, dynamic buffers, the particle, wind and rain recording) waited for it, although none of it reads the culling's output | Classic culling as a job overlapping the frame's preparation (joined before the frame graph) | implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify) | S | - | - |
 | PF-0042 | 300 fps plan (2026-10-22): r_shader_hotreload (on by default in dev builds) looked at about 170 shader sources and includes once a second on the main thread (one file stat each), a hitch every second on Windows where a stat costs tens of microseconds | The shader hot reload's source poll (file stats) on a job | implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify) | S | - | - |
 | PF-0043 | 300 fps plan (2026-10-22): one FIFO held the background jobs (terrain chunk generation, BC7 encodes, decodes: milliseconds each) and the frame's parallel_for helpers alike, so a loop's helpers waited behind them and the caller ran most of the loop alone (frame time spikes while streaming) | Frame work ahead of background jobs (parallel_for helpers, frame jobs on an urgent queue) | implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify) | S | - | - |
+| PF-0044 | 300 fps plan (2026-10-22, pacing): finalize_chunk built a chunk's four LOD meshes (vertices, normals, geomorph targets, skirts) on the main thread inside the sim tick, up to sim_chunk_uploads chunks a frame while the player streams terrain: map terrain at load, chunks:finalize 0.72 ms a chunk on average (Linux container), the bulk of sim:chunks | Terrain chunk LOD meshes built on the chunk's job (finalize only uploads them) | implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify) | S | - | - |
 
 ## PF-0001: Empty shadow maps are not re-cleared every frame
 
@@ -454,4 +455,15 @@ A second queue for frame work: the parallel_for helpers and jobs_submit_frame (t
 - Metrics (perf_verify): `wait:parfor_tail`, `cpu_work`
 - Scenes: veg_forest_pine, veg_meadow, horde_foliage
 - Why fidelity-neutral: Only the order in which workers pick up queued jobs changes; every loop and job runs the same code with the same results (parallel_for outputs do not depend on which thread runs a chunk).
+
+
+## PF-0044: Terrain chunk LOD meshes built on the chunk's job (finalize only uploads them)
+
+The chunk's generation job also builds the four LOD meshes into CPU builders (Chunk.pre); finalize_chunk only uploads them (then the collision body and the foliage as before). Zone chunks:finalize around each finalize. Map terrain at load (Linux container, 240 frames): chunks:finalize 0.72 -> 0.46 ms per chunk, worst 0.68 -> 0.31 ms; sim:chunks total 22.7 -> 16.1 ms.
+
+- Rule / finding: R07 300 fps plan (2026-10-22, pacing): finalize_chunk built a chunk's four LOD meshes (vertices, normals, geomorph targets, skirts) on the main thread inside the sim tick, up to sim_chunk_uploads chunks a frame while the player streams terrain: map terrain at load, chunks:finalize 0.72 ms a chunk on average (Linux container), the bulk of sim:chunks
+- Code: `src/world/chunks.c job_generate (Chunk.pre), build_lod_geometry, finalize_chunk, release_chunk`
+- Metrics (perf_verify): `zone:chunks:finalize`, `zone:sim:chunks`, `cpu_work`
+- Scenes: veg_forest_pine, veg_meadow
+- Why fidelity-neutral: The same function builds the same meshes from the same chunk data, only on the job thread; the upload and everything after it is unchanged. Map terrain A / B after streaming settles: the difference between the two sides (max 1 / 255 on 0.05 % of pixels) is the one between two runs with the fix (the streaming order varies run to run); early frames can differ while chunks finalize a frame apart.
 

@@ -79,6 +79,7 @@ typedef enum ProfFix {
     PFX_CLASSIC_CULL_ASYNC,   // PF-0041: the classic culling a job overlapping the frame's preparation (joined before the graph)
     PFX_SHADER_POLL_JOB,      // PF-0042: the shader hot reload's source poll (file stats) on a job
     PFX_JOBS_URGENT,          // PF-0043: frame work (parallel_for helpers, frame jobs) ahead of background jobs
+    PFX_CHUNK_MESH_JOB,       // PF-0044: terrain chunk LOD meshes built on the chunk's generation job (finalize uploads only)
     // Visual trade-offs (not fidelity neutral: perf_verify measures them, the images differ by design):
     // perf_fix_disable "all" leaves them on, only their own id turns them off.
     PFX_SHADOW_CASTER_LIMIT,  // PF-0013: grass / small plant shadows in the near cascades only (r_shadow_caster_limit)

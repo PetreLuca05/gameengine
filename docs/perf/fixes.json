@@ -3018,5 +3018,26 @@
    "veg_meadow",
    "horde_foliage"
   ]
+ },
+ "PF-0044": {
+  "title": "Terrain chunk LOD meshes built on the chunk's job (finalize only uploads them)",
+  "rule": "R07",
+  "finding": "300 fps plan (2026-10-22, pacing): finalize_chunk built a chunk's four LOD meshes (vertices, normals, geomorph targets, skirts) on the main thread inside the sim tick, up to sim_chunk_uploads chunks a frame while the player streams terrain: map terrain at load, chunks:finalize 0.72 ms a chunk on average (Linux container), the bulk of sim:chunks",
+  "effort": "S",
+  "status": "implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify)",
+  "code": [
+   "src/world/chunks.c job_generate (Chunk.pre), build_lod_geometry, finalize_chunk, release_chunk"
+  ],
+  "description": "The chunk's generation job also builds the four LOD meshes into CPU builders (Chunk.pre); finalize_chunk only uploads them (then the collision body and the foliage as before). Zone chunks:finalize around each finalize. Map terrain at load (Linux container, 240 frames): chunks:finalize 0.72 -> 0.46 ms per chunk, worst 0.68 -> 0.31 ms; sim:chunks total 22.7 -> 16.1 ms.",
+  "neutral": "The same function builds the same meshes from the same chunk data, only on the job thread; the upload and everything after it is unchanged. Map terrain A / B after streaming settles: the difference between the two sides (max 1 / 255 on 0.05 % of pixels) is the one between two runs with the fix (the streaming order varies run to run); early frames can differ while chunks finalize a frame apart.",
+  "metrics": [
+   "zone:chunks:finalize",
+   "zone:sim:chunks",
+   "cpu_work"
+  ],
+  "scenes": [
+   "veg_forest_pine",
+   "veg_meadow"
+  ]
  }
 }

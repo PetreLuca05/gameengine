@@ -3,6 +3,7 @@
 #include "core/cvar.h"
 #include "core/log.h"
 #include "core/jobs.h"
+#include "core/profiler.h"
 #include "render/mesh_gen.h"
 #include "render/debug_draw.h"
 #include "render/lod_fade.h"
@@ -34,6 +35,7 @@ typedef struct Chunk {
     int foliage_handle;
     BodyId *fol_bodies;
     int fol_body_count;
+    MeshBuilder *pre;   // PF-0044: the LOD meshes' vertices and indices, built by the job (LOD_COUNT), uploaded at finalize
 } Chunk;
 
 typedef struct ChunkStreamer ChunkStreamer;
@@ -199,7 +201,8 @@ static vec2 morph_target(const ChunkData *d, int x, int z, int stride, float h) 
 }
 
 // morph: uv carries the geomorph target (MAT_TERRAIN_MORPH draws); otherwise uv = (x, z) as before.
-static MeshId build_lod_mesh(const ChunkData *d, int stride, bool morph) {
+// CPU only (the chunk job builds them, PF-0044).
+static void build_lod_geometry(const ChunkData *d, int stride, bool morph, MeshBuilder *out) {
     MeshBuilder mb;
     mb_init(&mb);
     int n = (CHUNK_SAMPLES - 1) / stride + 1;
@@ -236,6 +239,12 @@ static MeshId build_lod_mesh(const ChunkData *d, int stride, bool morph) {
             mb_tri(&mb, ib, ja, jb);
         }
     }
+    *out = mb;
+}
+
+static MeshId build_lod_mesh(const ChunkData *d, int stride, bool morph) {
+    MeshBuilder mb;
+    build_lod_geometry(d, stride, morph, &mb);
     MeshId id = mb_upload(&mb);
     mb_free(&mb);
     return id;
@@ -285,7 +294,16 @@ BodyId chunks_capsule_body(World *w, const RenderCapsule *caps, int n) {
 static void finalize_chunk(ChunkStreamer *s, Chunk *ch) {
     ChunkData *d = ch->data;
     // uv = the geomorph target (docs/LOD.md); the shading never reads a terrain chunk's uv (untextured)
-    for (int l = 0; l < LOD_COUNT; l++) ch->lod[l] = build_lod_mesh(d, 1 << l, true);
+    for (int l = 0; l < LOD_COUNT; l++) {
+        if (ch->pre) {   // built by the job (PF-0044): the upload only
+            ch->lod[l] = mb_upload(&ch->pre[l]);
+            mb_free(&ch->pre[l]);
+        } else {
+            ch->lod[l] = build_lod_mesh(d, 1 << l, true);
+        }
+    }
+    free(ch->pre);
+    ch->pre = NULL;
     ch->heights = (float *)malloc(sizeof(float) * CHUNK_SAMPLES * CHUNK_SAMPLES);
     memcpy(ch->heights, d->heights, sizeof(float) * CHUNK_SAMPLES * CHUNK_SAMPLES);
     BodyDesc bd;
@@ -332,6 +350,9 @@ static void release_chunk(ChunkStreamer *s, Chunk *ch) {
     for (int i = 0; i < ch->fol_body_count; i++) phys_remove_body(s->w->phys, ch->fol_bodies[i]);
     free(ch->fol_bodies);
     free(ch->foliage);
+    if (ch->pre)
+        for (int l = 0; l < LOD_COUNT; l++) mb_free(&ch->pre[l]);
+    free(ch->pre);
     free(ch->heights);
     free(ch->data);
     memset(ch, 0, sizeof(*ch));
@@ -350,6 +371,13 @@ static void job_generate(void *user) {
     ChunkJob *j = (ChunkJob *)user;
     Chunk *ch = &j->s->chunks[j->index];
     j->s->provider.generate(j->s->provider.user, j->c, ch->data);
+    // docs/perf/FINDINGS.md PF-0044: the four LOD meshes (vertices, normals, geomorph targets, skirts:
+    // the bulk of a chunk's finalize) here instead of on the main thread inside the sim tick, which only
+    // uploads them now; the same meshes
+    if (prof_fix_enabled(PFX_CHUNK_MESH_JOB)) {
+        ch->pre = (MeshBuilder *)malloc(sizeof(MeshBuilder) * LOD_COUNT);
+        for (int l = 0; l < LOD_COUNT; l++) build_lod_geometry(ch->data, 1 << l, true, &ch->pre[l]);
+    }
     if (j->s->provider.foliage_chunk) ch->foliage = j->s->provider.foliage_chunk(j->s->provider.user, j->c.x, j->c.z, &ch->foliage_size);
     else if (CG->foliage->i)   // the chunk's placements (thread-safe): 1.5 instances per m2 on the terrain
         ch->foliage = render_foliage_test_chunk(j->c.x, j->c.z, 1.5f, -1e9f, -1e9f, 1e9f, 1e9f, job_height, j->s, &ch->foliage_size);
@@ -535,7 +563,11 @@ void chunks_update(World *w, float dt) {
     // Finalize generated chunks (GPU upload + collision) with a per-frame budget.
     int budget = CG->uploads->i;
     for (int i = 0; i < MAX_CHUNKS && budget > 0; i++) {
-        if (s->chunks[i].state == CS_READY) { finalize_chunk(s, &s->chunks[i]); budget--; }
+        if (s->chunks[i].state != CS_READY) continue;
+        PROF_BEGIN("chunks:finalize");
+        finalize_chunk(s, &s->chunks[i]);
+        PROF_END();
+        budget--;
     }
     // Unload chunks nobody needed for a while (hysteresis avoids thrashing at the border). A budget
     // per frame: a teleport drops hundreds at once, and each frees 8 buffers through the renderer's
