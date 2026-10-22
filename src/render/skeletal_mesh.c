@@ -271,12 +271,13 @@ void skm_proportioned_world(const SkeletalMesh *m, const SkeletonInstance *si, X
         }
         out[k] = w;
     }
-    // The arms in their own lengths reach where the skeleton's hands are (the held item, the grips, the
-    // hand poses stay right): two-bone IK from the mesh's shoulder, bending towards the skeleton's elbow;
-    // the hand keeps the skeleton's rotation, its fingers follow it.
-    static const int arms[2][3] = { { BR_L_ARM, BR_L_FOREARM, BR_L_HAND }, { BR_R_ARM, BR_R_FOREARM, BR_R_HAND } };
-    for (int side = 0; side < 2; side++) {
-        int ia = s->role[arms[side][0]], ib = s->role[arms[side][1]], ic = s->role[arms[side][2]];
+    // The limbs in their own lengths reach where the skeleton's hands and feet are (the held item, grips,
+    // hand poses, foot contacts stay right): two-bone IK from the mesh's shoulder / hip, bending towards
+    // the skeleton's elbow / knee; the hand / foot keeps the skeleton's rotation, its fingers / toes follow.
+    static const int limbs[4][3] = { { BR_L_ARM, BR_L_FOREARM, BR_L_HAND }, { BR_R_ARM, BR_R_FOREARM, BR_R_HAND },
+                                     { BR_L_UPLEG, BR_L_LEG, BR_L_FOOT }, { BR_R_UPLEG, BR_R_LEG, BR_R_FOOT } };
+    for (int side = 0; side < 4; side++) {
+        int ia = s->role[limbs[side][0]], ib = s->role[limbs[side][1]], ic = s->role[limbs[side][2]];
         if (ia < 0 || ib < 0 || ic < 0 || ia >= n || ib >= n || ic >= n) continue;
         vec3 sh = out[ia].t, el = out[ib].t, wr = out[ic].t, tgt = si->world[ic].t;
         float a = v3_dist(sh, el), b = v3_dist(el, wr);
@@ -293,7 +294,7 @@ void skm_proportioned_world(const SkeletalMesh *m, const SkeletonInstance *si, X
         for (int k = 0; k < n; k++) {
             int q = k;
             while (q >= 0 && q != ic) q = s->parent[q];
-            if (q == ic) out[k].t = v3_add(out[k].t, d);   // the hand and its fingers
+            if (q == ic) out[k].t = v3_add(out[k].t, d);   // the hand / foot and its fingers / toes
         }
     }
 }

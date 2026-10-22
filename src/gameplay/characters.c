@@ -1056,6 +1056,22 @@ static void sim_pre(World *w, CharacterInst *c, int i) {
 
 // Animation + hitboxes for one character. Thread-safe for NPCs (touches only c, its entity's
 // transform and read-only shared data); players run it on the main thread.
+// The hitboxes' pose on the body the character wears: a full-body skin of another rig (a per-bone
+// retarget mesh) in its own proportions (skm_proportioned_world: its head, neck, shoulders, hips where
+// its mesh has them); the Dummy and every part cut from it: the skeleton's pose as is. The worn body
+// is part of the replicated part selection, so host and clients build the same hitboxes.
+static void body_proportions(const CharacterInst *c, Xform *world) {
+    int o = c->parts[CSLOT_BODY];
+    if (!c->def || o <= 0 || o > c->def->slots[CSLOT_BODY].option_count) return;
+    int mesh = c->def->slots[CSLOT_BODY].options[o - 1].mesh;
+    if (mesh < 0) return;
+    SkeletonInstance si;
+    si.asset = &LIB->skeleton;
+    si.count = LIB->skeleton.skel.count;
+    memcpy(si.world, world, sizeof(Xform) * (size_t)si.count);
+    skm_proportioned_world(&LIB->meshes[mesh], &si, world);
+}
+
 static void sim_core(World *w, CharacterInst *c, int i, float dt) {
     CharInputs in;
     if (c->is_player && c->slot >= 0 && w->players[c->slot].active) player_inputs(w, c, &w->players[c->slot], &in);
@@ -1081,9 +1097,10 @@ static void sim_core(World *w, CharacterInst *c, int i, float dt) {
     }
     c->root = xf_make(feet_of(w, i), quat_yaw(c->body_yaw));
     clip_root_apply(c);
-    // Hitboxes from the sim-only pose (never from render LOD / IK).
+    // Hitboxes from the sim-only pose (never from render LOD / IK), on the body worn.
     Xform world[ANIM_MAX_BONES];
     charrt_to_world(&c->rt, c->rt.base_model, c->root, c->def->scale, world);
+    body_proportions(c, world);
     hitbox_build(&LIB->hitboxes, &LIB->ragdoll, world, c->def->ragdoll_scale, &c->hit);
     c->hit.tick = w->tick;
     c->hit_feet = c->root.t;
@@ -2072,6 +2089,7 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     if (!w->authority) {
         Xform world[ANIM_MAX_BONES];
         charrt_to_world(&c->rt, c->rt.base_model, c->root, c->def->scale, world);
+        body_proportions(c, world);
         hitbox_build(&LIB->hitboxes, &LIB->ragdoll, world, c->def->ragdoll_scale, &c->hit);
     }
     (void)i;
