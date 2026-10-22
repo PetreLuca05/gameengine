@@ -103,6 +103,9 @@ void render_register_cvars(void) {
     r->r_async_compute = cvar_reg_int("r_async_compute", 1, 0, 2, CVAR_LOCKED,
                                       "async compute (PF-0027): the sky, screen-space (hi-z, contact, GTAO, SSR / SSGI) and froxel passes on a second queue, "
                                       "overlapping the shadow maps: 0 off, 1 the compute-only queue family (off without one), 2 a second graphics queue (slower on NVIDIA)");
+    r->r_gpu_serial = cvar_reg_bool("r_gpu_serial", false, CVAR_LOCKED,
+                                    "GPU attribution (perf audit): every frame graph pass alone on the GPU (a full barrier before it, async compute off), so each pass scope "
+                                    "is its own cost; slower frames, for captures only");
     cmd_register("r_async_info", cmd_async_info, "log the last frame's queue batches (async compute, PF-0027: G graphics / C async queue, + signals)");
     r->r_vsync->on_change = on_render_cvar_changed;
 }

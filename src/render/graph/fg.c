@@ -218,6 +218,7 @@ void fg_begin(u32 rw, u32 rh, u32 ow, u32 oh) {
     // the passes are timed), 2 the second graphics queue (measured slower on an RTX 3060 Ti: the driver
     // time-slices the graphics family's queues); off when the device has not that queue.
     int want = R->r_async_compute ? R->r_async_compute->i : 0;
+    if (R->r_gpu_serial && R->r_gpu_serial->i) want = 0;   // serial attribution: one queue
     bool c = R->compute_queue && R->compute_timestamps && G.cmd_pool[0][1], g2 = R->gfx_queue2 != VK_NULL_HANDLE;
     G.async_kind = 0;
     if (want > 0 && prof_fix_enabled(PFX_ASYNC_COMPUTE) && G.timeline[0]) G.async_kind = want == 1 ? (c ? 1 : 0) : (g2 ? 2 : 0);
@@ -840,6 +841,17 @@ static void pass_begin(int i, VkCommandBuffer cmd) {
     int q = G.pass_queue[i];
     u32 qbase = (u32)((int)R->frame_slot * FG_MAX_PASSES * 2);
     vkp_stream(q, q == 0 || G.async_graphics);
+    if (R->r_gpu_serial && R->r_gpu_serial->i) {
+        // r_gpu_serial: the previous pass drains before this pass's scope starts, so the scope holds this
+        // pass alone (with its own barriers), not the tail of the one before
+        VkMemoryBarrier2 mb = { VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+        mb.srcStageMask = mb.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        mb.srcAccessMask = mb.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+        VkDependencyInfo dep = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        dep.memoryBarrierCount = 1;
+        dep.pMemoryBarriers = &mb;
+        vkCmdPipelineBarrier2(cmd, &dep);
+    }
     vkp_scope_begin(cmd, p->name);
     pass_barriers(cmd, p);
     vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, G.qp, qbase + (u32)i * 2);

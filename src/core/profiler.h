@@ -44,6 +44,8 @@ typedef enum ProfCounter {
     PC_DRAW_ITEMS, PC_SHADOW_ITEMS,                // CPU draw items submitted / to the sun shadow tiles
     PC_ANIM_EVAL_OUTSIDE,                          // characters posed this tick outside the last frame's view (PF-0033)
     PC_ANIM_POSE_SHARED, PC_ANIM_POSE_SAMPLES,     // draw poses from the shared pose cache / cache fills (PF-0034)
+    PC_CLASSIC_PARTS, PC_CLASSIC_PARTS_SHADOW,     // classic instance parts: main view / sun cascades (frame budget, docs/PERF_AUDIT.md)
+    PC_CLASSIC_TRIS, PC_CLASSIC_TRIS_SHADOW,       // classic triangles drawn: main view passes (prepass, lit) / shadow views (cascades, light tiles)
     PC_COUNT
 } ProfCounter;
 

@@ -1762,6 +1762,8 @@ void vkc_frame_end(void) {
     for (u32 i = 0; i < C.inst_retired_n; i++) vkr_defer_buffer(&C.inst_retired[i]);
     C.inst_retired_n = 0;
     if (!FA.cull) return;
+    prof_count(PC_CLASSIC_PARTS, (i64)C.view[0].instances);
+    for (u32 k = 0; k < C.ncasc; k++) prof_count(PC_CLASSIC_PARTS_SHADOW, (i64)C.view[1 + k].instances);
     if (FA.pip_lods) build_lods(&C.view[CL_VIEW_PIP]);
     for (int i = 0; i < CL_VIEW_PIP; i++) build_lods(&C.view[i]);
 }
@@ -2001,6 +2003,7 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
                 C.draws++;
                 C.tris += sec->index_count / 3 * bt->count;
                 if (pass == 2) C.tris_shadow += sec->index_count / 3 * bt->count;
+                prof_count(pass == 2 ? PC_CLASSIC_TRIS_SHADOW : PC_CLASSIC_TRIS, (i64)(sec->index_count / 3 * bt->count));
             }
         }
     }

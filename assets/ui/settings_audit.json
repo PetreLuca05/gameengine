@@ -1699,6 +1699,12 @@
    "reason": "Visibility: changes what you can see relative to other players. Gamma 0.5 .. 2.0 lifted shadows like a cheat; folded into the narrow brightness band, gamma fixed at 1.0.",
    "category": "rendering"
   },
+  "r_gpu_serial": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Perf audit GPU attribution (every pass alone on the GPU, async compute off): a capture switch, slower frames, never a play setting.",
+   "category": "rendering"
+  },
   "r_grass_debug": {
    "class": "LOCKED",
    "ui": "—",

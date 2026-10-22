@@ -290,6 +290,7 @@ typedef struct Renderer {
     bool share_concurrent;        // resources the async passes touch are CONCURRENT (compute_queue exists)
     u32 share_families[2];
     Cvar *r_async_compute;
+    Cvar *r_gpu_serial;      // frame budget attribution: every pass alone on the GPU (docs/PERF_AUDIT.md "Frame budget")
     VmaAllocator vma;
     bool validation;
     bool pipe_stats;          // pipelineStatisticsQuery enabled (profiler: per pass invocations)

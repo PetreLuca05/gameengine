@@ -24,7 +24,7 @@ sys.path.insert(0, HERE)
 
 from pa import findings as F            # noqa: E402
 from pa import report, rules_runtime, rules_static, timeline, verify   # noqa: E402
-from pa.profile import load_dir, median, Profile   # noqa: E402
+from pa.profile import load_dir, median, pct, Profile   # noqa: E402
 
 REGISTRY = os.path.join(ROOT, "docs", "perf", "fixes.json")
 
@@ -177,6 +177,29 @@ def scene_metrics(profiles):
     return out
 
 
+def budget_check(profiles, budget_ms):
+    """A frame-time budget (docs/PERF_AUDIT.md "Frame budget"): every scene's p99 frame period (without
+    the limiter's sleep), CPU work and GPU frame within budget_ms. 300 fps constant = 3.33 ms at p99, not
+    on average: a 1-in-5 sim tick frame or a 1-per-second hitch fails it."""
+    fail = 0
+    print("budget %.2f ms: scene  frame p50 / p95 / p99  |  cpu work p50 / p99  |  gpu p50 / p99" % budget_ms)
+    for p in sorted(profiles, key=lambda q: q.key):
+        f, w, g = p.cpu_ms(), verify.cpu_work(p), p.gpu_frame_ms()
+        worst = max(pct(f, 99), pct(w, 99), pct(g, 99))
+        bad = worst > budget_ms
+        fail += bad
+        print("budget: %-28s %6.2f / %6.2f / %6.2f  |  %6.2f / %6.2f  |  %6.2f / %6.2f  %s" % (
+            p.key, median(f), pct(f, 95), pct(f, 99), median(w), pct(w, 99), median(g), pct(g, 99),
+            "OVER (x%.2f)" % (worst / budget_ms) if bad else "ok"))
+    return fail
+
+
+def cmd_budget(a):
+    fail = budget_check(load_dir(a.dir), a.ms)
+    print("budget: %s" % ("FAIL (%d scenes over)" % fail if fail else "pass"))
+    return 1 if fail else 0
+
+
 def cmd_ci(a):
     profiles = load_dir(a.dir)
     cur = scene_metrics(profiles)
@@ -208,6 +231,8 @@ def cmd_ci(a):
         ok = (res["images_pass"] or res.get("tradeoff")) and res["state"]["pass"]   # a visual trade-off differs by design
         fail += not ok
         print("ci: verify %s: images %s, state %s" % (vd, "pass" if res["images_pass"] else "FAIL", res["state"]["verdict"]))
+    if a.budget_ms:
+        fail += budget_check(profiles, a.budget_ms)
     print("ci: %s" % ("FAIL (%d)" % fail if fail else "pass"))
     return 1 if fail else 0
 
@@ -251,7 +276,12 @@ def main(argv=None):
     p.add_argument("--write-baseline", action="store_true")
     p.add_argument("--machine", default=os.environ.get("COMPUTERNAME", "ci"))
     p.add_argument("--verify", action="append", help="perf_verify output dirs whose image / state diffs must pass")
+    p.add_argument("--budget-ms", type=float, default=0.0, help="also fail a scene whose p99 frame / CPU work / GPU exceeds this (3.33 = 300 fps)")
     p.set_defaults(fn=cmd_ci)
+    p = sub.add_parser("budget")
+    p.add_argument("dir")
+    p.add_argument("--ms", type=float, default=1000.0 / 300.0, help="frame budget (default 3.33 ms: 300 fps)")
+    p.set_defaults(fn=cmd_budget)
     p = sub.add_parser("timeline")
     p.add_argument("profile")
     p.add_argument("out")

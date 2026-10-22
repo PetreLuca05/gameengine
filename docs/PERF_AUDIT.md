@@ -332,6 +332,26 @@ outside the runs): absolute GPU milliseconds of separate runs varied up to 2x, s
   (the dev room -5 .. -10 %, the meadow -4 %, the pine forest -0.5 .. -5 %), docs/RENDERING_POST.md
   "Async compute".
 
+## Frame budget (300 fps)
+
+The goal set on 2026-10-22: 300 fps **constant** in dense foliage on the RTX 3060 Ti at the player's own
+settings, without a lower-quality tier and without visual sacrifice. Constant means the 99th percentile,
+not the average: a frame in five that runs the 60 Hz sim tick, or a hitch once a second, fails it.
+
+- `tools/perf_audit/perf_audit.py budget <dir> [--ms 3.33]`: every captured scene's frame period (without
+  the limiter's sleep), CPU work and GPU frame at p50 / p95 / p99 against the budget; `ci ... --budget-ms
+  3.33` adds the same gate to the nightly comparison (off by default until the scenes meet it).
+- **Attribution you can trust at 3 ms:** run captures on a dedicated GPU (the 2026-10-18 target run shared
+  it with 30 - 40 % outside load), with clocks locked, and `r_gpu_serial 1` for per-pass numbers: every
+  frame graph pass then waits for the one before (a full barrier ahead of its scope) and async compute is
+  off, so a scope is that pass's own cost instead of the previous pass's drain plus its own (scopes start
+  before a pass's barriers) or an overlapped async pass's elapsed time. The frame is slower that way; use
+  the normal mode for the frame time itself.
+- **Classic counters** (profile `counters`): `classic_parts` / `classic_parts_shadow` (instance parts the
+  main view / the sun cascades kept), `classic_tris` / `classic_tris_shadow` (triangles drawn: every main
+  view pass / every shadow view). The vegetation zones are geometry bound; these say where the triangles go.
+- The work towards the budget is listed in [perf/FINDINGS.md](perf/FINDINGS.md) from PF-0036 on.
+
 ## CI
 
 `.github/workflows/perf_audit.yml`:
