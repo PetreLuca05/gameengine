@@ -539,9 +539,10 @@ static void cmd_nvg_range(int argc, const char **argv) {
     World *w = G->world;
     if (!w) return;
     const char *when = argc > 1 ? argv[1] : "23:30";
-    char cmd[96];
-    snprintf(cmd, sizeof(cmd), "setpos 166 0.05 78 0 0\ntime_set %s instant\n", when);
-    cbuf_add(cmd);
+    char cmd[64];
+    cmd_execute_line("setpos 166 0.05 78 0 0");   // now: queued text would run after a script's end
+    snprintf(cmd, sizeof(cmd), "time_set %s instant", when);
+    cmd_execute_line(cmd);
     if (!TS.loaded) load();
     VehThermal vt[MAX_TV];
     int n = vehicles_thermal(w, vt, MAX_TV);
