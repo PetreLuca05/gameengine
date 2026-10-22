@@ -128,9 +128,16 @@ Proportions:
     keeps the skeleton's rotations, but its joints sit at its own bone lengths (each joint placed from its
     parent along the file's bind offset; the root raised / lowered by the hip-height difference). With the
     Dummy's joint positions, every segment longer or shorter than the Dummy's pinched or overlapped at its
-    joint (the neck sunk into hunched shoulders, short arms). Its arms then reach the skeleton's hands by
-    two-bone IK (bending towards the skeleton's elbow; the hand keeps the skeleton's rotation), so the held
-    item, grips and hand poses stay right.
+    joint (the neck sunk into hunched shoulders, short arms). Its arms and legs then reach the skeleton's hands
+    and feet by two-bone IK (bending towards the skeleton's elbow / knee; the hand / foot keeps the
+    skeleton's rotation), so the held item, grips, hand poses and foot contacts stay right.
+  - **Hitboxes on the worn body** (`body_proportions`, characters.c): built from the worn full-body
+    skin's own proportions (host and clients alike: the body is in the replicated part selection), so
+    head, neck, shoulders and limbs are hit where the skin has them. The pose itself never depends on the
+    skin. Any body mesh of another rig gets this, not only the Mixamo skins: the imported characters are
+    the base of every player body, and future customisation layers (skin tone, tattoos, clothing) go on
+    top of a body without touching the skeleton or the pose. `skin_audit` reports each skin's shoulder
+    widths (bind vs canonical, posed old vs own proportions).
 - Weights are quantised to u8 summing to exactly 255 (`skin_quantize_weights`): the shaders never
   renormalise, so 256 scaled a vertex about the world origin (1.66 m off at 300 m).
 - Bone-length differences above the tolerance are reported as warnings.
