@@ -2832,8 +2832,9 @@ static void build_frame_graph(FrameData *fd) {
         if (F.lit.ssgi_on) fg_read(p, F.lit.ssgi, FG_SAMPLED);
         if (p < 0) F.pip_color = FG_NONE;
         else if (R->thermal.on) {
-            // Thermal: radiance only (no decals, the sky is the sensor pass's, particles thermal_particle);
-            // the sensor model makes the display image (post_thermal.c).
+            // Thermal: radiance only (no decals, the sky is the sensor pass's; water and particles have
+            // their thermal branches); the sensor model makes the display image (post_thermal.c).
+            vkw_build_graph_pip(F.pip_color, F.pip_depth, F.pip_vp);
             p = fg_pass("scope_pip_fx", exec_scope_pip_fx, NULL);
             fg_write(p, F.pip_color, FG_COLOR);
             fg_read(p, F.pip_depth, FG_DEPTH_READ);

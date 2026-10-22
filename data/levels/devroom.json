@@ -3,8 +3,8 @@
   "_comment": "Units are meters, yaw in degrees. Y up, yaw 0 looks towards -Z (north). Box pos = bottom center. Open room (no walls / ceiling) under the procedural sky (env sky_zenith / sky_horizon / clouds).",
   "env": {"sun_dir": [0.32, 1.0, 0.22], "sun_color": [1.0, 0.96, 0.9], "sun_intensity": 2.4, "sky": [0.55, 0.6, 0.7], "ground": [0.32, 0.3, 0.27], "fog": [0.42, 0.45, 0.5], "fog_density": 0.0, "sky_zenith": [0.22, 0.42, 0.78], "sky_horizon": [0.72, 0.8, 0.9], "clouds": 0.45},
   "room": {"size": [60, 10, 60], "wall": 0.5, "floor_material": "concrete", "wall_material": "plaster", "floor_color": [0.6, 0.6, 0.6], "wall_color": [0.68, 0.68, 0.68], "walls": false, "ceiling": false, "floor_size": [4000, 0, 4000]},
-  "_footprint_areas": "Ground the dev room needs where no brush stands (level_include.h): a map that includes the dev room with \"ground\" (devroom_vegetation) flattens and clears these besides every brush / entity footprint. [x0, z0, x1, z1]: the sighting lane, the ballistics range, the flesh range lanes, the horde yard ring (spawn_horde: 30 m around (0, 50)), the aim stand's down range, the vehicle yard, the vehicle_test ground west of the room (vehicles.cfg), the foliage yard (foliage_test_scatter / foliage_grove), the audio range from its cliff to its car (flat ground between the pad and the cliff, docs/AUDIO_PROCEDURAL.md 'Audio range'), the item showcase (docs/ITEM_PIPELINE.md). Keep them in step when an area moves.",
-  "footprint_areas": [[28, -14, 236, 4], [28, -62, 536, -30], [-16, -82, 16, -30], [-34, 16, 34, 84], [98, 20, 132, 46], [-176, -26, -100, 26], [-112, -90, -86, 52], [60, 80, 380, 400], [-390, -336, -182, -144], [-64, 49, -44, 78]],
+  "_footprint_areas": "Ground the dev room needs where no brush stands (level_include.h): a map that includes the dev room with \"ground\" (devroom_vegetation) flattens and clears these besides every brush / entity footprint. [x0, z0, x1, z1]: the sighting lane, the ballistics range, the flesh range lanes, the horde yard ring (spawn_horde: 30 m around (0, 50)), the aim stand's down range, the vehicle yard, the vehicle_test ground west of the room (vehicles.cfg), the foliage yard (foliage_test_scatter / foliage_grove), the audio range from its cliff to its car (flat ground between the pad and the cliff, docs/AUDIO_PROCEDURAL.md 'Audio range'), the item showcase (docs/ITEM_PIPELINE.md), the night optics range (docs/NIGHT_OPTICS.md). Keep them in step when an area moves.",
+  "footprint_areas": [[28, -14, 236, 4], [28, -62, 536, -30], [-16, -82, 16, -30], [-34, 16, 34, 84], [98, 20, 132, 46], [-176, -26, -100, 26], [-112, -90, -86, 52], [60, 80, 380, 400], [-390, -336, -182, -144], [-64, 49, -44, 78], [140, 48, 192, 80]],
   "spawns": [
     {"pos": [0, 0.05, 24], "yaw": 0},
     {"pos": [2, 0.05, 24.5], "yaw": 0},
@@ -461,7 +461,19 @@
     {"type": "box", "pos": [25.05, 0, -11.45], "size": [0.1, 2.6, 0.1], "color": [0.4, 0.42, 0.45], "grid": false, "material": "metal_thick"},
     {"type": "box", "pos": [27.95, 0, -11.45], "size": [0.1, 2.6, 0.1], "color": [0.4, 0.42, 0.45], "grid": false, "material": "metal_thick"},
     {"type": "box", "pos": [25.05, 0, -8.55], "size": [0.1, 2.6, 0.1], "color": [0.4, 0.42, 0.45], "grid": false, "material": "metal_thick"},
-    {"type": "box", "pos": [27.95, 0, -8.55], "size": [0.1, 2.6, 0.1], "color": [0.4, 0.42, 0.45], "grid": false, "material": "metal_thick"}
+    {"type": "box", "pos": [27.95, 0, -8.55], "size": [0.1, 2.6, 0.1], "color": [0.4, 0.42, 0.45], "grid": false, "material": "metal_thick"},
+    {"_comment": "Night optics range (docs/NIGHT_OPTICS.md): nvg_range warps here at night. A dark corridor (a dim bulb, an LED), the yard with lamps of rising intensity, a bright LED on a stand (the flashlight), IR-reflective foliage, a glass pane with a person behind it, a polished metal plate (mirrors the cold sky on the thermal scope), a fire, a warm parked car, a zombie and a person, a shallow pool.", "type": "box", "pos": [166, 0, 78], "size": [3, 0.05, 3], "color": [0.3, 0.3, 0.3], "grid": false, "material": "metal_thick", "label": "night optics range: nvg_range", "label_size": 0.25},
+    {"type": "box", "pos": [144.15, 0, 62], "size": [0.3, 3, 20], "color": [0.42, 0.42, 0.4], "grid": false, "material": "concrete", "_night_optics": "corridor"},
+    {"type": "box", "pos": [149.85, 0, 62], "size": [0.3, 3, 20], "color": [0.42, 0.42, 0.4], "grid": false, "material": "concrete"},
+    {"type": "box", "pos": [147, 3, 62], "size": [6, 0.2, 20], "color": [0.4, 0.4, 0.4], "grid": false, "material": "concrete"},
+    {"type": "box", "pos": [147, 0, 52.15], "size": [6, 3, 0.3], "color": [0.42, 0.42, 0.4], "grid": false, "material": "concrete"},
+    {"type": "box", "pos": [156, 0, 64], "size": [0.15, 3, 0.15], "color": [0.3, 0.3, 0.32], "grid": false, "material": "metal_thick", "metallic": 0.6, "roughness": 0.5},
+    {"type": "box", "pos": [162, 0, 58], "size": [0.15, 3, 0.15], "color": [0.3, 0.3, 0.32], "grid": false, "material": "metal_thick", "metallic": 0.6, "roughness": 0.5},
+    {"type": "box", "pos": [170, 0, 54], "size": [0.15, 3.5, 0.15], "color": [0.3, 0.3, 0.32], "grid": false, "material": "metal_thick", "metallic": 0.6, "roughness": 0.5},
+    {"type": "box", "pos": [178, 0, 60], "size": [0.15, 4, 0.15], "color": [0.3, 0.3, 0.32], "grid": false, "material": "metal_thick", "metallic": 0.6, "roughness": 0.5},
+    {"type": "box", "pos": [184, 0, 66], "size": [0.4, 1.2, 0.4], "color": [0.2, 0.2, 0.2], "grid": false, "material": "wood", "label": "flashlight stand (LED)", "label_size": 0.12},
+    {"type": "box", "pos": [172, 0, 68], "size": [2.2, 2.4, 0.04], "color": [0.6, 0.8, 0.9, 0.35], "grid": false, "glass": true, "material": "glass", "label": "glass: thermal shows the pane, not the person", "label_size": 0.1},
+    {"type": "box", "pos": [176.5, 0.3, 70], "size": [1.6, 0.03, 1.6], "yaw": 25, "color": [0.85, 0.86, 0.88], "grid": false, "material": "steel", "metallic": 1.0, "roughness": 0.12, "label": "polished metal: reflects the sky", "label_size": 0.1}
   ],
   "puddles": [
     {"_comment": "Authored puddle areas (game_weather.c bake_puddles): pos [x, z], size [w, d], value 0..1 (1 fills first).", "pos": [-44, 26], "size": [5, 3], "value": 1.0},
@@ -474,12 +486,14 @@
     {"def": "moto", "pos": [-114, 0.3, 4], "yaw": 0, "fuel": 10},
     {"def": "car", "pos": [116, 0.3, 40], "yaw": 90, "fuel": 0, "_comment": "aim stand: lean on the bodywork / shoot over the bonnet (docs/AIM.md)"},
     {"def": "car", "pos": [-200, 0.3, -250], "yaw": 0, "fuel": 30, "_comment": "audio range: engine / tires / interior filter"},
-    {"def": "car", "pos": [18, 0.3, -3], "yaw": 90, "fuel": 30, "_comment": "sound test bay: engine / tires / cabin filter (F to drive)"}
+    {"def": "car", "pos": [18, 0.3, -3], "yaw": 90, "fuel": 30, "_comment": "sound test bay: engine / tires / cabin filter (F to drive)"},
+    {"def": "car", "pos": [182, 0.3, 55], "yaw": 90, "fuel": 30, "_comment": "night optics range: a warm parked car (nvg_range sets its engine to 85 C)"}
   ],
   "fuel_pumps": [{"pos": [-104.5, 0.12, -12], "yaw": 90}],
   "vehicle_spikes": [{"pos": [-110, 8], "size": [7, 0.5]}],
   "water": [
-    {"type": "lake", "name": "devpool", "preset": "pool", "level": 2.6, "box": {"center": [80, -82], "half": [8, 6]}}
+    {"type": "lake", "name": "devpool", "preset": "pool", "level": 2.6, "box": {"center": [80, -82], "half": [8, 6]}},
+    {"type": "lake", "name": "nightpool", "preset": "pool", "level": 0.3, "box": {"center": [151.5, 75.5], "half": [2.5, 2.0]}}
   ],
   "labels": [
     {"pos": [115, 0, 43.4], "yaw": 0, "floor": true, "size": 0.18, "text": "aim stand: wall edge / window / car / low wall / thin wall. aim_debug 1, crosshair_obstruct, block_fire_when_barrel_blocked, aim_report, aim_stats"},
@@ -692,7 +706,21 @@
     {"type": "prop", "shape": "box", "size": [0.8, 0.8, 0.8], "pos": [78.8, 3.2, -82], "mass": 409.6, "density": 800, "color": [0.75, 0.55, 0.3]},
     {"type": "prop", "shape": "box", "size": [0.6, 0.6, 0.6], "pos": [81.2, 3.2, -82], "mass": 324.0, "density": 1500, "color": [0.45, 0.45, 0.5]},
     {"type": "prop", "shape": "box", "size": [2.0, 0.16, 0.5], "pos": [83.6, 3.2, -82], "mass": 72.0, "density": 450, "color": [0.75, 0.55, 0.3]},
-    {"type": "prop", "shape": "cylinder", "size": [0.6, 0.9, 0.6], "pos": [86.0, 3.2, -82], "mass": 152.7, "density": 600, "color": [0.75, 0.55, 0.3]}
+    {"type": "prop", "shape": "cylinder", "size": [0.6, 0.9, 0.6], "pos": [86.0, 3.2, -82], "mass": 152.7, "density": 600, "color": [0.75, 0.55, 0.3]},
+    {"type": "light", "pos": [147, 2.6, 66], "color": [1.0, 0.75, 0.45], "radius": 5, "intensity": 0.6, "_night_optics": "a dim bulb in the corridor"},
+    {"type": "light", "pos": [147, 2.6, 56], "color": [0.88, 0.94, 1.0], "radius": 6, "intensity": 3, "_night_optics": "an LED: almost no near-IR"},
+    {"type": "light", "pos": [156, 3.15, 64], "color": [1.0, 0.8, 0.55], "radius": 8, "intensity": 2},
+    {"type": "light", "pos": [162, 3.15, 58], "color": [1.0, 0.8, 0.55], "radius": 10, "intensity": 10},
+    {"type": "light", "pos": [170, 3.65, 54], "color": [1.0, 0.72, 0.42], "radius": 14, "intensity": 40},
+    {"type": "light", "pos": [178, 4.15, 60], "color": [0.85, 0.92, 1.0], "radius": 12, "intensity": 15},
+    {"type": "light", "pos": [184, 1.35, 66], "color": [0.92, 0.95, 1.0], "radius": 7, "intensity": 25, "_night_optics": "the flashlight on its stand"},
+    {"type": "vgeo", "mesh": "foliage_bush", "pos": [157.5, 0, 70], "collision": "none", "_night_optics": "IR-reflective foliage"},
+    {"type": "vgeo", "mesh": "foliage_bush", "pos": [159.2, 0, 70.6], "yaw": 70, "collision": "none"},
+    {"type": "vgeo", "mesh": "foliage_bush", "pos": [156.4, 0, 71.4], "yaw": 140, "collision": "none"},
+    {"type": "fire", "pos": [164, 0, 63], "radius": 9, "intensity": 18},
+    {"type": "character", "character": "player", "pos": [172, 0, 66.6], "yaw": 0, "hp": 1000, "name": "optics_human_glass"},
+    {"type": "character", "character": "player", "pos": [161, 0, 60.5], "yaw": 0, "hp": 1000, "name": "optics_human"},
+    {"type": "character", "character": "zombie_helmet", "pos": [167, 0, 59.5], "yaw": 0, "hp": 1000, "name": "optics_zombie"}
   ],
   "post": {},
   "post_volumes": [

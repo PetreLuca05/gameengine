@@ -14,6 +14,7 @@
 #include "lighting.glsl"
 #define WATER_SET 1
 #include "water/water_common.glsl"
+#include "thermal.glsl"
 
 layout(location = 0) in vec3 v_world;
 layout(location = 1) flat in uint v_body;
@@ -168,6 +169,21 @@ void main() {
     }
     n = normalize(vec3(n.x / n.y - slope.x, 1.0, n.z / n.y - slope.y));
     if (below) n = -n;
+    // Thermal scope PiP (docs/NIGHT_OPTICS.md): water is opaque in LWIR. It emits at its own (lagging)
+    // temperature with an emissivity of ~0.96 looking down, falling with Fresnel towards grazing, where it
+    // mirrors the cold sky: a lake reads cold at a distance.
+    if (frame.thermal.x > 0.5) {
+        float cv = clamp(dot(n, v), 0.0, 1.0);
+        float e = frame.thermal_cls[THC_WATER].y * (1.0 - pow(1.0 - cv, 5.0));
+        vec3 rv = reflect(-v, n);
+        float tw = frame.thermal_cls[THC_WATER].x;
+        float rad = e * th_radiance(tw) + (1.0 - e) * th_radiance(rv.y > 0.0 ? th_sky(rv.y) : frame.thermal.z);
+        out_color = vec4(rad, tw, e, 1.0);
+#ifdef WATER_VELOCITY
+        out_velocity = vec2(0.0);
+#endif
+        return;
+    }
     float rough = clamp(B.scatter.w + min(W.wind.z * 0.004, 0.06) + smoothstep(30.0, 400.0, dist) * 0.08, 0.02, 0.5);
 
     // ---- what is under the surface (the scene snapshot) and how much water the view crosses

@@ -30,6 +30,8 @@ u32 handpose_seat_case(World *w, int slot);                    // "vehicle:<def>
 float handpose_seat_case_time(u32 case_hash);                  // the "use" marker (the editor's timeline time while previewed)
 float handpose_seat_case_weight(u32 case_hash);                // 1 (editor: the reach / return blend at the timeline time)
 u32 handpose_mantle_case(void);                                // "mantle" when it has keys (0: the ledge grab as before)
+u32 handpose_item_case(const char *bind);                      // "item:<id>:<action>" (night vision flip: "item:nvg:flip"), 0 = none
+float handpose_case_duration(u32 case_hash);                   // its timeline length (s; 0 = none)
 float handpose_mantle_case_time(float progress);               // traversal progress 0..1 (< 0 = hanging: the "use" marker)
 // Reloads (reload_<weapon>, once reviewed): the hand IK weight at `elapsed` of a `total` s reload
 // from the case's hand-off markers; < 0 = no authored case (the controller's transitions).

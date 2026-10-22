@@ -223,6 +223,13 @@ u32 handpose_mantle_case(void) {
     return c && (c->key_count || h == HS.preview_case) ? h : 0;
 }
 
+u32 handpose_item_case(const char *bind) { return case_for_bind(bind); }
+
+float handpose_case_duration(u32 case_hash) {
+    const HandPoseCase *c = handpose_case_by_hash(case_hash);
+    return c ? c->duration : 0.0f;
+}
+
 float handpose_mantle_case_time(float progress) {
     u32 h = case_for_bind("mantle");
     if (h && h == HS.preview_case) return HS.preview_t;

@@ -20,6 +20,7 @@
 #include "core/platform.h"
 #include "gameplay/inventory.h"
 #include "gameplay/nvg_rules.h"
+#include "gameplay/characters.h"
 #include "render/post/nvg_model.h"
 #include "render/post/post.h"
 #include "input/input.h"
@@ -213,7 +214,13 @@ void nvg_host_tick(World *w, int slot, const UserCmd *c, float dt) {
 u32 nvg_entity_flags(int slot) {
     if (slot < 0 || slot >= MAX_PLAYERS) return 0;
     const NvgRuleState *st = &NV.sv[slot];
-    return (st->on ? EF_NVG : 0) | (st->on && st->illum ? EF_NVG_IR : 0);
+    u32 f = (st->on ? EF_NVG : 0) | (st->on && st->illum ? EF_NVG_IR : 0);
+    World *w = G->world;
+    if (st->on && w) {
+        const InvItem *it = inv_get_c(&w->players[slot].inv.t, st->uid);
+        if (it && variant_of(w->items, it->s.item)->tubes > 1) f |= EF_NVG_DUAL;
+    }
+    return f;
 }
 
 void nvg_player_reset(int slot) {
@@ -260,6 +267,29 @@ float nvg_flip_pos(World *w, int slot) {
     }
     float t = (float)DG_CLAMP((g_engine.render_time - t0) / ft, 0.0, 1.0);
     return on ? t : 1.0f - t;
+}
+
+float nvg_flip_phase(World *w, int slot) {
+    if (!w || slot < 0 || slot >= MAX_PLAYERS) return -1.0f;
+    nvg_flip_pos(w, slot);   // updates the edge record
+    float ft = DG_MAX(NV.cfg.flip_time, 0.05f);
+    double t0 = slot == G->local_slot ? (NV.local_flipped ? NV.local_flip_t0 : -1e9) : NV.edge[slot].t0;
+    double ph = (g_engine.render_time - t0) / ft;
+    return ph >= 0.0 && ph <= 1.0 ? (float)ph : -1.0f;
+}
+
+static float goggles_phase_hook(World *w, int slot) { return nvg_flip_phase(w, slot); }
+
+// Worn while down or flipping (up after the flip: off the head); the model by the replicated variant bit.
+static bool goggles_draw_hook(World *w, int slot, float *down, u16 *item) {
+    float d = nvg_flip_pos(w, slot);
+    bool flipping = nvg_flip_phase(w, slot) >= 0.0f;
+    if (d <= 0.0f && !flipping) return false;
+    *down = d;
+    Player *p = &w->players[slot];
+    bool dual = slot == G->local_slot ? nvg_player_variant(w, slot)->tubes > 1 : (w->flags[ENT_INDEX(p->ent)] & EF_NVG_DUAL) != 0;
+    *item = item_find(w->items, dual ? "nvg_dual" : "nvg");
+    return *item != 0;
 }
 
 // The variant of the goggles a player wears (the first nvg of the inventory for the local player /
@@ -377,6 +407,8 @@ static void cmd_nvg_debug(int argc, const char **argv) {
 
 void nvg_register(void) {
     load();
+    chars_set_goggles_hook(goggles_phase_hook);   // the third-person body's flip reach (characters.c)
+    chars_set_goggles_draw_hook(goggles_draw_hook);   // the goggles on the head (characters.c)
     NV.brightness_floor = cvar_reg_float("nvg_brightness_floor", 0.0f, 0.0f, 0.15f, CVAR_ARCHIVE | CVAR_EDITABLE,
                                          "night vision: minimum image brightness (accessibility)");
     cmd_register("nvg", cmd_nvg, "nvg [0|1] [ir 0|1]: night vision goggles on / off (key 8; needs an nvg with charge)");

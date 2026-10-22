@@ -1215,6 +1215,7 @@ void game_render(void) {
             hi.vm_kick_rot = fo->gun_rot;
             hands_set_fire_mech(true, fo->slide, fo->wobble_rot);
         }
+        hi.goggles_flip = nvg_flip_phase(G->world, game_view_slot());   // the night vision flip reach (game_nvg.c)
         hands_update(&hi);
         bool tpv = cvar_find("cl_thirdperson")->i || GR->cam_mode == 3;   // incl. the third-person vehicle camera
         if (!tpv) {

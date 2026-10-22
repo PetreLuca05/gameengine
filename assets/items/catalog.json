@@ -1039,6 +1039,91 @@
         "chin_strap"
       ],
       "sockets": []
+    },
+    "battery_aa": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "cell"
+      ],
+      "sockets": []
+    },
+    "nvg": {
+      "kind": "item",
+      "budget": [
+        5000,
+        60000
+      ],
+      "path": "procedural",
+      "parts": [
+        "tubes",
+        "body",
+        "mount"
+      ],
+      "sockets": [
+        "flip_pivot",
+        "ir_emitter"
+      ]
+    },
+    "nvg_white": {
+      "kind": "item",
+      "budget": [
+        5000,
+        60000
+      ],
+      "path": "procedural",
+      "parts": [
+        "tubes",
+        "body",
+        "mount"
+      ],
+      "sockets": [
+        "flip_pivot",
+        "ir_emitter"
+      ]
+    },
+    "nvg_dual": {
+      "kind": "item",
+      "budget": [
+        8000,
+        90000
+      ],
+      "path": "procedural",
+      "parts": [
+        "tubes",
+        "body",
+        "mount"
+      ],
+      "sockets": [
+        "flip_pivot",
+        "ir_emitter"
+      ]
+    },
+    "att_scope_thermal": {
+      "kind": "attachment",
+      "budget": [
+        10000,
+        90000
+      ],
+      "path": "procedural",
+      "parts": [
+        "mount",
+        "rings",
+        "body",
+        "lens_stack",
+        "caps",
+        "thermal"
+      ],
+      "sockets": [
+        "lens",
+        "objective",
+        "reticle"
+      ]
     }
   }
 }

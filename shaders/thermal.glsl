@@ -50,7 +50,7 @@ int th_class(uint flags, uint ao_b, vec3 albedo, float metal, float rough, float
 }
 
 // Heat volumes: bodies set a character's surface (the weighted volumes), hot spots pull any surface
-// towards their temperature, ground patches only up-facing surfaces; worn gear near a body warms a little.
+// towards their temperature, ground patches only up-facing surfaces; worn gear on a body is warmed through.
 float th_volumes(vec3 wp, vec3 n, float t, bool body) {
     int count = int(frame.thermal_sky.w);
     float bw = 0.0, bt = 0.0;

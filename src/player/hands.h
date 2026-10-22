@@ -32,6 +32,7 @@ typedef struct HandsInput {
     float dt;
     EntityId focus;           // interactable under the crosshair
     bool use_pressed;         // use edge this frame (local prediction of the interaction)
+    float goggles_flip;       // night vision goggles flipping: phase 0..1 (< 0 none): the left hand goes to the brow mount
     bool use_held;
     bool ads;
     // Interaction target captured at the use press (the entity may vanish within the frame).

@@ -560,6 +560,9 @@ void chars_system_create(World *w) {
 }
 
 static CharLifeFn g_life_hook;
+static CharGogglesFn g_goggles;
+void chars_set_goggles_hook(CharGogglesFn fn) { g_goggles = fn; }
+
 void chars_set_life_hook(CharLifeFn fn) { g_life_hook = fn; }
 
 int chars_bone_draw(World *w, EntityId e, int bone, Xform *out) {
@@ -1932,6 +1935,26 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
                 }
             }
         }
+        // Night vision goggles flip: the left hand to the brow mount and back (the weapon stays in the right).
+        float gph = g_goggles ? g_goggles(w, c->slot) : -1.0f;
+        if (gph >= 0.0f && !pi.seated && pi.hand_anchor_w <= 0.0f) {
+            vec3 head;
+            if (chars_head_world(w, c->ent, 1.0f, &head)) {
+                int ei = (int)ENT_INDEX(c->ent);
+                float yaw = quat_get_yaw(w->xf[ei].rot), pitch = w->anim[ei];
+                vec3 f = dir_from_angles(yaw, pitch), r = right_from_yaw(yaw), up = v3_cross(r, f);
+                u32 gc = handpose_item_case("item:nvg:flip");
+                float dur = handpose_case_duration(gc);
+                pi.hand_anchor[0] = v3_add(v3_add(head, v3_scale(f, 0.13f)), v3_add(v3_scale(up, 0.07f), v3_scale(r, -0.03f)));
+                pi.hand_anchor_rot[0] = quat_mul(quat_yaw(yaw), quat_axis_angle(v3(1, 0, 0), 1.35f));
+                pi.hand_anchor_rot_valid = true;
+                pi.hand_anchor_w = smoothstepf(0.0f, 0.3f, gph) * (1.0f - smoothstepf(0.62f, 1.0f, gph));
+                pi.hand_anchor_skip = 2;   // the right hand keeps the weapon
+                pi.anchor_case[0] = gc;
+                pi.anchor_pose_base[0] = handpose_grip_style_hash(GRIP_GRAB);
+                pi.anchor_case_t[0] = gph * (dur > 0.0f ? dur : 0.6f);
+            }
+        }
         // The local player's interactions (door knob, lever, pickup: the first-person hand
         // system's targets and cases, docs/HANDPOSE.md) on the third-person body too (shadow,
         // third-person views, the hand pose editor's orbit view): the same case evaluation.
@@ -2754,6 +2777,44 @@ static void draw_worn(const World *w, const u16 *worn, int mesh, const Xform *po
     }
 }
 
+// Night vision goggles on the head (docs/NIGHT_OPTICS.md): the item's mesh on the head bone, the eyepiece in
+// front of the eyes when down, swung up about its mount ("flip_pivot") by 100 deg when up; the game's
+// hook says how far down (the replicated EF_NVG edge, the local request) and which model.
+static CharGogglesDrawFn g_goggles_draw;
+void chars_set_goggles_draw_hook(CharGogglesDrawFn fn) { g_goggles_draw = fn; }
+
+static void draw_goggles(const World *w, const CharacterInst *c, const Xform *pose, u32 flags) {
+    if (!g_goggles_draw || !c->is_player || c->slot < 0 || c->dead) return;
+    float down = 0.0f;
+    u16 item = 0;
+    if (!g_goggles_draw((World *)w, c->slot, &down, &item) || !item) return;
+    const ItemDef *it = item_def(w->items, item);
+    ItemMesh *m = it && it->model.mesh[0] ? item_mesh_get(it->model.mesh) : NULL;
+    const Skeleton *s = &LIB->skel;
+    int bone = s->role[BR_HEAD];
+    if (!m || bone < 0) return;
+    int mesh = worn_body_mesh(c);
+    const SkeletalMesh *sm = mesh >= 0 && mesh < LIB->mesh_count ? &LIB->meshes[mesh] : NULL;
+    const WornFit *f = worn_fit_of(sm ? mesh : -1);
+    int mb = sm ? skm_bone_of_skel(sm, bone) : -1;
+    Xform B = mb >= 0 && sm->bones[mb].has_fix ? xf_mul(sm->bones[mb].bind_delta, sm->bones[mb].bind_model) : s->bind_model[bone];
+    B.s = v3(1, 1, 1);
+    Xform piv;
+    vec3 p_piv = item_mesh_socket(m, "flip_pivot", &piv) ? piv.t : v3(0, 0.05f, 0.004f);
+    // down: the eyepiece (item +z end) a few cm in front of the eyes (model axes: +z back, -z forward)
+    vec3 eyepiece = v3(f->crown.x, f->crown.y - 0.105f, f->crown.z - 0.12f);
+    vec3 origin_down = v3_sub(eyepiece, v3(0, 0, 0.045f));
+    quat r = quat_axis_angle(v3(1, 0, 0), (1.0f - saturate(down)) * 100.0f * DG_DEG2RAD);
+    vec3 pivot_model = v3_add(origin_down, p_piv);
+    vec3 pos = v3_sub(pivot_model, quat_rotate(r, p_piv));
+    quat bi = quat_conj(B.r);
+    Xform rel = { quat_rotate(bi, v3_sub(pos, B.t)), quat_norm(quat_mul(bi, r)), v3(1, 1, 1) };
+    Xform b = pose[bone];
+    float sc = b.s.x;
+    vec3 p = v3_add(b.t, quat_rotate(b.r, v3_scale(rel.t, sc)));
+    item_mesh_draw(m, item_mesh_condition(it->model.condition), p, quat_norm(quat_mul(b.r, rel.r)), sc, NULL, flags, false);
+}
+
 // char_worn (tests): the fit of an item in a slot on a character's body mesh (NULL: the Skeleton) as text.
 bool chars_worn_fit(const World *w, const CharacterInst *c, u16 item, int slot, char *out, size_t n) {
     if (!LIB || !w || !w->items || !item || slot < 0 || slot >= CWORN_COUNT) return false;
@@ -3503,6 +3564,11 @@ static void draw_char_all(World *w, CharacterInst *c, float alpha, int local_slo
     if ((c->worn[CWORN_HEAD] | c->worn[CWORN_CHEST] | c->worn[CWORN_BACK]) && !c->shared) {
         render_mark_self(local);
         draw_worn(w, c->worn, worn_body_mesh(c), c->pose_draw, local ? MAT_SHADOW_ONLY : 0, 0);
+        render_mark_self(false);
+    }
+    if (!c->shared) {   // night vision goggles (the owner's only cast shadows: the image is theirs)
+        render_mark_self(local);
+        draw_goggles(w, c, c->pose_draw, local ? MAT_SHADOW_ONLY : 0);
         render_mark_self(false);
     }
     // Held item (glued to the right hand).

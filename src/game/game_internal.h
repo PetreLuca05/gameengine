@@ -48,6 +48,7 @@ u32 nvg_entity_flags(int slot);                 // EF_NVG / EF_NVG_IR for the pl
 void nvg_player_reset(int slot);
 bool nvg_blocks_ads(World *w, int slot);        // goggles down or flipping: no ADS (any sight)
 float nvg_flip_pos(World *w, int slot);         // 0 up .. 1 down
+float nvg_flip_phase(World *w, int slot);       // inside a flip: its time 0..1 (either way), else -1 (the hand reach)
 const struct NvgVariant *nvg_player_variant(World *w, int slot);
 u16 nvg_local_item(float *charge, u16 *item);   // the local goggles' instance uid (0 none)
 float nvg_brightness_floor(void);

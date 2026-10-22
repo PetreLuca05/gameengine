@@ -533,6 +533,26 @@ static void cmd_thermal_probe(int argc, const char **argv) {
     log_info("thermal_probe: %u: no character / vehicle heat state", e);
 }
 
+// The dev room's night optics range (data/levels/devroom.json, docs/NIGHT_OPTICS.md): to the stand, at
+// night, the parked car's engine warm.
+static void cmd_nvg_range(int argc, const char **argv) {
+    World *w = G->world;
+    if (!w) return;
+    const char *when = argc > 1 ? argv[1] : "23:30";
+    char cmd[96];
+    snprintf(cmd, sizeof(cmd), "setpos 166 0.05 78 0 0\ntime_set %s instant\n", when);
+    cbuf_add(cmd);
+    if (!TS.loaded) load();
+    VehThermal vt[MAX_TV];
+    int n = vehicles_thermal(w, vt, MAX_TV);
+    for (int i = 0; i < n; i++) {
+        if (v3_dist(vt[i].ground, v3(182, 0.3f, 55)) > 4.0f) continue;
+        ThermalVehicle *v = veh_state(vt[i].ent, TS.env.air, true);
+        if (v) thermal_vehicle_init(v, TS.env.air, 85.0f);
+    }
+    log_info("nvg_range: the night optics range at %s (give nvg, attach optic scope_thermal)", when);
+}
+
 void thermal_register(void) {
     TS.debug = cvar_reg_bool("thermal_debug_volumes", false, CVAR_LOCKED, "thermal_debug also lists every heat volume");
     TS.range_lo = cvar_reg_float("thermal_range_lo", 0.0f, -60.0f, 1500.0f, CVAR_LOCKED, "thermal scope fixed range low C (with thermal_range_hi above it: no AGC; dev)");
@@ -542,5 +562,6 @@ void thermal_register(void) {
     cmd_register("thermal_debug", cmd_thermal_debug,
                  "thermal_debug [range <lo C> <hi C> | palette <n> | zoom <1..4>]: the thermal model (air, classes, emissivity), the sensor (AGC range, NUC timer, spot) and its overrides");
     cmd_register("thermal_probe", cmd_thermal_probe, "thermal_probe <entity | self>: the heat state of a character (face / chest / legs) or vehicle (engine / exhaust / brakes / tyres)");
+    cmd_register("nvg_range", cmd_nvg_range, "nvg_range [HH:MM]: to the dev room's night optics range (default 23:30), its parked car warm");
     cmd_register("temp_set", cmd_temp_set, "temp_set <entity | self> <C | off>: override a character's core / a vehicle's engine temperature (thermal scope, dev)");
 }

@@ -319,6 +319,13 @@ bool chars_fp_camera(World *w, float alpha, int local_slot, float yaw, float pit
 // Death / revive notifications on every machine (flesh effects: kill burst, pools, bleeding).
 typedef void (*CharLifeFn)(World *w, CharacterInst *c, bool died);
 void chars_set_life_hook(CharLifeFn fn);
+// Night vision goggles flip (docs/NIGHT_OPTICS.md): the game's phase of a player's flip (0..1, < 0 none);
+// the body's left hand reaches to the brow mount (case item:nvg:flip).
+typedef float (*CharGogglesFn)(World *w, int slot);
+void chars_set_goggles_hook(CharGogglesFn fn);
+// Drawing them: how far down (0 up .. 1 down) and the item model; false = none worn.
+typedef bool (*CharGogglesDrawFn)(World *w, int slot, float *down, u16 *item);
+void chars_set_goggles_draw_hook(CharGogglesDrawFn fn);
 // Bone world transform as drawn this frame: 1 ok, 0 not drawn this frame (culled), -1 gone.
 int chars_bone_draw(World *w, EntityId e, int bone, Xform *out);
 void chars_push_event(World *w, const AnimEvent *e);

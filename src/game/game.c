@@ -351,7 +351,7 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     if (p->sim.wpn.recoil_kick > 0.8f) f |= EF_FIRING;
     if ((c.buttons & BTN_FLASHLIGHT) && m->mode != MOVE_DEAD && game_player_has_light(w, slot)) f |= EF_FLASHLIGHT;
     if (w->authority) f |= nvg_entity_flags(slot);   // night vision goggles (game_nvg.c)
-    else f |= w->flags[i] & (EF_NVG | EF_NVG_IR);    // the client's prediction keeps the host's
+    else f |= w->flags[i] & (EF_NVG | EF_NVG_IR | EF_NVG_DUAL);    // the client's prediction keeps the host's
     w->flags[i] = f;
     const InvSlot *eq = weapon_equipped(w, slot);
     w->item[i] = eq ? eq->item : 0;

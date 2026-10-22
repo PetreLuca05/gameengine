@@ -1885,6 +1885,12 @@
    "reason": "Motion blur strength: fixed (the Post-processing quality turns motion blur on / off).",
    "category": "rendering"
   },
+  "r_night_optics": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Night vision / thermal optics detail (tube resolution, halo, persistence, thermal core): set by the Effects quality; the optics work at every level.",
+   "category": "rendering"
+  },
   "r_perf_overlay": {
    "class": "EDITABLE",
    "ui": "—",
@@ -2568,6 +2574,30 @@
    "ui": "Lobby rules",
    "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
    "category": "network"
+  },
+  "thermal_debug_volumes": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (lists heat sources through walls).",
+   "category": "rendering"
+  },
+  "thermal_range_hi": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Thermal scope fixed range (dev tuning): the scope runs its AGC for everyone.",
+   "category": "rendering"
+  },
+  "thermal_range_lo": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Thermal scope fixed range (dev tuning): the scope runs its AGC for everyone.",
+   "category": "rendering"
+  },
+  "thermal_zombie_core": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Gameplay rule: how dim zombies read on the thermal scope (their body temperature); one value per session (docs/NIGHT_OPTICS.md).",
+   "category": "rendering"
   },
   "tod_day_ambience": {
    "class": "LOCKED",

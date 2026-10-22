@@ -426,6 +426,25 @@ void hands_update(const HandsInput *in) {
             }
     }
 
+    // Night vision goggles flip (docs/NIGHT_OPTICS.md, case item:nvg:flip): the left hand leaves the
+    // support grip, reaches to the mount on the brow, pushes it down / up and comes back.
+    if (in->goggles_flip >= 0.0f && in->goggles_flip <= 1.0f) {
+        float f = in->goggles_flip;
+        float wgt = smoothstepf(0.0f, 0.3f, f) * (1.0f - smoothstepf(0.62f, 1.0f, f));
+        if (wgt > ov_target[HAND_LEFT]) {
+            u32 gc = handpose_item_case("item:nvg:flip");
+            float dur = handpose_case_duration(gc);
+            // the mount in front of the brow, palm towards the face, fingers up
+            H->ov_pos[HAND_LEFT] = cam_to_world(in->eye, cam_rot, v3(-0.03f, 0.075f, -0.11f));
+            H->ov_rot[HAND_LEFT] = quat_mul(cam_rot, quat_mul(quat_axis_angle(v3(1, 0, 0), 1.35f), quat_axis_angle(v3(0, 0, 1), 0.4f)));
+            H->ov_grip[HAND_LEFT] = GRIP_GRAB;
+            H->ov_case[HAND_LEFT] = gc;
+            H->ov_case_t[HAND_LEFT] = f * (dur > 0.0f ? dur : 0.6f);
+            ov_target[HAND_LEFT] = wgt;
+            weapon_two_handed = false;
+        }
+    }
+
     // Interaction reach (local prediction: starts on the use press).
     if (in->use_pressed && ent_valid(w, in->focus) && H->ia_phase == IA_NONE) {
         int fi = (int)ENT_INDEX(in->focus);

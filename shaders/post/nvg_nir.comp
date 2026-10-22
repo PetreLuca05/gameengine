@@ -108,5 +108,15 @@ void main() {
             nir += c.x * dens * acc * (len / float(STEPS)) / (4.0 * PI);
         }
     }
+    // another player's illuminator seen from in front: a bright point at the emitter (an IR strobe the same)
+    for (int i = 0; i < nspot && i < 8; i++) {
+        vec4 a = D.spot[i * 3], b = D.spot[i * 3 + 1], c = D.spot[i * 3 + 2];
+        vec3 to = a.xyz - cam;
+        float tz = dot(to, ray);
+        if (tz < 0.3 || tz > dist + 0.3) continue;   // the own one sits at the eye; behind a wall: hidden
+        if (dot(-normalize(to), b.xyz) < b.w) continue;
+        float d = length(to - ray * tz), r = 0.004 * tz + 0.01;
+        nir += c.x * 30.0 * exp(-(d * d) / (r * r)) / max(tz * tz, 1.0);
+    }
     imageStore(dst, p, vec4(min(nir, 6.0e4), 0.0, 0.0, 0.0));
 }

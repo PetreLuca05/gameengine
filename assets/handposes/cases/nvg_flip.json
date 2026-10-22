@@ -1,0 +1,36 @@
+{
+  "schema": 2,
+  "id": "nvg_flip",
+  "label": "Night vision: flip down / up",
+  "kind": "item",
+  "bind": "item:nvg:flip",
+  "source": "src/game/game_nvg.c",
+  "inherits": "style/grip_palm",
+  "hands": [
+    "left"
+  ],
+  "reviewed": false,
+  "auto_placed": false,
+  "setup": {
+    "item": "nvg",
+    "distance": 0.5
+  },
+  "anchor": {
+    "pos": [0, 0, 0],
+    "q": [0, 0, 0, 1]
+  },
+  "duration": 0.6,
+  "markers": {
+    "contact": 0.2,
+    "use": 0.3,
+    "release": 0.42
+  },
+  "keys": [
+    { "t": 0.2, "name": "contact", "left": { "ik": { "pos": [0.0, -0.02, 0.03], "q": [0.0, 0.0, 0.0, 1.0] }, "ik_weight": 1,
+      "fingers": { "thumb": [[0.3, 0, 0], [0.4, 0, 0], [0.3, 0, 0]], "index": [[0.9, 0, 0], [1.1, 0, 0], [0.8, 0, 0]], "middle": [[0.9, 0, 0], [1.1, 0, 0], [0.8, 0, 0]],
+                   "ring": [[1.0, 0, 0], [1.2, 0, 0], [0.9, 0, 0]], "pinky": [[1.0, 0, 0], [1.2, 0, 0], [0.9, 0, 0]] } } },
+    { "t": 0.42, "name": "release", "left": { "ik": { "pos": [0.0, -0.04, 0.05], "q": [0.0, 0.0, 0.0, 1.0] }, "ik_weight": 1,
+      "fingers": { "thumb": [[0.1, 0, 0], [0.1, 0, 0], [0.1, 0, 0]], "index": [[0.3, 0, 0], [0.4, 0, 0], [0.3, 0, 0]], "middle": [[0.3, 0, 0], [0.4, 0, 0], [0.3, 0, 0]],
+                   "ring": [[0.4, 0, 0], [0.5, 0, 0], [0.4, 0, 0]], "pinky": [[0.4, 0, 0], [0.5, 0, 0], [0.4, 0, 0]] } } }
+  ]
+}
