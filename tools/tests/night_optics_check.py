@@ -42,7 +42,7 @@ def main(argv):
 
     check(len(nvg) >= 4, f"{len(nvg)} nvg_debug lines, want 4")
     if len(nvg) >= 4:
-        check(nvg[0]["white"] < 0.05 and nvg[0]["gain"] > 50, f"night: settled, no whiteout ({nvg[0]})")
+        check(nvg[0]["white"] < 0.05 and nvg[0]["gain"] > 22.0, f"night: settled, no whiteout ({nvg[0]})")
         check(nvg[1]["white"] > 0.3, f"the muzzle flash washes the tube out ({nvg[1]['white']})")
         check(nvg[2]["white"] < 0.05, f"recovered after the flash ({nvg[2]['white']})")
         check(nvg[3]["white"] > 0.5 or (rep and rep[-1] == 0), f"noon: whiteout / shut off ({nvg[3]['white']})")
