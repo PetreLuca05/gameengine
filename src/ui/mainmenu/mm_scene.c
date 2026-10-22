@@ -111,7 +111,7 @@ void mm_background_draw(bool globe) {
     in.target = CHAR_PREVIEW_MENU;
     // The render size (the image is stretched over the screen). Text pages (Settings, Patch notes,
     // Credits): a tenth of it into its own target - stretched, it reads as a blur behind the text.
-    bool soft = M->tab == MT_SETTINGS || M->tab == MT_NEWS || M->tab == MT_CREDITS;
+    bool soft = M->tab == MT_SETTINGS || M->tab == MT_STATS || M->tab == MT_NEWS || M->tab == MT_CREDITS;
     float k = soft ? 0.1f : fminf(1.0f, 2560.0f / W);
     in.w = (int)lrintf(W * k);
     in.h = (int)lrintf(H * k);

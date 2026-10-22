@@ -25,6 +25,7 @@
 #include "gameplay/entities.h"
 #include "gameplay/inventory/inv_wire.h"
 #include "game/game_voice.h"
+#include "game/game_stats.h"
 #include <enet/enet.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -416,6 +417,7 @@ static void host_handle(const NetEvent *e) {
         net_host_send_voice(c->slot, e->data + 1, (int)e->size - 1);
         break;
     }
+    case MSG_STATS: if (c && c->welcomed) game_stats_net_receive(c->slot, e->data + 1, (int)e->size - 1); break;
     default: break;
     }
 }
@@ -717,6 +719,7 @@ static void client_handle(const NetEvent *e) {
         if (!r.overflow && game_world()) game_handle_event(&ev);
         break;
     }
+    case MSG_STATS: game_stats_net_receive(-1, e->data + 1, (int)e->size - 1); break;
     case MSG_ANIM_EVENTS: {
         u8 n = r_u8(&r);
         World *w = game_world();
@@ -1085,6 +1088,15 @@ bool net_send_reliable(int peer, const void *data, u32 size) {
 }
 
 void net_flush(void) { if (N && N->t) N->t->flush(N->t); }
+
+bool net_send_to_slot(int slot, const void *data, u32 size) {
+    if (!N || !N->t || N->role != NET_HOST) return false;
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        RemoteClient *c = &N->clients[i];
+        if (c->active && c->welcomed && c->slot == slot) return net_send_reliable(c->peer, data, size);
+    }
+    return false;
+}
 
 void net_drop_peer(int peer) {
     if (!N || !N->t || N->role != NET_HOST) return;

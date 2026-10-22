@@ -2629,6 +2629,12 @@
    "reason": "UI scale / safe area: display.",
    "category": "hud"
   },
+  "ui_units": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "Display preference: metric / imperial distances in the Stats tab.",
+   "category": "hud"
+  },
   "vehicle_debug": {
    "class": "LOCKED",
    "ui": "—",

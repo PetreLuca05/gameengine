@@ -29,9 +29,9 @@ launch ── splash (1.6 s, any key / click skips) ──▶ MAIN MENU
               same on every tab; no world behind it: the menu holds an empty world (game_host_ex
               GH_MENU: no level, not simulated, not drawn) with the local player for the render and
               for the lobby to host from
-  top bar:  [⏻]        Play · Player · Cosmetics · Settings · Patch notes · Credits        account
+  top bar:  [⏻]        Play · Player · Cosmetics · Settings · Stats · Patch notes · Credits        account
             (quit left, the tabs centred, the account right)
-            Q / E · LB / RB · 1-6 · mouse                         ⏻ ─▶ CONFIRM "Quit to desktop?"
+            Q / E · LB / RB · 1-7 · mouse                         ⏻ ─▶ CONFIRM "Quit to desktop?"
             account: avatar · name · phone glyph + status (click: the Connect portal) · Online /
             Offline (LAN only) / LAN build · relay ping · version
   ├─ Play ── [Trials | Story] (mm_set_play_mode; mm_tab trials / story / chapters)
@@ -54,6 +54,8 @@ launch ── splash (1.6 s, any key / click skips) ──▶ MAIN MENU
   │             left and the camera closes on the SMG, half the screen wide, centred) ▸ categories ▸ item grid (inventory slot widget, rarity strip, LOCKED) ▸ equip
   ├─ Settings   (untitled, the whole content area) the game's settings screen (Engine Fidelity, Graphics, Controls, Crosshair,
   │             Audio, Character, Phone), applying live
+  ├─ Stats      the pause menu's Stats tab (sub-pages, charts, player selector; docs/STATS.md),
+  │             a text page like Settings
   ├─ Patch notes  assets/ui/news.txt (## heading; a "# " title line is skipped)
   └─ Credits    credits + third-party licences (no auto-roll; Patch notes and Credits use the whole
                 content area)
@@ -88,7 +90,7 @@ IN GAME
 
 Keyboard, mouse and gamepad all work everywhere: the spatial focus navigation of docs/UI.md, A /
 Enter accept, B / Esc back (browser → Play, a tab → Play, Play → the quit prompt), LB / RB and Q / E
-cycle the tabs (inside Settings they cycle the settings' own tabs), 1-6 jump to a tab. Key hints
+cycle the tabs (inside Settings and Stats they cycle that tab's own pages), 1-7 jump to a tab. Key hints
 show next to the tab names while the keyboard / pad drives.
 
 `--test` runs boot into the dev room as before (scripts, screenshots); `--menu` forces the menu. `--nomenu` skips the splash and the menu in a normal run (your config loads as usual): straight into `+map <id>` / `+scene <id>`, or the boot map.
@@ -274,7 +276,7 @@ cosmetics → part options → selection → cosmetics for every slot; profile J
 menu screen linted and solved at 1920×1080, 2560×1080, 1024×768, 1280×720, 3840×2160 and 3440×1440.
 
 **Scripted runs** (`tools/tests/`):
-* `mm_nav.cfg` (`--test --menu`): every tab by keys 1-6, Q / E, pad LB / RB, mouse; the browser;
+* `mm_nav.cfg` (`--test --menu`): every tab by keys 1-7, Q / E, pad LB / RB, mouse; the browser;
   Back; the quit prompt cancelled; screenshots.
 * `mm_resolutions.cfg`: the menu at 1280×720, 1920×1080, 2560×1080, 1024×768.
 * `lobby_lan.sh`: two instances on one machine (LAN): host, discovery, join, chat both ways, ready,

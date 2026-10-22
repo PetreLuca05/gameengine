@@ -64,7 +64,7 @@
     "mm_panel_w": 460, "mm_panel_max_h": 620,
     "mm_source_h": 38, "mm_filter_h": 34, "mm_filter_w": 180, "mm_list_row_h": 50, "mm_detail_w": 380, "mm_detail_wide": 460,
     "mm_info_w": 380, "mm_cat_w": 190, "mm_grid_w": 400, "mm_preview_bar_h": 44, "mm_list_w": 440, "mm_map_row_h": 72, "mm_map_card_w": 240, "mm_map_card_h": 176,
-    "mm_settings_min_w": 640, "mm_settings_max_w": 1160, "mm_credits_w": 820,
+    "mm_settings_min_w": 640, "mm_settings_max_w": 1160, "mm_stats_min_w": 720, "mm_stats_max_w": 1400, "mm_credits_w": 820,
     "mm_avatar": 40, "mm_avatar_sm": 26, "mm_splash_logo": 64, "mm_splash_time": 1.6,
     "ph_card_h": 200, "ph_head_h": 30, "ph_glyph": 24, "ph_dialog_w": 780, "ph_dialog_h": 450, "ph_qr": 300, "ph_url_h": 44, "ph_button_w": 190,
     "lb_side_w": 340, "lb_chat_w": 400, "lb_bar_h": 46, "lb_button_w": 170, "lb_player_h": 46, "lb_input_h": 36, "lb_icon": 14,

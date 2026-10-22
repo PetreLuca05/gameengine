@@ -10,6 +10,7 @@
 //   - audio_debug: per-voice readout (distance, gain, occlusion bands and walls, zone, echoes), the
 //     occlusion / diffraction rays, the listener's room box and probe rays, the last echo scan
 #include "game_internal.h"
+#include "game_stats.h"
 #include "audio/audio.h"
 #include "audio/mixer.h"
 #include "audio/env/env_world.h"
@@ -132,6 +133,8 @@ static void footsteps(World *w, vec3 cam, float dt) {
     CharStep st[32];
     int n = chars_take_steps(w, cam, 40.0f, dt, st, 32);
     const Player *lp = game_local_player();
+    for (int i = 0; i < n; i++)
+        if (lp && st[i].ent == lp->ent) stats_cl_step();   // the local player's footsteps (docs/STATS.md "Steps")
     for (int i = 0; i < n && i < 12; i++) {
         bool water;
         int mat = ground_material(w, st[i].pos, &water);

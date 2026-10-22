@@ -17,7 +17,8 @@
         { "id": "audio", "label": "Audio", "prefixes": ["snd_", "s_", "audio_", "voice_"] },
         { "id": "phone", "label": "Phone", "prefixes": ["phone"] },
         { "id": "revive", "label": "Revive & Death", "prefixes": ["revive", "death_", "fab_", "reconstruction_"] },
-        { "id": "story", "label": "Story", "prefixes": ["story_", "kit_"] }
+        { "id": "story", "label": "Story", "prefixes": ["story_", "kit_"] },
+        { "id": "stats", "label": "Stats", "prefixes": ["stats_"] }
     ],
     "names": {
         "settings_audit": "system",

@@ -11,6 +11,7 @@
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "core/log.h"
+#include "game/game_stats.h"
 #include <stdlib.h>
 #include <math.h>
 
@@ -832,6 +833,7 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
         m->jump_buffer = 0;
         m->coyote = 0;
         jumped = true;
+        if (first && w->players[slot].local) stats_cl_jump();   // this machine's player, once per command (docs/STATS.md)
         m->climb_intent = (u8)moving_fwd;   // the jump started towards something: a second press in reach climbs
         on_ground = false;
         m->fall_start_y = m->pos.y;

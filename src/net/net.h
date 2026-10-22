@@ -74,6 +74,7 @@ NetStats net_stats(void);
 // starts with MSG_LOBBY), welcome a lobby member into the started game, drop / identify peers.
 bool net_send_reliable(int peer, const void *data, u32 size);
 void net_flush(void);
+bool net_send_to_slot(int slot, const void *data, u32 size);   // host: reliable to the welcomed client in a player slot
 bool net_host_welcome(int peer, const char *name);
 // A peer is not dropped for NET_LOAD_GRACE_MS of silence: someone is loading a map. Host: per client
 // from net_host_welcome (or the lobby's start) to its first commands. Client: the host's peer from the

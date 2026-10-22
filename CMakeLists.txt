@@ -281,8 +281,14 @@ if(DG_PROFILE_ALLOC)
     target_compile_options(deadground PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include core/prof_alloc.h>")
   endif()
 endif()
+# Steam Stats mirror of the player statistics (docs/STATS.md "Steam"): kills, deaths, headshots,
+# matches_won, highest_wave, configured as INT stats in the app's Steamworks settings.
+option(DG_STEAM_STATS "Mirror the player statistics to Steam Stats (DEADGROUND_STEAM)" OFF)
 if(DG_HAVE_STEAM)
   target_compile_definitions(deadground PRIVATE DG_HAVE_STEAM=1)
+  if(DG_STEAM_STATS)
+    target_compile_definitions(deadground PRIVATE DEADGROUND_STEAM=1)
+  endif()
   target_link_libraries(deadground PRIVATE steam_shim)
   add_custom_command(TARGET deadground POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${STEAM_DLL}" $<TARGET_FILE_DIR:deadground>
@@ -796,6 +802,18 @@ if(MSVC)
 endif()
 add_dependencies(test_hud dg_copy_data)
 add_test(NAME hud COMMAND test_hud WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# Player statistics + the chart math (docs/STATS.md): derived values, killstreak, history rings,
+# host deltas, save / load + migration, stats_fake, nice ticks, moving average.
+add_executable(test_stats tests/test_stats.c src/gameplay/stats/stats.c src/gameplay/stats/stats_save.c src/gameplay/stats/stats_fake.c src/ui/ui_chart_math.c third_party/cjson/cJSON.c)
+set_target_properties(test_stats PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_stats PRIVATE src third_party/cjson)
+if(MSVC)
+  target_compile_options(test_stats PRIVATE /W3 /utf-8)
+else()
+  target_compile_options(test_stats PRIVATE -Wall -Wextra -Wno-unused-parameter)
+  target_link_libraries(test_stats PRIVATE m)
+endif()
+add_test(NAME stats COMMAND test_stats)
 # Downed / revive / corpse / DNA / fabricator state machines + the death sequence (docs/REVIVE.md).
 add_executable(test_revive tests/test_revive.c src/gameplay/revive/revive_core.c src/gameplay/revive/death_seq.c third_party/cjson/cJSON.c)
 set_target_properties(test_revive PROPERTIES C_STANDARD 11)

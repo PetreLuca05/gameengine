@@ -385,4 +385,14 @@ bool dgs_avatar_rgba(uint64_t steam_id, int *w, int *h, uint8_t *out, int cap) {
     return true;
 }
 
+bool dgs_stat_set_int(const char *name, int32_t value) {
+    if (!g_shim || !SteamUserStats()) return false;
+    return SteamUserStats()->SetStat(name, value);
+}
+
+bool dgs_stats_store(void) {
+    if (!g_shim || !SteamUserStats()) return false;
+    return SteamUserStats()->StoreStats();
+}
+
 } // extern "C"

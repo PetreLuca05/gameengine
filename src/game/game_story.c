@@ -6,6 +6,7 @@
 #include "game_story.h"
 #include "game_vista.h"
 #include "game_internal.h"
+#include "game_stats.h"
 #include "story/story_save.h"
 #include "story/story_bot.h"
 #include "core/engine.h"
@@ -1412,6 +1413,7 @@ void story_frame(World *w, float dt) {
     }
     if (SR.menu_pending) {
         SR.menu_pending = false;
+        game_stats_match_end(MATCH_WIN);   // the chapter's end: a won match (docs/STATS.md)
         story_stop();
         if (mainmenu_enabled()) mainmenu_enter("Chapter complete");
         return;

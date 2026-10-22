@@ -4,6 +4,7 @@
 #include "ui/mainmenu/mainmenu.h"
 #include "game_voice.h"
 #include "game_internal.h"
+#include "game_stats.h"
 #include "core/profiler.h"
 #include "game_water.h"
 #include "editor/handpose/hp_system.h"
@@ -817,6 +818,7 @@ float game_ads_vis(void) {
 }
 
 void game_frame(float dt) {
+    game_stats_frame(dt);   // time played, distance, the host's stat deltas, autosave (docs/STATS.md)
     handpose_system_poll();
     blender_open_poll();   // blender_open's output -> the console (game_blender.c)
     game_items_poll();     // a mesh exported from Blender -> reloaded (game_items.c)
@@ -930,6 +932,7 @@ bool game_host(const char *map) { return game_host_ex(map, 0); }
 // empty world - no level, never simulated or drawn - holding the local player for the menu's
 // character render and the lobby to host from).
 bool game_host_ex(const char *map, u32 flags) {
+    game_stats_level_leaving();   // the clients' last stat deltas, the match recorded (docs/STATS.md)
     if (!(flags & GH_KEEP_NET)) net_stop();
     destroy_world();
     G->world = world_create(true, &G->items);
@@ -969,11 +972,13 @@ bool game_host_ex(const char *map, u32 flags) {
     G->view.yaw = G->world->players[0].sim.move.yaw;
     story_level_loaded(G->world, G->map);   // the level's story block; starts a pending chapter (roles, saves)
     if (G->net_autohost->i && !(flags & (GH_KEEP_NET | GH_NO_AUTOHOST))) net_host(TRANSPORT_LAN, (u16)cvar_find("net_port")->i);
+    game_stats_level_loaded(G->map);
     log_info("game: hosting '%s'", G->map);
     return true;
 }
 
 void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick) {
+    game_stats_level_leaving();
     destroy_world();
     G->world = world_create(false, &G->items);
     revive_world_reset(G->world);
@@ -1000,6 +1005,7 @@ void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick) {
     G->world->tick = server_tick;
     memset(&G->view, 0, sizeof(G->view));
     memset(G->cmd_history, 0, sizeof(G->cmd_history));
+    game_stats_level_loaded(map);
     // The local player's slot is filled when the first snapshot creates its entity.
     log_info("client: joined as slot %d on '%s'", slot, map);
 }
@@ -1010,6 +1016,7 @@ void game_cl_disconnected(const char *reason) {
 }
 
 void game_disconnect_to_local(const char *reason) {
+    game_stats_level_leaving();
     net_stop();
     // Main menu builds (not --test): a lost / left session returns to the menu.
     if (mainmenu_enabled()) {
@@ -1867,6 +1874,7 @@ void game_init(void) {
     G->world_seed = cvar_reg_int("world_seed", 1337, 0, 999999999, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "procedural world seed");
     cmd_register("map", cmd_map, "map <name>: host a new game on a level / menu entry; map: list every level, menu entry and scene");
     wheels_register();
+    game_stats_init();
     revive_register();
     story_register();
     vista_register();
@@ -1964,6 +1972,7 @@ void game_init(void) {
 
 void game_shutdown(void) {
     if (!G) return;
+    game_stats_shutdown();   // the match recorded, saved synchronously
     net_stop();
     phone_shutdown();
     destroy_world();

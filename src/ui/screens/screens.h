@@ -12,10 +12,11 @@ typedef enum ScreenId {
     SCR_LOBBY,      // pause > Lobby: players, chat, invite, kick
     SCR_COMMANDS,   // pause > Commands: the console registry + embedded console (src/ui/pause)
     SCR_PHONE,      // the Connect portal (src/ui/mainmenu/mm_phone.c): main menu, pause menu, the in-game phone
+    SCR_STATS,      // pause > Stats (src/ui/ui_stats_tab.c, docs/STATS.md)
     SCR_COUNT
 } ScreenId;
 
-typedef enum ConfirmKind { CONFIRM_QUIT, CONFIRM_LEAVE, CONFIRM_DROP, CONFIRM_DISPLAY, CONFIRM_RESET_BINDS, CONFIRM_GRAPHICS_DEFAULTS, CONFIRM_MAINMENU, CONFIRM_COMMAND } ConfirmKind;
+typedef enum ConfirmKind { CONFIRM_QUIT, CONFIRM_LEAVE, CONFIRM_DROP, CONFIRM_DISPLAY, CONFIRM_RESET_BINDS, CONFIRM_GRAPHICS_DEFAULTS, CONFIRM_MAINMENU, CONFIRM_COMMAND, CONFIRM_STATS_RESET } ConfirmKind;
 
 // Shared by the screens (menus.c)
 const char *screen_name(int id);

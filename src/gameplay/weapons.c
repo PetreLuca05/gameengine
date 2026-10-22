@@ -16,6 +16,7 @@
 #include "gameplay/characters.h"
 #include "gameplay/aim.h"
 #include "game/game.h"
+#include "game/game_stats.h"
 #include "vfx/vfx_library.h"
 #include <math.h>
 #include <stdlib.h>
@@ -500,6 +501,11 @@ static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const U
     vec3 eye = weapon_shot_eye(w, slot, m, cmd);
     vec3 muzzle = muzzle_world(w, slot, m, d, local_view, eye);
     *muzzle_out = muzzle;
+    // Player statistics (docs/STATS.md): projectiles fired (a shell counts its pellets), host-side.
+    if (w->authority) {
+        const InvSlot *eq = weapon_equipped(w, slot);
+        stats_sv_shots(w, slot, eq ? eq->item : 0, d->kind == WPN_PROJECTILE ? 1 : DG_MAX(1, d->pellets));
+    }
     int dbg = WC.recoil_debug ? WC.recoil_debug->i : 0;
     bool ballistic = bal_world_enabled() && bal_weapon_cartridge(d) >= 0;
     if (local_view && first) {
@@ -902,6 +908,10 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
             ws->swing_hit_done = 0;
             ws->cooldown = 1.0f / fmaxf(0.1f, d->fire_rate);
             out->swung = true;
+            if (w->authority) {
+                const InvSlot *eq = weapon_equipped(w, slot);
+                stats_sv_shots(w, slot, eq ? eq->item : 0, 1);   // a swing counts as a shot (docs/STATS.md)
+            }
             if (local_view && first) fx_sound(d->sound_fire, sim->move.pos, 0.8f);
             if (w->authority) {
                 GameEvent ev;
