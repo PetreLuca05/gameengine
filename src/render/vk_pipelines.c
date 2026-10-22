@@ -1,6 +1,9 @@
 // Descriptor layouts and graphics pipelines (dynamic rendering, no render passes).
 #include "vk_internal.h"
 #include "core/platform.h"
+#include "core/jobs.h"
+#include "core/profiler.h"
+#include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -19,7 +22,8 @@ typedef struct PipeDesc {
     bool depth_bias;
     VkPipelineLayout layout;
     int extra_colors;       // MRT: additional attachments (no blending), formats below
-    VkFormat extra_formats[3];
+    VkFormat extra_formats[GB_COLORS - 1];
+    int extra_masked;       // the last extra_masked of them bound but not written (the prepass's classic deferred targets)
 } PipeDesc;
 
 bool vkp_create_layouts(void) {
@@ -308,9 +312,12 @@ static VkPipeline build_pipeline(const PipeDesc *d) {
         cba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         cba.alphaBlendOp = VK_BLEND_OP_ADD;
     }
-    VkPipelineColorBlendAttachmentState cbas[4];
+    VkPipelineColorBlendAttachmentState cbas[GB_COLORS];
     cbas[0] = cba;
-    for (int i = 0; i < d->extra_colors; i++) { memset(&cbas[1 + i], 0, sizeof(cba)); cbas[1 + i].colorWriteMask = 0xF; }
+    for (int i = 0; i < d->extra_colors; i++) {
+        memset(&cbas[1 + i], 0, sizeof(cba));
+        cbas[1 + i].colorWriteMask = i < d->extra_colors - d->extra_masked ? 0xF : 0;
+    }
     VkPipelineColorBlendStateCreateInfo cb = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
     cb.attachmentCount = d->color_format != VK_FORMAT_UNDEFINED ? 1u + (u32)d->extra_colors : 0;
     cb.pAttachments = cbas;
@@ -319,7 +326,8 @@ static VkPipeline build_pipeline(const PipeDesc *d) {
     dy.dynamicStateCount = d->depth_bias ? 3 : 2;
     dy.pDynamicStates = dyn;
 
-    VkFormat cfmts[4] = { d->color_format, d->extra_formats[0], d->extra_formats[1], d->extra_formats[2] };
+    VkFormat cfmts[GB_COLORS] = { d->color_format };
+    for (int i = 0; i < d->extra_colors; i++) cfmts[1 + i] = d->extra_formats[i];
     VkPipelineRenderingCreateInfo rci = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
     rci.colorAttachmentCount = d->color_format != VK_FORMAT_UNDEFINED ? 1u + (u32)d->extra_colors : 0;
     rci.pColorAttachmentFormats = cfmts;
@@ -377,9 +385,12 @@ bool vkp_create_pipelines(void) {
     d[PIPE_PREPASS] = d[PIPE_LIT];
     d[PIPE_PREPASS].frag = "gbuffer.frag";
     d[PIPE_PREPASS].color_format = GB_NORMAL_FORMAT;
-    d[PIPE_PREPASS].extra_colors = 2;
+    d[PIPE_PREPASS].extra_colors = 4;
     d[PIPE_PREPASS].extra_formats[0] = GB_MATERIAL_FORMAT;
     d[PIPE_PREPASS].extra_formats[1] = GB_VELOCITY_FORMAT;
+    d[PIPE_PREPASS].extra_formats[2] = GB_ALBEDO_FORMAT;   // classic deferred targets (PF-0039): bound, not written
+    d[PIPE_PREPASS].extra_formats[3] = GB_PARAMS_FORMAT;
+    d[PIPE_PREPASS].extra_masked = 2;
     // glTF materials (docs/PBR.md): doubleSided without culling; alphaMode MASK discards (own shaders,
     // so the common pipelines keep early depth) and is drawn two-sided.
     d[PIPE_LIT_2S] = d[PIPE_LIT];
@@ -462,7 +473,11 @@ static const char *g_extra_shaders[128];
 static int g_extra_count;
 void vkp_register_shader(const char *name) {
     for (int i = 0; i < g_extra_count; i++) if (!strcmp(g_extra_shaders[i], name)) return;
-    if (g_extra_count < 128) g_extra_shaders[g_extra_count++] = name;
+    if (g_extra_count < 128) {
+        g_extra_shaders[g_extra_count] = name;
+        SDL_MemoryBarrierRelease();   // the poll job reads the list (PF-0042)
+        g_extra_count++;
+    }
 #ifdef DG_SOURCE_DIR
     // A shader registered later (post passes are created lazily) is not a source change: move the
     // hot reload baseline past it, otherwise its first use would recompile every shader.
@@ -482,12 +497,15 @@ static i64 shader_sources_mtime(void) {
         i64 t = platform_file_mtime(path);
         if (t > newest) newest = t;
     }
-    for (int i = 0; i < g_extra_count; i++) {
+    int extra = g_extra_count;
+    SDL_MemoryBarrierAcquire();
+    for (int i = 0; i < extra; i++) {
         snprintf(path, sizeof(path), "%s/shaders/%s", DG_SOURCE_DIR, g_extra_shaders[i]);
         i64 t = platform_file_mtime(path);
         if (t > newest) newest = t;
     }
-    static const char *incs[] = { "common.glsl", "vfx_common.glsl", "vfx_spawn.glsl", "lit_body.glsl", "lighting.glsl", "weather.glsl", "post/post_common.glsl", "water/water_waves.glsl", "water/water_common.glsl", "lod_fade.glsl" };
+    static const char *incs[] = { "common.glsl", "vfx_common.glsl", "vfx_spawn.glsl", "lit_body.glsl", "lighting.glsl", "weather.glsl", "post/post_common.glsl", "water/water_waves.glsl", "water/water_common.glsl", "lod_fade.glsl",
+                                  "lit_surface.glsl", "lit_surface_fn.glsl", "classic_deferred.glsl", "classic_deferred_gbuffer.glsl" };
     for (int i = 0; i < ARRAY_COUNT(incs); i++) {
         snprintf(path, sizeof(path), "%s/shaders/%s", DG_SOURCE_DIR, incs[i]);
         i64 t = platform_file_mtime(path);
@@ -583,15 +601,40 @@ bool render_reload_shaders(void) {
     return ok;
 }
 
-void render_poll_shader_hot_reload(void) {
-    if (!R->r_shader_hotreload->i) return;
-    if (g_engine.real_time < R->next_shader_poll) return;
-    R->next_shader_poll = g_engine.real_time + 1.0;
-    i64 t = shader_sources_mtime();
+static void poll_result(i64 t) {
     if (!R->shader_src_mtime) { R->shader_src_mtime = t; return; }
     if (t > R->shader_src_mtime) {
         R->shader_src_mtime = t;
         log_info("shaders: source change detected, hot reloading");
         render_reload_shaders();
     }
+}
+
+// docs/perf/FINDINGS.md PF-0042: the once-a-second look at the shader sources (about 170 file stats,
+// a hitch of a frame every second on Windows) runs as a job; the main thread takes its result at a
+// later frame and reloads from there as before.
+static JobCounter g_poll_counter;
+static bool g_poll_pending;
+static i64 g_poll_mtime;
+static void poll_job(void *u) {
+    (void)u;
+    g_poll_mtime = shader_sources_mtime();
+}
+
+void render_poll_shader_hot_reload(void) {
+    if (!R->r_shader_hotreload->i) return;
+    if (g_poll_pending) {
+        if (SDL_GetAtomicInt((SDL_AtomicInt *)&g_poll_counter.pending) > 0) return;   // still looking
+        g_poll_pending = false;
+        poll_result(g_poll_mtime);
+        return;
+    }
+    if (g_engine.real_time < R->next_shader_poll) return;
+    R->next_shader_poll = g_engine.real_time + 1.0;
+    if (prof_fix_enabled(PFX_SHADER_POLL_JOB) && jobs_worker_count() > 0) {
+        g_poll_pending = true;
+        jobs_submit(poll_job, NULL, NULL, &g_poll_counter);
+        return;
+    }
+    poll_result(shader_sources_mtime());
 }

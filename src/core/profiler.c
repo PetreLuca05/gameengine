@@ -32,7 +32,7 @@
 #define PROF_MAX_STARTUP 4096
 
 volatile int dg_prof_recording;
-u32 dg_prof_fix_off;
+u64 dg_prof_fix_off;
 
 enum { EV_BEGIN, EV_END };
 enum { CAT_ZONE, CAT_WAIT, CAT_JOB, CAT_PARFOR };
@@ -75,7 +75,8 @@ static const char *k_counter_names[PC_COUNT] = {
     "audio_voices_silent", "ui_text", "ui_verts", "draw_items", "shadow_items", "anim_eval_outside", "anim_pose_shared", "anim_pose_samples",
 };
 static const char *k_fix_ids[PFX_COUNT] = { "PF-0001", "PF-0002", "PF-0005", "PF-0006", "PF-0007", "PF-0009", "PF-0010", "PF-0011", "PF-0012", "PF-0014", "PF-0015",
-                                             "PF-0024", "PF-0020", "PF-0021", "PF-0026", "PF-0027", "PF-0013", "PF-0016", "PF-0029", "PF-0028", "PF-0035", "PF-0033", "PF-0034" };
+                                             "PF-0024", "PF-0020", "PF-0021", "PF-0026", "PF-0027", "PF-0037", "PF-0038", "PF-0039", "PF-0040", "PF-0041", "PF-0042", "PF-0043", "PF-0013", "PF-0016", "PF-0029", "PF-0028", "PF-0035", "PF-0033", "PF-0034",
+                                             "PF-0036" };
 
 static struct {
     bool init;
@@ -575,7 +576,7 @@ static void write_profile(void) {
             SDL_GetNumLogicalCPUCores(), P.overhead_ns, ticks_ms(prof_ticks() - P.record_t0));
     bool truncated = false;
     for (int ti = 0; ti < nthreads; ti++) truncated |= P.threads[ti] && P.threads[ti]->truncated;
-    fprintf(f, ",\"truncated\":%s,\"fixes_disabled\":%u}", truncated ? "true" : "false", dg_prof_fix_off);
+    fprintf(f, ",\"truncated\":%s,\"fixes_disabled\":%llu}", truncated ? "true" : "false", (unsigned long long)dg_prof_fix_off);
 
     fprintf(f, ",\n\"frames\":{\"cpu_ms\":");
     json_doubles(f, P.frame_ms, frames);
@@ -900,9 +901,9 @@ void prof_init(void) {
 }
 
 static void fix_disable_changed(Cvar *cv) {
-    u32 m = 0;
+    u64 m = 0;
     for (int f = 0; f < PFX_COUNT; f++)
-        if (strstr(cv->str, k_fix_ids[f]) || (!strcmp(cv->str, "all") && f < PFX_TRADEOFF_FIRST)) m |= 1u << f;   // "all": the fidelity-neutral ones
+        if (strstr(cv->str, k_fix_ids[f]) || (!strcmp(cv->str, "all") && f < PFX_TRADEOFF_FIRST)) m |= 1ull << f;   // "all": the fidelity-neutral ones
     dg_prof_fix_off = m;
 }
 

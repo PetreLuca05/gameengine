@@ -24,6 +24,7 @@ typedef struct JobSystem {
     SDL_Mutex *mutex;
     SDL_Condition *cond;
     JobQueue pending;
+    JobQueue urgent;        // frame work (parallel_for helpers, jobs_submit_frame): taken before pending (PF-0043)
     JobQueue completed;
     SDL_Mutex *done_mutex;
     bool quit;
@@ -47,6 +48,10 @@ static bool queue_pop(JobQueue *q, Job *out) {
 }
 
 static void pf_helper(void *u);
+
+// Under the mutex: frame work first, then the background queue.
+static bool pop_any(Job *out) { return queue_pop(&s_jobs.urgent, out) || queue_pop(&s_jobs.pending, out); }
+static int queued(void) { return *(volatile int *)&s_jobs.pending.count + *(volatile int *)&s_jobs.urgent.count; }
 
 static void run_job(Job *j) {
     bool rec = j->fn != pf_helper;   // parallel_for helpers record themselves (parfor:<fn>)
@@ -77,12 +82,12 @@ static int worker_main(void *arg) {
     for (;;) {
         // Bursty frame work: spin briefly for more before sleeping (a condition wake costs
         // tens of microseconds, longer than most chunks).
-        for (int spin = 0; spin < 4000 && !s_jobs.quit && *(volatile int *)&s_jobs.pending.count == 0; spin++) SDL_CPUPauseInstruction();
+        for (int spin = 0; spin < 4000 && !s_jobs.quit && queued() == 0; spin++) SDL_CPUPauseInstruction();
         SDL_LockMutex(s_jobs.mutex);
-        while (!s_jobs.quit && s_jobs.pending.count == 0) SDL_WaitCondition(s_jobs.cond, s_jobs.mutex);
+        while (!s_jobs.quit && queued() == 0) SDL_WaitCondition(s_jobs.cond, s_jobs.mutex);
         if (s_jobs.quit) { SDL_UnlockMutex(s_jobs.mutex); break; }
         Job j;
-        bool got = queue_pop(&s_jobs.pending, &j);
+        bool got = pop_any(&j);
         SDL_UnlockMutex(s_jobs.mutex);
         if (got) run_job(&j);
     }
@@ -121,15 +126,24 @@ void jobs_shutdown(void) {
 
 int jobs_worker_count(void) { return s_jobs.worker_count; }
 
-void jobs_submit(JobFn fn, JobFn done, void *user, JobCounter *counter) {
+static void submit(JobQueue *q, JobFn fn, JobFn done, void *user, JobCounter *counter) {
     Job j = { fn, done, user, counter, prof_ticks() };
     prof_count(PC_JOBS, 1);
     if (counter) SDL_AtomicIncRef((SDL_AtomicInt *)&counter->pending);
     SDL_LockMutex(s_jobs.mutex);
-    bool ok = queue_push(&s_jobs.pending, j);
+    bool ok = queue_push(q, j);
     SDL_SignalCondition(s_jobs.cond);
     SDL_UnlockMutex(s_jobs.mutex);
     if (!ok) run_job(&j); // queue full: run inline
+}
+
+void jobs_submit(JobFn fn, JobFn done, void *user, JobCounter *counter) { submit(&s_jobs.pending, fn, done, user, counter); }
+
+// docs/perf/FINDINGS.md PF-0043: frame work no longer queues behind background jobs (terrain chunk
+// generation, texture encoding: milliseconds each), which held a parallel_for's helpers back while the
+// caller ran the loop alone. Workers take the urgent queue first.
+void jobs_submit_frame(JobFn fn, JobFn done, void *user, JobCounter *counter) {
+    submit(prof_fix_enabled(PFX_JOBS_URGENT) ? &s_jobs.urgent : &s_jobs.pending, fn, done, user, counter);
 }
 
 void jobs_wait(JobCounter *counter) {
@@ -137,7 +151,7 @@ void jobs_wait(JobCounter *counter) {
     while (SDL_GetAtomicInt((SDL_AtomicInt *)&counter->pending) > 0) {
         SDL_LockMutex(s_jobs.mutex);
         Job j;
-        bool got = queue_pop(&s_jobs.pending, &j);
+        bool got = pop_any(&j);
         SDL_UnlockMutex(s_jobs.mutex);
         if (got) {
             if (waiting) { PROF_WAIT_END(); waiting = false; }
@@ -222,13 +236,14 @@ void jobs_parallel_for(int count, int chunk, JobRangeFn fn, void *ctx) {
     SDL_SetAtomicInt(&p->gen, gen);   // before the counter: whoever takes an index from it sees this loop
     SDL_SetAtomicInt(&p->next, (int)(((u32)gen & PF_GEN_MASK) << PF_IDX_BITS));
     int helpers = DG_MIN(s_jobs.worker_count, chunks - 1);
+    JobQueue *hq = prof_fix_enabled(PFX_JOBS_URGENT) ? &s_jobs.urgent : &s_jobs.pending;
     SDL_LockMutex(s_jobs.mutex);
     for (int k = 0; k < helpers; k++) {
         PfHelper *h = &g_pf_helpers[slot][k];
         h->p = p;
         h->gen = gen;
         Job j = { pf_helper, NULL, h, NULL, 0 };
-        queue_push(&s_jobs.pending, j);
+        queue_push(hq, j);
     }
     SDL_BroadcastCondition(s_jobs.cond);
     SDL_UnlockMutex(s_jobs.mutex);

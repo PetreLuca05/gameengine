@@ -329,8 +329,10 @@ int main(int argc, char **argv) {
             double target = 1.0 / cap;
             double spent = platform_time() - frame_start;
             if (spent < target) {
+                // Nanoseconds, not whole milliseconds: a 300 fps cap (3.33 ms) truncated to 3 ms ran at
+                // ~330 fps with uneven frames. SDL sleeps the bulk and spins the last part.
                 PROF_WAIT_BEGIN(PW_FPS_CAP);
-                platform_sleep_ms((u32)((target - spent) * 1000.0));
+                SDL_DelayPrecise((Uint64)((target - spent) * 1e9));
                 PROF_WAIT_END();
             }
         }

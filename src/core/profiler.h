@@ -70,6 +70,13 @@ typedef enum ProfFix {
     PFX_CHAR_POSE_JOBS,       // PF-0021: character draw poses and palettes on the job system
     PFX_SKY_CACHE,            // PF-0026: sky passes skipped while their inputs are unchanged (sky.c)
     PFX_ASYNC_COMPUTE,        // PF-0027: sky / GTAO / volumetrics on the async compute queue (fg.c, r_async_compute)
+    PFX_LOD_DEDUPE,           // PF-0037: classic LODs with their finer neighbour's exact triangles picked as that LOD
+    PFX_VFX_IDLE_SKIP,        // PF-0038: GPU particle simulation skipped while nothing is alive, spawned or queued
+    PFX_CLASSIC_DEFERRED,     // PF-0039: classic content lit by one full-screen pass from its prepass (no second geometry pass)
+    PFX_CLASSIC_CULL_PAR,     // PF-0040: the classic views' cell walks, packing and emit on the jobs (the same streams)
+    PFX_CLASSIC_CULL_ASYNC,   // PF-0041: the classic culling a job overlapping the frame's preparation (joined before the graph)
+    PFX_SHADER_POLL_JOB,      // PF-0042: the shader hot reload's source poll (file stats) on a job
+    PFX_JOBS_URGENT,          // PF-0043: frame work (parallel_for helpers, frame jobs) ahead of background jobs
     // Visual trade-offs (not fidelity neutral: perf_verify measures them, the images differ by design):
     // perf_fix_disable "all" leaves them on, only their own id turns them off.
     PFX_SHADOW_CASTER_LIMIT,  // PF-0013: grass / small plant shadows in the near cascades only (r_shadow_caster_limit)
@@ -79,14 +86,16 @@ typedef enum ProfFix {
     PFX_TEX_BC,               // PF-0035: world / terrain / foliage textures block-compressed (BC7, r_texture_compress)
     PFX_ANIM_FRUSTUM_LOD,     // PF-0033: characters outside the view pose at the cheap rate, without IK (presentation only)
     PFX_ANIM_SHARED_POSE,     // PF-0034: far characters share one sampled pose per clip / phase bucket (presentation only)
+    PFX_SHADOW_ONE_LOD,       // PF-0036: sun cascades draw the finer LOD of a LOD band alone (no dithered pair; never coarser)
     PFX_COUNT
 } ProfFix;
 #define PFX_TRADEOFF_FIRST PFX_SHADOW_CASTER_LIMIT
+_Static_assert(PFX_COUNT <= 64, "perf_fix_disable keeps one bit per fix in a u64");
 
 #ifdef DG_PROFILE   // the engine target; unit tests compiling engine files get the no-op probes below
 
 extern volatile int dg_prof_recording;   // the one hot flag every probe reads
-extern u32 dg_prof_fix_off;              // bit per ProfFix, from perf_fix_disable
+extern u64 dg_prof_fix_off;              // bit per ProfFix, from perf_fix_disable
 
 void prof_init(void);                    // right after log_init: starts the startup recording
 void prof_register(void);                // commands / cvars (after the cvar system)
@@ -106,7 +115,7 @@ u64 prof_ticks(void);
 void prof_count_slow(ProfCounter c, i64 v);
 DG_INLINE void prof_count(ProfCounter c, i64 v) { if (dg_prof_recording) prof_count_slow(c, v); }
 void prof_series(const char *name, double v);   // this frame's value of a named series
-DG_INLINE bool prof_fix_enabled(ProfFix f) { return !(dg_prof_fix_off & (1u << f)); }
+DG_INLINE bool prof_fix_enabled(ProfFix f) { return !(dg_prof_fix_off & (1ull << f)); }
 DG_INLINE bool dg_prof_recording_on(void) { return dg_prof_recording != 0; }
 const char *prof_fix_id(ProfFix f);             // "PF-0001"
 

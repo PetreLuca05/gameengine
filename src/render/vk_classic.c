@@ -66,6 +66,7 @@ typedef struct ClMesh {
     bool used;
     u32 lod_count;
     float lod_error[VGEO_MAX_LODS];
+    u8 lod_same[VGEO_MAX_LODS];     // the first LOD with exactly this LOD's triangles (PF-0037; itself if none)
     ClLod lods[VGEO_MAX_LODS];
     // exported discrete LODs, uploaded on first use (meshes without colours, one material)
     VgDiscreteLod src[VGEO_MAX_LODS];
@@ -94,16 +95,21 @@ typedef struct ClView {
     u32 batch_count, batch_cap, instances;
 } ClView;
 typedef struct ClTask { const VgInstance *inst; u32 n, off, out; } ClTask;
-static struct {
+typedef struct ClTaskList {
     ClTask *t;
     u32 n, cap;
+    u32 parts;                      // output slots per instance (CL_PARTS with the fades, else 1)
+} ClTaskList;
+static struct {
+    ClTaskList l;
     const struct ClCull *v;
     const VgScene *s;
-    u32 parts;                      // output slots per instance (CL_PARTS with the fades, else 1)
 } T;   // culling tasks (cull_cells)
 
 enum { CP_GB, CP_GB_2S, CP_GB_CLIP, CP_GB_CLIP_2S, CP_LIT, CP_LIT_2S, CP_LIT_CLIP, CP_LIT_CLIP_2S, CP_SHADOW, CP_SHADOW_MASKED, CP_IMP_GB, CP_IMP_LIT,
-       CP_PIP, CP_PIP_2S, CP_PIP_CLIP, CP_PIP_CLIP_2S, CP_PIP_IMP, CP_COUNT };   // CP_PIP*: the scope PiP, forward (lit + depth write)
+       CP_PIP, CP_PIP_2S, CP_PIP_CLIP, CP_PIP_CLIP_2S, CP_PIP_IMP,   // CP_PIP*: the scope PiP, forward (lit + depth write)
+       CP_GB_DEF, CP_GB_DEF_2S, CP_GB_DEF_CLIP, CP_GB_DEF_CLIP_2S,   // prepass of deferred materials (PF-0039): + the deferred targets
+       CP_COUNT };
 
 static struct {
     bool ok;
@@ -119,10 +125,19 @@ static struct {
     VkImageView set4_views[FRAMES_IN_FLIGHT][VG_WIND_RING];   // the tile images the slot's set samples (NULL: white)
     VkPipelineLayout layout;
     VkPipeline pipe[CP_COUNT];
+    // Deferred lighting (PF-0039): the full-screen pass, its G-buffer set (set 3) per frame slot
+    VkDescriptorSetLayout def_set_layout;
+    VkDescriptorPool def_pool;
+    VkDescriptorSet def_set[FRAMES_IN_FLIGHT];
+    VkPipelineLayout def_layout;
+    VkPipeline def_pipe;
+    bool deferred;                  // this frame: deferrable materials go through the deferred path
     VkDescriptorSet set_default, set_disp;
     VkImageView disp_view;
     GpuBuffer inst[FRAMES_IN_FLIGHT];
     u32 inst_cap[FRAMES_IN_FLIGHT], inst_used;
+    GpuBuffer inst_retired[8];      // instance buffers the culling job replaced (deleted at vkc_frame_end)
+    u32 inst_retired_n;
     ClInst *tmp;                    // gathered instances of one view
     u32 *tmp_key;
     u32 tmp_n, tmp_cap;
@@ -137,6 +152,7 @@ static struct {
     float disp[4];
     u32 ncasc;
     float density;
+    bool lod_dedupe;                // this frame: PF-0037 (identical LODs picked as their first)
     float cpu_ms;
     u32 draws, tris, tris_shadow, local_instances;
     u64 gpu_bytes, cpu_bytes;      // LOD buffers + impostor textures / CPU copies of exported LODs (classic_stats)
@@ -200,20 +216,23 @@ static VkPipeline cl_pipeline(const char *vert, const char *frag, bool impostor,
     ds.depthTestEnable = VK_TRUE;
     ds.depthWriteEnable = depth_write;
     ds.depthCompareOp = cmp;
-    VkPipelineColorBlendAttachmentState cba[3];
+    // colors 3: the G-buffer prepass (its deferred targets bound, not written); 5: a deferred material's
+    // prepass (PF-0039) writes them too; 1: HDR
+    int natt = colors >= 3 ? GB_COLORS : colors;
+    VkPipelineColorBlendAttachmentState cba[GB_COLORS];
     memset(cba, 0, sizeof(cba));
-    for (int i = 0; i < 3; i++) cba[i].colorWriteMask = 0xF;
+    for (int i = 0; i < natt; i++) cba[i].colorWriteMask = i < colors ? 0xF : 0;
     VkPipelineColorBlendStateCreateInfo cb = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
-    cb.attachmentCount = (u32)colors;
+    cb.attachmentCount = (u32)natt;
     cb.pAttachments = cba;
     VkDynamicState dyn[3] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS };
     VkPipelineDynamicStateCreateInfo dy = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
     dy.dynamicStateCount = shadow ? 3 : 2;
     dy.pDynamicStates = dyn;
-    VkFormat gb[3] = { GB_NORMAL_FORMAT, GB_MATERIAL_FORMAT, GB_VELOCITY_FORMAT }, hdr = VK_FORMAT_R16G16B16A16_SFLOAT;
+    VkFormat gb[GB_COLORS] = { GB_NORMAL_FORMAT, GB_MATERIAL_FORMAT, GB_VELOCITY_FORMAT, GB_ALBEDO_FORMAT, GB_PARAMS_FORMAT }, hdr = VK_FORMAT_R16G16B16A16_SFLOAT;
     VkPipelineRenderingCreateInfo rci = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
-    rci.colorAttachmentCount = (u32)colors;
-    rci.pColorAttachmentFormats = colors == 3 ? gb : &hdr;
+    rci.colorAttachmentCount = (u32)natt;
+    rci.pColorAttachmentFormats = natt == GB_COLORS ? gb : &hdr;
     rci.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
     VkGraphicsPipelineCreateInfo gp = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
     gp.pNext = &rci;
@@ -260,9 +279,143 @@ static VkDescriptorSet cl_alloc_set(VkImageView v0, VkImageLayout l0, VkImageVie
     return set;
 }
 
+// docs/perf/FINDINGS.md PF-0039: the deferred lighting pass (shaders/classic_deferred.frag): a
+// full-screen triangle into HDR, the frame / lit post sets as the lit pipelines bind them (sets 0 - 2),
+// set 3 the prepass targets (normal, material, albedo, params, depth). Without it the classic content
+// keeps its lit pass.
+static void cl_deferred_init(void) {
+    VkDescriptorSetLayoutBinding b[5];
+    memset(b, 0, sizeof(b));
+    for (u32 i = 0; i < 5; i++) {
+        b[i].binding = i;
+        b[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        b[i].descriptorCount = 1;
+        b[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
+    VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+    li.bindingCount = 5;
+    li.pBindings = b;
+    if (vkCreateDescriptorSetLayout(R->device, &li, NULL, &C.def_set_layout) != VK_SUCCESS) return;
+    VkDescriptorPoolSize ps = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FRAMES_IN_FLIGHT * 5 };
+    VkDescriptorPoolCreateInfo pci = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+    pci.maxSets = FRAMES_IN_FLIGHT;
+    pci.poolSizeCount = 1;
+    pci.pPoolSizes = &ps;
+    if (vkCreateDescriptorPool(R->device, &pci, NULL, &C.def_pool) != VK_SUCCESS) return;
+    for (u32 f = 0; f < FRAMES_IN_FLIGHT; f++) {
+        VkDescriptorSetAllocateInfo ai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+        ai.descriptorPool = C.def_pool;
+        ai.descriptorSetCount = 1;
+        ai.pSetLayouts = &C.def_set_layout;
+        if (vkAllocateDescriptorSets(R->device, &ai, &C.def_set[f]) != VK_SUCCESS) return;
+    }
+    VkDescriptorSetLayout sets[4] = { R->frame_layout, R->tex_layout, R->lit_post_layout, C.def_set_layout };
+    VkPushConstantRange pr = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit) };
+    VkPipelineLayoutCreateInfo pli = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    pli.setLayoutCount = 4;
+    pli.pSetLayouts = sets;
+    pli.pushConstantRangeCount = 1;
+    pli.pPushConstantRanges = &pr;
+    if (vkCreatePipelineLayout(R->device, &pli, NULL, &C.def_layout) != VK_SUCCESS) return;
+    VkShaderModule vs = vkp_load_shader("fullscreen.vert"), fs = vkp_load_shader("classic_deferred.frag");
+    if (vs && fs) {
+        VkPipelineShaderStageCreateInfo st[2] = { { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO }, { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO } };
+        st[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+        st[0].module = vs;
+        st[0].pName = "main";
+        st[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        st[1].module = fs;
+        st[1].pName = "main";
+        VkPipelineVertexInputStateCreateInfo vi = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+        VkPipelineInputAssemblyStateCreateInfo ia = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+        ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        VkPipelineViewportStateCreateInfo vp = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+        vp.viewportCount = vp.scissorCount = 1;
+        VkPipelineRasterizationStateCreateInfo rs = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+        rs.polygonMode = VK_POLYGON_MODE_FILL;
+        rs.cullMode = VK_CULL_MODE_NONE;
+        rs.lineWidth = 1.0f;
+        VkPipelineMultisampleStateCreateInfo ms = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+        ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+        VkPipelineDepthStencilStateCreateInfo ds = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+        VkPipelineColorBlendAttachmentState cba;
+        memset(&cba, 0, sizeof(cba));
+        cba.colorWriteMask = 0xF;
+        VkPipelineColorBlendStateCreateInfo cb = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+        cb.attachmentCount = 1;
+        cb.pAttachments = &cba;
+        VkDynamicState dyn[2] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+        VkPipelineDynamicStateCreateInfo dy = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+        dy.dynamicStateCount = 2;
+        dy.pDynamicStates = dyn;
+        VkFormat hdr = VK_FORMAT_R16G16B16A16_SFLOAT;
+        VkPipelineRenderingCreateInfo rci = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
+        rci.colorAttachmentCount = 1;
+        rci.pColorAttachmentFormats = &hdr;
+        VkGraphicsPipelineCreateInfo gp = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+        gp.pNext = &rci;
+        gp.stageCount = 2;
+        gp.pStages = st;
+        gp.pVertexInputState = &vi;
+        gp.pInputAssemblyState = &ia;
+        gp.pViewportState = &vp;
+        gp.pRasterizationState = &rs;
+        gp.pMultisampleState = &ms;
+        gp.pDepthStencilState = &ds;
+        gp.pColorBlendState = &cb;
+        gp.pDynamicState = &dy;
+        gp.layout = C.def_layout;
+        if (vkCreateGraphicsPipelines(R->device, R->pipeline_cache, 1, &gp, NULL, &C.def_pipe) != VK_SUCCESS) {
+            C.def_pipe = VK_NULL_HANDLE;
+            log_error("classic: deferred lighting pipeline failed (the lit pass stays)");
+        }
+    }
+    if (vs) vkDestroyShaderModule(R->device, vs, NULL);
+    if (fs) vkDestroyShaderModule(R->device, fs, NULL);
+}
+
+// This frame's choice (render_end_frame, before the frame graph): deferred lighting when wanted, the fix
+// is on, its pipeline exists and the main view draws classic content.
+bool vkc_deferred_begin(bool want) {
+    C.deferred = want && C.ok && C.def_pipe && prof_fix_enabled(PFX_CLASSIC_DEFERRED) && C.scene && C.view[0].batch_count > 0;
+    return C.deferred;
+}
+
+// The full-screen deferred lighting (inside a rendering of HDR alone): views are the prepass targets
+// (normal, material, albedo, params: shader-read; depth: depth read-only), inv_vp the inverse of the
+// prepass's (jittered) view-projection. The caller bound the frame set (0) and pushed the lit inputs (2).
+void vkc_draw_deferred(VkCommandBuffer cmd, const VkImageView views[5], mat4 inv_vp) {
+    if (!C.deferred) return;
+    VkDescriptorImageInfo im[5];
+    VkWriteDescriptorSet w[5];
+    for (int i = 0; i < 5; i++) {
+        im[i] = (VkDescriptorImageInfo){ R->sampler_clamp, views[i], i == 4 ? VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        w[i] = (VkWriteDescriptorSet){ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        w[i].dstSet = C.def_set[R->frame_slot];
+        w[i].dstBinding = (u32)i;
+        w[i].descriptorCount = 1;
+        w[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        w[i].pImageInfo = &im[i];
+    }
+    vkUpdateDescriptorSets(R->device, 5, w, 0, NULL);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.def_pipe);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.def_layout, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.def_layout, 3, 1, &C.def_set[R->frame_slot], 0, NULL);
+    PushLit pc;
+    memset(&pc, 0, sizeof(pc));
+    pc.model = inv_vp;
+    vkCmdPushConstants(cmd, C.def_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+    R->stats.draw_calls++;
+}
+
+static void cmd_classic_cull_check(int argc, const char **argv);
+
 void vkc_init(void) {
     C.impostor_px = cvar_reg_float("r_classic_impostor_px", 64.0f, 0.0f, 1024.0f, CVAR_LOCKED,
                                    "classic renderer: trees with an impostor atlas draw it below this projected size (pixels across, 0 = never)");
+    cmd_register("classic_cull_check", cmd_classic_cull_check,
+                 "classic renderer: cull the next frame's views by the serial and the parallel path (PF-0040) and compare their instance streams");
     {   // sun shadow caster cascade limits (shadow_casters.h)
         char path[512], err[160] = "";
         platform_data_path("assets/render/shadow_casters.json", path, sizeof(path));
@@ -353,6 +506,11 @@ void vkc_init(void) {
     C.pipe[CP_PIP_CLIP] = cl_pipeline("classic.vert", "classic_lit_clip.frag", false, false, false, le, true, 1);
     C.pipe[CP_PIP_CLIP_2S] = cl_pipeline("classic.vert", "classic_lit_clip.frag", false, false, true, le, true, 1);
     C.pipe[CP_PIP_IMP] = cl_pipeline("classic_impostor.vert", "classic_impostor_lit.frag", true, false, true, le, true, 1);
+    C.pipe[CP_GB_DEF] = cl_pipeline("classic.vert", "classic_gbuffer_def.frag", false, false, false, le, true, 5);
+    C.pipe[CP_GB_DEF_2S] = cl_pipeline("classic.vert", "classic_gbuffer_def.frag", false, false, true, le, true, 5);
+    C.pipe[CP_GB_DEF_CLIP] = cl_pipeline("classic.vert", "classic_gbuffer_def_clip.frag", false, false, false, le, true, 5);
+    C.pipe[CP_GB_DEF_CLIP_2S] = cl_pipeline("classic.vert", "classic_gbuffer_def_clip.frag", false, false, true, le, true, 5);
+    cl_deferred_init();
     for (int i = 0; i < CP_COUNT; i++)
         if (!C.pipe[i]) { log_error("classic: renderer unavailable (pipeline %d)", i); return; }
     C.ok = true;   // the default set 3 (white) is written at the first frame (the white texture comes later)
@@ -365,6 +523,10 @@ void vkc_shutdown(void) {
     vkam_shutdown();
     for (int i = 0; i < CP_COUNT; i++) if (C.pipe[i]) vkDestroyPipeline(R->device, C.pipe[i], NULL);
     vkDestroyPipelineLayout(R->device, C.layout, NULL);
+    if (C.def_pipe) vkDestroyPipeline(R->device, C.def_pipe, NULL);
+    if (C.def_layout) vkDestroyPipelineLayout(R->device, C.def_layout, NULL);
+    if (C.def_pool) vkDestroyDescriptorPool(R->device, C.def_pool, NULL);
+    if (C.def_set_layout) vkDestroyDescriptorSetLayout(R->device, C.def_set_layout, NULL);
     vkDestroyDescriptorSetLayout(R->device, C.set3_layout, NULL);
     if (C.set4_layout) vkDestroyDescriptorSetLayout(R->device, C.set4_layout, NULL);
     if (C.set4_pool) vkDestroyDescriptorPool(R->device, C.set4_pool, NULL);
@@ -378,7 +540,7 @@ void vkc_shutdown(void) {
     free(C.tmp);
     free(C.tmp_key);
     free(C.count);
-    free(T.t);
+    free(T.l.t);
     free(C.chunk);
     memset(&T, 0, sizeof(T));
     memset(&C, 0, sizeof(C));
@@ -536,6 +698,29 @@ static TextureId module_texture(u32 index) {
     return C.modtex[k];
 }
 
+// docs/perf/FINDINGS.md PF-0037: LOD k holds exactly LOD k - 1's triangles: the same DAG cut (decoded
+// meshes) or the same exported vertices and indices. Grass clumps, ground cover and small plants are
+// cards the simplifier cannot reduce: all of their LODs are one mesh.
+static bool cut_same(const VgBuilt *b, float e0, float e1) {
+    u32 n0 = vgeo_cut(b, e0, NULL, 0), n1 = vgeo_cut(b, e1, NULL, 0);
+    if (n0 != n1 || !n0) return false;
+    VgCutRef *r = (VgCutRef *)malloc(sizeof(VgCutRef) * 2 * n0);
+    vgeo_cut(b, e0, r, n0);
+    vgeo_cut(b, e1, r + n0, n0);
+    bool same = true;
+    for (u32 i = 0; i < n0 && same; i++) same = r[i].page == r[n0 + i].page && r[i].index == r[n0 + i].index;
+    free(r);
+    return same;
+}
+
+static bool exported_same(const VgBuilt *b, u32 k0, u32 k1) {
+    const VgDiscreteLod *a = &b->lods[k0], *c = &b->lods[k1];
+    if (a->index_count != c->index_count || a->vertex_count != c->vertex_count || !a->index_count) return false;
+    if (a->first_index == c->first_index && a->first_vertex == c->first_vertex) return true;
+    return !memcmp(b->lod_indices + a->first_index, b->lod_indices + c->first_index, sizeof(u32) * a->index_count) &&
+           !memcmp(b->lod_vertices + a->first_vertex, b->lod_vertices + c->first_vertex, sizeof(VgLodVertex) * a->vertex_count);
+}
+
 void vkc_register_mesh(u32 mesh, const VgBuilt *b, bool persistent) {
     if (!C.ok) return;
     ClMesh *cm = cl_mesh_slot(mesh);
@@ -570,6 +755,10 @@ void vkc_register_mesh(u32 mesh, const VgBuilt *b, bool persistent) {
         }
     }
     cm->coarse_tris = decode ? cm->lods[cm->lod_count - 1].tris : b->lods[cm->lod_count - 1].tris;
+    for (u32 k = 0; k < cm->lod_count; k++) {
+        bool same = k > 0 && (decode ? cut_same(b, b->lods[k - 1].error, b->lods[k].error) : exported_same(b, k - 1, k));
+        cm->lod_same[k] = (u8)(same ? cm->lod_same[k - 1] : k);
+    }
     const u8 *alb, *nrm;
     const VgImpostorHeader *h = vgeo_impostor(b, &alb, &nrm);
     if (h) {
@@ -703,6 +892,7 @@ typedef struct ClCull {
     int nrcv;
     bool scc_on;                    // sun cascades: the caster classes' cascade limits (PF-0013)
     SccView scc;
+    bool one_lod;                   // sun cascades: a LOD band draws its finer LOD alone (PF-0036)
 } ClCull;
 static ClCull g_main_cull;          // the last frame's main view (classic_fade_probe)
 static bool g_main_cull_ok;
@@ -792,12 +982,21 @@ static void cull_instance(const ClCull *v, const VgScene *s, const VgInstance *i
         float k = v->ortho ? sc * v->px_scale : sc * v->px_scale / dcl, cw = 0;
         int first = v->era2010 && cm->lod_count > 1 ? 1 : 0;
         u32 lod = iw >= 1.0f ? 0u : (u32)lod_pick_band(cm->lod_error, (int)cm->lod_count, first, k, v->lod_px, v->band, &cw);
+        if (v->one_lod) cw = 0;   // PF-0036: the finer LOD of the band, whole
+        u32 coarse = lod + 1;
+        if (C.lod_dedupe) {   // PF-0037: a LOD holding its finer neighbour's triangles is that LOD (no fade between them)
+            if (cw > 0) {
+                coarse = cm->lod_same[coarse];
+                if (coarse == cm->lod_same[lod]) cw = 0;
+            }
+            lod = cm->lod_same[lod];
+        }
         float phase = (float)VG_INST_PHASE(in->flags_phase) / 256.0f, sd = sc * shrink;
         // parts: impostor [0, iw), coarser LOD [iw, mid), finer LOD [mid, 1)
         float mid = iw + (1.0f - iw) * cw;
         if (iw > 0) emit_part(out, key, n, in->mesh, CL_IMPOSTOR, p, q, sd, phase, alpha, iw < 1.0f ? lod_iv_pack(0, iw) : 0.0f);
         if (iw < 1.0f) {
-            if (cw > 0) emit_part(out, key, n, in->mesh, lod + 1, p, q, sd, phase, alpha, cw < 1.0f || iw > 0 ? lod_iv_pack(iw, mid) : 0.0f);
+            if (cw > 0) emit_part(out, key, n, in->mesh, coarse, p, q, sd, phase, alpha, cw < 1.0f || iw > 0 ? lod_iv_pack(iw, mid) : 0.0f);
             if (mid < 1.0f) emit_part(out, key, n, in->mesh, lod, p, q, sd, phase, alpha, mid > 0 ? lod_iv_pack(mid, 1.0f) : 0.0f);
         }
         return;
@@ -818,6 +1017,7 @@ static void cull_instance(const ClCull *v, const VgScene *s, const VgInstance *i
         lod = v->era2010 && cm->lod_count > 1 ? 1 : 0;
         float k = v->ortho ? sc * v->px_scale : sc * v->px_scale / dc;
         while (lod + 1 < cm->lod_count && cm->lod_error[lod + 1] * k <= v->lod_px) lod++;
+        if (C.lod_dedupe) lod = cm->lod_same[lod];   // PF-0037
     }
     ClInst *o = &out[*n];
     o->pos[0] = p[0], o->pos[1] = p[1], o->pos[2] = p[2], o->pos[3] = sc;
@@ -831,28 +1031,28 @@ static void cull_instance(const ClCull *v, const VgScene *s, const VgInstance *i
 // The cells a view keeps become tasks (their instances), culled in parallel on the job system: task
 // i writes at most its instance count from offset off, then the outputs are packed in task order
 // (the result does not depend on the thread count).
-static void task_add(const VgInstance *inst, u32 n) {
+static void task_add(ClTaskList *L, const VgInstance *inst, u32 n) {
     if (!n) return;
-    if (T.n >= T.cap) {
-        T.cap = T.cap ? T.cap * 2 : 1024;
-        T.t = (ClTask *)realloc(T.t, sizeof(ClTask) * T.cap);
+    if (L->n >= L->cap) {
+        L->cap = L->cap ? L->cap * 2 : 1024;
+        L->t = (ClTask *)realloc(L->t, sizeof(ClTask) * L->cap);
     }
-    u32 off = T.n ? T.t[T.n - 1].off + T.t[T.n - 1].n * T.parts : 0;
-    T.t[T.n++] = (ClTask){ inst, n, off, 0 };
+    u32 off = L->n ? L->t[L->n - 1].off + L->t[L->n - 1].n * L->parts : 0;
+    L->t[L->n++] = (ClTask){ inst, n, off, 0 };
 }
 
 static void cull_range(void *ctx, int begin, int end) {
     (void)ctx;
     for (int i = begin; i < end; i++) {
-        ClTask *t = &T.t[i];
+        ClTask *t = &T.l.t[i];
         t->out = 0;
         for (u32 k = 0; k < t->n; k++) cull_instance(T.v, T.s, &t->inst[k], C.tmp + t->off, C.tmp_key + t->off, &t->out);
     }
 }
 
-static void cell_tasks(const ClCull *v, const VgScene *s) {
-    T.n = 0;
-    T.parts = v->legacy ? 1u : CL_PARTS;
+static void cell_tasks(ClTaskList *L, const ClCull *v, const VgScene *s) {
+    L->n = 0;
+    L->parts = v->legacy ? 1u : CL_PARTS;
     float lim_k = v->legacy ? 1.0f : (v->shadow ? v->shadow_lim_k : v->fade_lim_k);   // docs/LOD.md: scaled distances
     for (u32 ci = 0; ci < s->cell_count; ci++) {
         const VgCell *cl = &s->cells[ci];
@@ -860,7 +1060,7 @@ static void cell_tasks(const ClCull *v, const VgScene *s) {
         if (!n || !box_in(v->planes, 6, cl->min, cl->max)) continue;
         if (v->nrcv && !box_in(v->rcv, v->nrcv, cl->min, cl->max)) continue;
         if (v->sphere.w > 0 && box_dist(cl->min, cl->max, v3(v->sphere.x, v->sphere.y, v->sphere.z)) > v->sphere.w) continue;
-        if (cl->first < s->instance_count) task_add(&s->instances[cl->first], DG_MIN(n, s->instance_count - cl->first));
+        if (cl->first < s->instance_count) task_add(L, &s->instances[cl->first], DG_MIN(n, s->instance_count - cl->first));
     }
     const VgPlacements *pl = &s->pl;
     for (u32 h = 0; h < pl->chunk_count; h++) {
@@ -891,21 +1091,21 @@ static void cell_tasks(const ClCull *v, const VgScene *s) {
             if (!box_in(v->planes, 6, cl->min, cl->max)) continue;
             if (v->nrcv && !box_in(v->rcv, v->nrcv, cl->min, cl->max)) continue;
             if (v->sphere.w > 0 && box_dist(cl->min, cl->max, v3(v->sphere.x, v->sphere.y, v->sphere.z)) > v->sphere.w) continue;
-            task_add(&pl->inst[cl->first], cl->count);
+            task_add(L, &pl->inst[cl->first], cl->count);
         }
     }
 }
 
 static void cull_cells(const ClCull *v, const VgScene *s) {
-    cell_tasks(v, s);
-    if (!T.n) return;
-    tmp_reserve(T.t[T.n - 1].off + T.t[T.n - 1].n * T.parts);
+    cell_tasks(&T.l, v, s);
+    if (!T.l.n) return;
+    tmp_reserve(T.l.t[T.l.n - 1].off + T.l.t[T.l.n - 1].n * T.l.parts);
     T.v = v;
     T.s = s;
-    jobs_parallel_for((int)T.n, 8, cull_range, NULL);
+    jobs_parallel_for((int)T.l.n, 8, cull_range, NULL);
     u32 w = 0;
-    for (u32 i = 0; i < T.n; i++) {
-        const ClTask *t = &T.t[i];
+    for (u32 i = 0; i < T.l.n; i++) {
+        const ClTask *t = &T.l.t[i];
         if (t->out && t->off != w) {
             memmove(C.tmp + w, C.tmp + t->off, sizeof(ClInst) * t->out);
             memmove(C.tmp_key + w, C.tmp_key + t->off, sizeof(u32) * t->out);
@@ -922,10 +1122,22 @@ static void cull_cells(const ClCull *v, const VgScene *s) {
 // instance buffer layout) is the one the per-view passes produce.
 typedef struct ClMulti {
     const ClCull *v;
-    ClTask *t;
-    u32 n, cap, parts, base;
+    ClTaskList l;
+    u32 base;
     ClInst *tmp;
     u32 *key, tmp_cap;
+    // PF-0040 (cull_views_par): the view's emit on the jobs
+    ClView *out;
+    const mat4 *vp;                 // depth order along row `row` of it (NULL: key order)
+    int row;
+    u32 kept, first, rel;           // kept parts, their place in this frame's instance buffer (absolute, from the views' range)
+    u32 *kcount, kcount_cap;        // parts per key
+    u32 *kslot, kslot_cap;          // the used keys' slots
+    u32 *count, count_cap;          // per used key x depth bucket: the write cursors
+    u8 *bucket;
+    u32 bucket_cap;
+    ClInst *sorted;                 // the stream in order (cached memory), then copied to the buffer
+    u32 sorted_cap;
 } ClMulti;
 static struct { ClMulti m[CL_VIEWS]; int n; const VgScene *s; } MV;
 
@@ -935,7 +1147,7 @@ static void cull_range_multi(void *ctx, int begin, int end) {
     for (int i = begin; i < end; i++) {
         while (vi + 1 < MV.n && (u32)i >= MV.m[vi + 1].base) vi++;
         ClMulti *m = &MV.m[vi];
-        ClTask *t = &m->t[(u32)i - m->base];
+        ClTask *t = &m->l.t[(u32)i - m->base];
         t->out = 0;
         for (u32 k = 0; k < t->n; k++) cull_instance(m->v, MV.s, &t->inst[k], m->tmp + t->off, m->key + t->off, &t->out);
     }
@@ -954,16 +1166,10 @@ static void cull_views(const ClCull *views, ClView *const *outs, const mat4 *con
     for (int i = 0; i < nv; i++) {
         ClMulti *m = &MV.m[i];
         m->v = &views[i];
-        // the task list of this view in its own buffer (cell_tasks fills T)
-        ClTask *tt = T.t;
-        u32 tc = T.cap;
-        T.t = m->t, T.cap = m->cap;
-        cell_tasks(&views[i], s);
-        m->t = T.t, m->cap = T.cap, m->n = T.n, m->parts = T.parts;
-        T.t = tt, T.cap = tc, T.n = 0;
+        cell_tasks(&m->l, &views[i], s);   // the task list of this view in its own buffer
         m->base = total;
-        total += m->n;
-        u32 need = m->n ? m->t[m->n - 1].off + m->t[m->n - 1].n * m->parts : 0;
+        total += m->l.n;
+        u32 need = m->l.n ? m->l.t[m->l.n - 1].off + m->l.t[m->l.n - 1].n * m->l.parts : 0;
         if (need > m->tmp_cap) {
             u32 cap = m->tmp_cap ? m->tmp_cap : 4096;
             while (cap < need) cap *= 2;
@@ -976,8 +1182,8 @@ static void cull_views(const ClCull *views, ClView *const *outs, const mat4 *con
     for (int i = 0; i < nv; i++) {
         ClMulti *m = &MV.m[i];
         u32 w = 0;
-        for (u32 k = 0; k < m->n; k++) {
-            const ClTask *t = &m->t[k];
+        for (u32 k = 0; k < m->l.n; k++) {
+            const ClTask *t = &m->l.t[k];
             if (t->out && t->off != w) {
                 memmove(m->tmp + w, m->tmp + t->off, sizeof(ClInst) * t->out);
                 memmove(m->key + w, m->key + t->off, sizeof(u32) * t->out);
@@ -1005,7 +1211,9 @@ static ClInst *inst_alloc(u32 n, u32 *first) {
         if (!nb.mapped) return NULL;
         if (C.inst[f].buffer) {
             memcpy(nb.mapped, C.inst[f].mapped, sizeof(ClInst) * C.inst_used);
-            vkr_defer_buffer(&C.inst[f]);
+            // the culling job (PF-0041): the renderer's deferred deletion is the main thread's (vkc_frame_end)
+            if (jobs_on_worker() && C.inst_retired_n < ARRAY_COUNT(C.inst_retired)) C.inst_retired[C.inst_retired_n++] = C.inst[f];
+            else vkr_defer_buffer(&C.inst[f]);
         }
         C.inst[f] = nb;
         C.inst_cap[f] = cap;
@@ -1124,6 +1332,180 @@ static void emit_view_depth_order(ClView *out, const mat4 *vp, int row) {
     qsort(out->batches, out->batch_count, sizeof(ClBatch), cmp_batch_size);
 }
 
+// docs/perf/FINDINGS.md PF-0040: cull_views with every per-view step on the job system. The views'
+// cell walks run in parallel, then the instance cull (as before), then each view's packing and emit
+// in parallel into the range of this frame's instance buffer reserved for it in the old view order.
+// The emit is emit_view / emit_view_depth_order's: the same keys, buckets, batches and order, with
+// only the keys the view uses counted (no per-frame clear of keys x 32 buckets), the stream sorted in
+// cached memory and copied to the mapped buffer in one sequential write (not scattered into it). The
+// instance buffer and every view's batches are byte for byte the serial path's.
+static void views_tasks_range(void *ctx, int begin, int end) {
+    (void)ctx;
+    for (int i = begin; i < end; i++) {
+        ClMulti *m = &MV.m[i];
+        cell_tasks(&m->l, m->v, MV.s);
+        u32 need = m->l.n ? m->l.t[m->l.n - 1].off + m->l.t[m->l.n - 1].n * m->l.parts : 0;
+        if (need > m->tmp_cap) {
+            u32 cap = m->tmp_cap ? m->tmp_cap : 4096;
+            while (cap < need) cap *= 2;
+            m->tmp = (ClInst *)realloc(m->tmp, sizeof(ClInst) * cap);
+            m->key = (u32 *)realloc(m->key, sizeof(u32) * cap);
+            m->tmp_cap = cap;
+        }
+    }
+}
+
+static void *grow(void *p, u32 *cap, u32 need, size_t elem) {
+    if (need <= *cap) return p;
+    u32 c = *cap ? *cap : 1024;
+    while (c < need) c *= 2;
+    *cap = c;
+    return realloc(p, elem * c);
+}
+
+static void emit_multi(ClMulti *m, ClInst *dst) {
+    ClView *out = m->out;
+    out->batch_count = 0;
+    out->instances = m->kept;
+    if (!m->kept || !dst) return;
+    u32 n = m->kept, nkeys = C.mesh_cap << CL_KEY_SHIFT, nb = m->vp ? CL_DEPTH_BUCKETS : 1u;
+    m->kcount = (u32 *)grow(m->kcount, &m->kcount_cap, nkeys, sizeof(u32));
+    m->kslot = (u32 *)grow(m->kslot, &m->kslot_cap, nkeys, sizeof(u32));
+    memset(m->kcount, 0, sizeof(u32) * nkeys);
+    for (u32 i = 0; i < n; i++) m->kcount[m->key[i]]++;
+    u32 used = 0;
+    for (u32 k = 0; k < nkeys; k++)
+        if (m->kcount[k]) m->kslot[k] = used++;
+    if (m->vp) {   // emit_view_depth_order's buckets
+        m->bucket = (u8 *)grow(m->bucket, &m->bucket_cap, n, 1);
+        const float *mm = m->vp->m + m->row;
+        float zlo = 1e30f, zhi = -1e30f;
+        for (u32 i = 0; i < n; i++) {
+            const float *q = m->tmp[i].pos;
+            float z = mm[0] * q[0] + mm[4] * q[1] + mm[8] * q[2] + mm[12];
+            if (m->row == 3) z = log2f(fmaxf(z, 0.25f));
+            zlo = fminf(zlo, z), zhi = fmaxf(zhi, z);
+        }
+        float k = zhi > zlo ? (float)CL_DEPTH_BUCKETS / (zhi - zlo) : 0.0f;
+        for (u32 i = 0; i < n; i++) {
+            const float *q = m->tmp[i].pos;
+            float z = mm[0] * q[0] + mm[4] * q[1] + mm[8] * q[2] + mm[12];
+            if (m->row == 3) z = log2f(fmaxf(z, 0.25f));
+            int b = (int)((z - zlo) * k);
+            m->bucket[i] = (u8)(b < 0 ? 0 : (b >= (int)CL_DEPTH_BUCKETS ? CL_DEPTH_BUCKETS - 1 : b));
+        }
+    }
+    m->count = (u32 *)grow(m->count, &m->count_cap, used * nb, sizeof(u32));
+    memset(m->count, 0, sizeof(u32) * used * nb);
+    for (u32 i = 0; i < n; i++) m->count[m->kslot[m->key[i]] * nb + (m->vp ? m->bucket[i] : 0u)]++;
+    u32 run = 0;
+    for (u32 key = 0; key < nkeys; key++) {
+        if (!m->kcount[key]) continue;
+        u32 *c = &m->count[m->kslot[key] * nb];
+        if (out->batch_count >= out->batch_cap) {
+            out->batch_cap = out->batch_cap ? out->batch_cap * 2 : 64;
+            out->batches = (ClBatch *)realloc(out->batches, sizeof(ClBatch) * out->batch_cap);
+        }
+        out->batches[out->batch_count++] = (ClBatch){ key, m->first + run, m->kcount[key] };
+        for (u32 b = 0; b < nb; b++) {   // write cursors: buckets nearest first
+            u32 cnt = c[b];
+            c[b] = run;
+            run += cnt;
+        }
+    }
+    m->sorted = (ClInst *)grow(m->sorted, &m->sorted_cap, n, sizeof(ClInst));
+    for (u32 i = 0; i < n; i++) m->sorted[m->count[m->kslot[m->key[i]] * nb + (m->vp ? m->bucket[i] : 0u)]++] = m->tmp[i];
+    memcpy(dst, m->sorted, sizeof(ClInst) * n);
+    if (m->vp) qsort(out->batches, out->batch_count, sizeof(ClBatch), cmp_batch_size);
+}
+
+static void views_emit_range(void *ctx, int begin, int end) {
+    ClInst *base = (ClInst *)ctx;
+    for (int i = begin; i < end; i++) {
+        ClMulti *m = &MV.m[i];
+        u32 w = 0;   // pack the tasks' outputs in task order
+        for (u32 k = 0; k < m->l.n; k++) {
+            const ClTask *t = &m->l.t[k];
+            if (t->out && t->off != w) {
+                memmove(m->tmp + w, m->tmp + t->off, sizeof(ClInst) * t->out);
+                memmove(m->key + w, m->key + t->off, sizeof(u32) * t->out);
+            }
+            w += t->out;
+        }
+        emit_multi(m, base ? base + m->rel : NULL);
+    }
+}
+
+static void cull_views_par(const ClCull *views, ClView *const *outs, const mat4 *const *light_vps, const int *depth_rows, int nv, const VgScene *s) {
+    MV.n = nv;
+    MV.s = s;
+    for (int i = 0; i < nv; i++) {
+        ClMulti *m = &MV.m[i];
+        m->v = &views[i];
+        m->out = outs[i];
+        m->vp = light_vps ? light_vps[i] : NULL;
+        m->row = depth_rows ? depth_rows[i] : 0;
+    }
+    jobs_parallel_for(nv, 1, views_tasks_range, NULL);
+    u32 total = 0;
+    for (int i = 0; i < nv; i++) {
+        MV.m[i].base = total;
+        total += MV.m[i].l.n;
+    }
+    if (total) jobs_parallel_for((int)total, 8, cull_range_multi, NULL);
+    // every view's parts, then their ranges of the instance buffer in view order (one allocation:
+    // the buffer cannot be replaced between the views)
+    u32 parts = 0;
+    for (int i = 0; i < nv; i++) {
+        ClMulti *m = &MV.m[i];
+        m->kept = 0;
+        for (u32 k = 0; k < m->l.n; k++) m->kept += m->l.t[k].out;
+        m->rel = parts;
+        parts += m->kept;
+    }
+    u32 first = 0;
+    ClInst *base = parts ? inst_alloc(parts, &first) : NULL;
+    for (int i = 0; i < nv; i++) MV.m[i].first = first + MV.m[i].rel;
+    jobs_parallel_for(nv, 1, views_emit_range, base);
+}
+
+// classic_cull_check: the next frame's views culled by both paths (cull_views, cull_views_par), their
+// instance streams and batches compared byte for byte (logged).
+static bool g_cull_check;
+static void cmd_classic_cull_check(int argc, const char **argv) {
+    (void)argc, (void)argv;
+    g_cull_check = true;
+    log_info("classic_cull_check: next frame");
+}
+
+static void cull_check(const ClCull *views, ClView *const *outs, const mat4 *const *light_vps, const int *depth_rows, int nv, const VgScene *s) {
+    u32 used0 = C.inst_used;
+    cull_views(views, outs, light_vps, depth_rows, nv, s);
+    u32 n_a = C.inst_used - used0;
+    ClInst *a = (ClInst *)malloc(sizeof(ClInst) * (n_a + 1));
+    memcpy(a, (ClInst *)C.inst[R->frame_slot].mapped + used0, sizeof(ClInst) * n_a);
+    ClBatch *ab[CL_VIEWS];
+    u32 an[CL_VIEWS];
+    for (int i = 0; i < nv; i++) {
+        an[i] = outs[i]->batch_count;
+        ab[i] = (ClBatch *)malloc(sizeof(ClBatch) * (an[i] + 1));
+        memcpy(ab[i], outs[i]->batches, sizeof(ClBatch) * an[i]);
+    }
+    C.inst_used = used0;
+    cull_views_par(views, outs, light_vps, depth_rows, nv, s);
+    u32 n_b = C.inst_used - used0;
+    bool same = n_a == n_b && !memcmp(a, (ClInst *)C.inst[R->frame_slot].mapped + used0, sizeof(ClInst) * n_a);
+    for (int i = 0; i < nv; i++) {
+        bool bs = an[i] == outs[i]->batch_count && !memcmp(ab[i], outs[i]->batches, sizeof(ClBatch) * an[i]);
+        if (!bs) log_error("classic_cull_check: view %d batches differ (%u vs %u)", i, an[i], outs[i]->batch_count);
+        same &= bs;
+        free(ab[i]);
+    }
+    free(a);
+    if (same) log_info("classic_cull_check: %d views, %u instances, identical", nv, n_a);
+    else log_error("classic_cull_check: instance streams differ (%u vs %u instances)", n_a, n_b);
+}
+
 static void build_lods(const ClView *v) {
     for (u32 b = 0; b < v->batch_count; b++) {
         u32 mesh = mesh_drawn(v->batches[b].key >> CL_KEY_SHIFT), lod = v->batches[b].key & 7u;
@@ -1183,6 +1565,11 @@ static void cascade_view(ClCull *v, u32 k, u32 tile, float shadow_px) {
     memcpy(v->rcv, R->shadow_rcv[k], sizeof(vec4) * (size_t)v->nrcv);
     v->scc_on = C.scc_mode > 0;
     v->scc = C.scc_view[k];
+    // docs/perf/FINDINGS.md PF-0036: an orthographic tile's LOD pick depends on the instance's scale
+    // and the tile's texel size only, never on the camera, so an instance inside a LOD band stayed
+    // there for good, drawn twice (both LODs, dithered, through the alpha-tested pipelines). The
+    // finer LOD alone: one draw, the opaque pipeline for opaque materials, never coarser.
+    v->one_lod = prof_fix_enabled(PFX_SHADOW_ONE_LOD);
 }
 
 // docs/perf/FINDINGS.md PF-0013 (a visual trade-off): this frame's caster cascade limits per cascade
@@ -1195,19 +1582,31 @@ static void caster_limits(u32 ncasc) {
     for (u32 k = 0; k < 4; k++) scc_view(&C.scc, C.scc_mode, (int)k, (int)ncasc, splits, wide, R->shq.border, &C.scc_view[k]);
 }
 
-void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px, bool era2010, bool shadows) {
+// The frame's culling in three steps (vkc_frame runs them in a row): begin on the main thread (state,
+// descriptor sets), cull (main view, cascades, PiP: thread-safe, a job with PF-0041), end on the main
+// thread again (LOD uploads). The cull step reads the camera and shadow state compute_matrices set.
+typedef struct ClFrameArgs {
+    const VgScene *s;
+    float density, lod_px, shadow_lod_px, small_impostor_px;
+    bool era2010, shadows, cull, pip_lods;
+} ClFrameArgs;
+static ClFrameArgs FA;
+
+bool vkc_frame_begin(const VgScene *s, const VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px, bool era2010, bool shadows) {
+    FA.cull = FA.pip_lods = false;
     C.scene = NULL;
     C.inst_used = 0;
     C.draws = C.tris = C.tris_shadow = C.local_instances = 0;
     C.lod_new = lod_active();
+    C.lod_dedupe = prof_fix_enabled(PFX_LOD_DEDUPE);
+    C.deferred = false;   // vkc_deferred_begin decides (before the frame graph)
     for (int v = 0; v < CL_VIEWS; v++) C.view[v].batch_count = C.view[v].instances = 0;
-    if (!C.ok || !s || !C.mesh_cap) return;
+    if (!C.ok || !s || !C.mesh_cap) return false;
     if (!C.set_default) {
         VkImageView white = R->textures[R->white_tex].view;
         C.set_default = cl_alloc_set(white, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, white, R->sampler_linear);
-        if (!C.set_default) return;
+        if (!C.set_default) return false;
     }
-    u64 t0 = SDL_GetPerformanceCounter();
     C.scene = s;
     C.density = density;
     C.ncasc = 0;
@@ -1222,6 +1621,16 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
             C.set_disp = cl_alloc_set(disp->view, VK_IMAGE_LAYOUT_GENERAL, R->textures[R->white_tex].view, R->sampler_linear);
         }
     }
+    FA = (ClFrameArgs){ s, density, lod_px, shadow_lod_px, small_impostor_px, era2010, shadows, true, false };
+    return true;
+}
+
+void vkc_frame_cull(void) {
+    if (!FA.cull) return;
+    u64 t0 = SDL_GetPerformanceCounter();
+    const VgScene *s = FA.s;
+    float density = FA.density, lod_px = FA.lod_px, shadow_lod_px = FA.shadow_lod_px, small_impostor_px = FA.small_impostor_px;
+    bool era2010 = FA.era2010, shadows = FA.shadows;
     // main view
     ClCull v;
     memset(&v, 0, sizeof(v));
@@ -1300,8 +1709,15 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
                 outs[nv++] = &C.view[1 + k];
             }
         }
-        cull_views(cv, outs, lvps, rows, nv, s);
-        if (pip) build_lods(&C.view[CL_VIEW_PIP]);
+        if (g_cull_check) {
+            g_cull_check = false;
+            cull_check(cv, outs, lvps, rows, nv, s);
+        } else if (prof_fix_enabled(PFX_CLASSIC_CULL_PAR)) {
+            cull_views_par(cv, outs, lvps, rows, nv, s);
+        } else {
+            cull_views(cv, outs, lvps, rows, nv, s);
+        }
+        FA.pip_lods = pip;   // its LODs uploaded in vkc_frame_end
         count_view(&C.view[0]);
         PROF_END();
     } else if (render_scope_cull(&pip_vp, &pip_eye, &pip_px)) {
@@ -1338,8 +1754,21 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
         }
         PROF_END();
     }
-    for (int i = 0; i < CL_VIEW_PIP; i++) build_lods(&C.view[i]);
     C.cpu_ms = (float)((double)(SDL_GetPerformanceCounter() - t0) / (double)SDL_GetPerformanceFrequency() * 1000.0);
+}
+
+// LOD uploads of what the views drew (first use; the next finer prefetched): GPU resources, main thread.
+void vkc_frame_end(void) {
+    for (u32 i = 0; i < C.inst_retired_n; i++) vkr_defer_buffer(&C.inst_retired[i]);
+    C.inst_retired_n = 0;
+    if (!FA.cull) return;
+    if (FA.pip_lods) build_lods(&C.view[CL_VIEW_PIP]);
+    for (int i = 0; i < CL_VIEW_PIP; i++) build_lods(&C.view[i]);
+}
+
+void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px, bool era2010, bool shadows) {
+    if (vkc_frame_begin(s, disp, density, lod_px, shadow_lod_px, small_impostor_px, era2010, shadows)) vkc_frame_cull();
+    vkc_frame_end();
 }
 
 // The frame's wind (after its tile upload, before any classic draw): the foliage fields of a vgeo
@@ -1464,6 +1893,12 @@ static void mat_push(PushLit *pc, const VgMaterial *m, TextureId tex, u32 maps, 
 
 static bool lod_ready(const ClLod *L) { return L->gpu && R->meshes[L->gpu].used && R->frame_index >= L->ready_frame; }
 
+// PF-0039: a material the deferred lighting lights. What the lit body adds after the lighting (emissive,
+// the facade window grid in bit 11, highlight, glass, caustics) keeps the lit pass.
+static bool mat_deferrable(const VgMaterial *m) {
+    return m->emissive == 0.0f && !(m->flags & (MAT_EMISSIVE_TEX | MAT_HIGHLIGHT | MAT_GLASS | MAT_CAUSTICS | MAT_VIEWMODEL | (1u << 11)));
+}
+
 // pass 0 G-buffer, 1 lit, 2 shadow (view 1-4: cascade, or a local tile list), 3 scope PiP (lit forward)
 static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow_view) {
     if (!C.scene || !v->batch_count) return;
@@ -1479,10 +1914,13 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.layout, 4, 1, &C.set4[R->frame_slot], 0, NULL);
     VkDeviceSize zero = 0;
     vkCmdBindVertexBuffers(cmd, 1, 1, &C.inst[R->frame_slot].buffer, &zero);
-    // pipeline groups: plain one-sided first (early-z), then two-sided, then clipped
-    int groups = pass == 2 ? 2 : 4;
+    // pipeline groups: plain one-sided first (early-z), then two-sided, then clipped; with the deferred
+    // lighting (PF-0039) the prepass splits each group into the lit-pass materials, then the deferred
+    // ones (their own pipelines), and the lit pass skips the deferred ones
+    bool def = C.deferred && (pass == 0 || pass == 1);
+    int groups = pass == 2 ? 2 : (pass == 0 && def ? 8 : 4);
     for (int g = 0; g < groups; g++) {
-        int pipe = base + g;
+        int pipe = pass == 0 && def ? ((g & 1) ? CP_GB_DEF : CP_GB) + (g >> 1) : base + g;
         bool pipe_bound = false;
         TextureId bound_tex = ~0u;
         for (u32 b = 0; b < v->batch_count; b++) {
@@ -1512,8 +1950,11 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
                 bool two = (m->flags & VGM_TWO_SIDED) != 0;
                 bool clip = fading || ((m->flags & VGM_MASKED) && tex) || (m->flags & VGM_DITHER_FADE);
                 int want;
+                bool dm = def && mat_deferrable(m);
                 if (pass == 2) want = fading || ((m->flags & VGM_MASKED) && tex) ? 1 : 0;
                 else want = (clip ? 2 : 0) + (two ? 1 : 0);
+                if (pass == 1 && dm) continue;   // lit by the deferred pass
+                if (pass == 0 && def) want = want * 2 + (dm ? 1 : 0);
                 if (want != g) continue;
                 if (!pipe_bound) {
                     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.pipe[pipe]);
@@ -1527,7 +1968,7 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
                 }
                 TextureId t = tex ? tex : R->white_tex;
                 // the shadow views and the prepass only read the alpha: its R8 mask once built (PF-0014)
-                bool alpha_only = (m->flags & VGM_MASKED) && tex && (pass == 2 || (pass == 0 && g >= 2));
+                bool alpha_only = (m->flags & VGM_MASKED) && tex && (pass == 2 || (pass == 0 && clip && !dm));
                 TextureId bind_key = alpha_only ? t | 0x80000000u : t;
                 if (bind_key != bound_tex) {
                     VkDescriptorSet ts = alpha_only ? vkam_set(t, mat_sampler(m, t)) : VK_NULL_HANDLE;

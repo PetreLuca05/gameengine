@@ -33,6 +33,11 @@
 #define GB_NORMAL_FORMAT VK_FORMAT_R16G16_SNORM
 #define GB_MATERIAL_FORMAT VK_FORMAT_R8G8B8A8_UNORM
 #define GB_VELOCITY_FORMAT VK_FORMAT_R16G16_SFLOAT
+// The deferred lighting targets of classic content (docs/perf/FINDINGS.md PF-0039, shaders/classic_deferred.glsl):
+// bound at every prepass (null views when off), written by the deferred classic materials only.
+#define GB_ALBEDO_FORMAT VK_FORMAT_R16G16B16A16_SFLOAT
+#define GB_PARAMS_FORMAT VK_FORMAT_R16G16B16A16_UINT
+#define GB_COLORS 5
 
 void vkr_check_failed(VkResult r, const char *file, int line, const char *expr);   // logs the device fault (lost device), then fatal
 #define VK_CHECK(x) do { VkResult _r = (x); if (_r != VK_SUCCESS) vkr_check_failed(_r, __FILE__, __LINE__, #x); } while (0)
@@ -626,6 +631,10 @@ void vkg_shutdown(void);
 void vkg_record_foliage(VkCommandBuffer cmd); // before the shadow pass: wind, displacement buffer, wind tile, classic wind set
 void vkg_frame_update(void);                  // per frame before recording (render_set_camera): grass fidelity level
 void vkg_classic_frame(void);                 // after compute_matrices: the classic renderer's culling / LOD / batches
+// The same in two halves (PF-0041): begin starts the culling (a job when the fix is on), end (before the
+// frame graph) waits for it and uploads the LODs it asked for. vkg_classic_frame = begin + end.
+void vkg_classic_frame_begin(void);
+void vkg_classic_frame_end(void);
 // Point / spot light shadow tile: the scene instances near the light (PIPE_SHADOW bound).
 u32 vkg_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 cascade, u32 tile_px, u32 layers);
 
@@ -651,11 +660,20 @@ void vkc_chunk_loaded(const struct VgScene *s, u32 handle);                    /
 // The frame's batches: main view, sun cascades, scope PiP; the scene for the local light tiles.
 void vkc_frame(const struct VgScene *s, const struct VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px, bool era2010,
                bool shadows);
+// vkc_frame's steps: begin (main thread; false: nothing to cull), cull (thread-safe), end (main thread).
+bool vkc_frame_begin(const struct VgScene *s, const struct VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px,
+                     bool era2010, bool shadows);
+void vkc_frame_cull(void);
+void vkc_frame_end(void);
 struct VgViewGpu;
 struct VgWindTex;
 void vkc_wind_frame(const struct VgViewGpu *v, const struct VgWindTex *w);   // after the wind tile upload: the frame's wind (set 4)
 void vkc_draw_gbuffer(VkCommandBuffer cmd);   // inside the prepass (frame set bound)
 void vkc_draw_lit(VkCommandBuffer cmd);       // inside the opaque pass (depth EQUAL)
+// Deferred lighting of classic content (PF-0039): decided per frame before the frame graph; the
+// full-screen pass (views: normal, material, albedo, params, depth; inv_vp: the prepass's inverse).
+bool vkc_deferred_begin(bool want);
+void vkc_draw_deferred(VkCommandBuffer cmd, const VkImageView views[5], mat4 inv_vp);
 void vkc_draw_pip(VkCommandBuffer cmd);       // inside the scope PiP pass (own culling / LOD, lit forward; docs/LOD.md)
 // The scope PiP view of this frame (setup_scope_pip): view-projection, eye, pixels per unit tangent; false: none.
 bool render_scope_cull(mat4 *vp, vec3 *eye, float *px_scale);

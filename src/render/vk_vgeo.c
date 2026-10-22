@@ -437,8 +437,43 @@ static void fallback_register(u32 mesh, const VgBuilt *b, bool persistent) { vkc
 // Once per frame after the camera is set (render.c): the classic renderer's culling, LOD selection
 // and instance batches for the main view, the sun cascades and the scope PiP.
 void vkg_classic_frame(void) {
+    vkg_classic_frame_begin();
+    vkg_classic_frame_end();
+}
+
+// docs/perf/FINDINGS.md PF-0041: the culling (every view's cell walk, instance cull and emit; itself
+// parallel inside) as a job from the moment compute_matrices set the camera and the shadow cascades,
+// while the main thread prepares the rest of the frame (skinned passes, dynamic buffers, the particle,
+// wind and rain recording) instead of waiting for it. Nothing the job reads changes in between; what it
+// writes (the views' batches, the instance buffer) is read by the frame graph only, after the join. The
+// LOD uploads (GPU resources) stay on the main thread, after the join. Needs the batched cull (PF-0009).
+static JobCounter g_cull_counter;
+static bool g_cull_async;
+static void cull_job(void *u) {
+    (void)u;
+    vkc_frame_cull();
+}
+
+void vkg_classic_frame_begin(void) {
+    g_cull_async = false;
     if (!G.ok) return;
-    vkc_frame(&G.scene, G.disp_ok ? &G.disp : NULL, G.foliage_density->f, G.lod_px->f, G.shadow_error_px->f, G.impostor_px->f, G.era && G.era->i == 3, G.shadows->i != 0);
+    if (!vkc_frame_begin(&G.scene, G.disp_ok ? &G.disp : NULL, G.foliage_density->f, G.lod_px->f, G.shadow_error_px->f, G.impostor_px->f,
+                         G.era && G.era->i == 3, G.shadows->i != 0))
+        return;
+    g_cull_async = prof_fix_enabled(PFX_CLASSIC_CULL_ASYNC) && prof_fix_enabled(PFX_CLASSIC_CULL_BATCH) && jobs_worker_count() > 0;
+    if (g_cull_async) jobs_submit_frame(cull_job, NULL, NULL, &g_cull_counter);
+    else vkc_frame_cull();
+}
+
+void vkg_classic_frame_end(void) {
+    if (!G.ok) return;
+    if (g_cull_async) {
+        PROF_BEGIN("classic:cull_join");
+        jobs_wait(&g_cull_counter);
+        PROF_END();
+        g_cull_async = false;
+    }
+    vkc_frame_end();
 }
 
 // ------------------------------------------------------------------ point / spot light shadows

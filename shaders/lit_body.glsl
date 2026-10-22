@@ -52,76 +52,7 @@ layout(location = 0) out vec4 out_color;
 const float PI = 3.14159265;
 #endif
 
-// Anti-aliased grid line intensity for coordinate c with spacing s and width w (in pixels).
-float grid_line(float c, float s, float w) {
-    float x = c / s;
-    float d = abs(fract(x - 0.5) - 0.5) / max(fwidth(x), 1e-5);
-    return 1.0 - clamp(d / w, 0.0, 1.0);
-}
-
-vec3 apply_grid(vec3 base, vec3 p, vec3 n) {
-    vec3 an = abs(n);
-    vec2 c;
-    vec2 axis_tint_sel;
-    if (an.y >= an.x && an.y >= an.z) c = p.xz;
-    else if (an.x >= an.z) c = p.zy;
-    else c = p.xy;
-    float minor = max(grid_line(c.x, 0.25, 0.8), grid_line(c.y, 0.25, 0.8));
-    float major = max(grid_line(c.x, 1.0, 1.3), grid_line(c.y, 1.0, 1.3));
-    float big   = max(grid_line(c.x, 5.0, 2.0), grid_line(c.y, 5.0, 2.0));
-    vec3 col = base;
-    col = mix(col, col * 0.72, minor * 0.6);
-    col = mix(col, col * 0.35, major);
-    col = mix(col, col * 0.18, big * 0.6);
-    // The world origin axes on floors (greys only): X near black, Z near white.
-    if (an.y > 0.9) {
-        float ax = grid_line(p.z, 1000.0, 2.5) * step(abs(p.z), 0.5);
-        float az = grid_line(p.x, 1000.0, 2.5) * step(abs(p.x), 0.5);
-        col = mix(col, vec3(0.04), ax);
-        col = mix(col, vec3(0.9), az);
-    }
-    return col;
-}
-
-// Measuring grid for the recoil wall: 10 cm minor, 50 cm major, 1 m bold lines.
-vec3 apply_fine_grid(vec3 base, vec3 p, vec3 n) {
-    vec3 an = abs(n);
-    vec2 c;
-    if (an.y >= an.x && an.y >= an.z) c = p.xz;
-    else if (an.x >= an.z) c = p.zy;
-    else c = p.xy;
-    float minor = max(grid_line(c.x, 0.1, 0.9), grid_line(c.y, 0.1, 0.9));
-    float half_m = max(grid_line(c.x, 0.5, 1.4), grid_line(c.y, 0.5, 1.4));
-    float meter = max(grid_line(c.x, 1.0, 2.0), grid_line(c.y, 1.0, 2.0));
-    vec3 col = base;
-    col = mix(col, col * 0.62, minor * 0.7);
-    col = mix(col, vec3(0.32), half_m * 0.8);
-    col = mix(col, vec3(0.06), meter);
-    return col;
-}
-
-// Sighting-in target: 1 MOA squares at its distance (spacing s in metres), 5 MOA bold, 10 MOA black
-// (level.c snaps the target centre onto a 10 MOA crossing; the aim square is its own box).
-vec3 apply_moa_grid(vec3 base, vec3 p, vec3 n, float s) {
-    vec3 an = abs(n);
-    vec2 c;
-    if (an.y >= an.x && an.y >= an.z) c = p.xz;
-    else if (an.x >= an.z) c = p.zy;
-    else c = p.xy;
-    s = max(s, 1e-4);
-    // Each level fades out once its squares get smaller than a few pixels (readable through a
-    // scope, a clean board from far away).
-    float px = max(length(fwidth(c)), 1e-6);
-    float f1 = clamp((s / px - 4.0) / 4.0, 0.0, 1.0), f5 = clamp((s * 5.0 / px - 4.0) / 4.0, 0.0, 1.0), f10 = clamp((s * 10.0 / px - 4.0) / 4.0, 0.0, 1.0);
-    float minor = max(grid_line(c.x, s, 0.8), grid_line(c.y, s, 0.8)) * f1;
-    float five = max(grid_line(c.x, s * 5.0, 1.2), grid_line(c.y, s * 5.0, 1.2)) * f5;
-    float ten = max(grid_line(c.x, s * 10.0, 1.6), grid_line(c.y, s * 10.0, 1.6)) * f10;
-    vec3 col = base;
-    col = mix(col, col * 0.55, minor * 0.8);
-    col = mix(col, vec3(0.25), five * 0.85);
-    col = mix(col, vec3(0.03), ten);
-    return col;
-}
+#include "lit_surface_fn.glsl"
 
 #include "lighting.glsl"
 // LIT_COVER: ground cover shading (MAT_COVER materials only; the includer defines LIT_COVER_IN,
@@ -134,72 +65,18 @@ void main() {
 #ifdef LIT_PRE_MAIN
     LIT_PRE_MAIN
 #endif
-    uint flags = MAT_FLAGS;
-    uint ao_b = MAT_AO_BYTE;
-    vec3 n = normalize(v_normal);
-    if (!LIT_FRONT_FACING) n = -n;
-    // MAT_AO_BYTE_VERTEX: the vertex alpha is baked AO (applied to the indirect light below), not opacity.
-    bool vertex_ao = (ao_b & MAT_AO_BYTE_VERTEX) != 0u;
-    vec4 base = MAT_COLOR * vec4(v_color.rgb, vertex_ao ? 1.0 : v_color.a);
-
-    if ((flags & MAT_TEXTURED) != 0u) {
-        vec4 t;
-        if ((flags & MAT_TRIPLANAR) != 0u) {
-            float s = MAT_PARAMS.w;
-            vec3 w = abs(n);
-            w /= (w.x + w.y + w.z);
-            t = LIT_TEX_W(v_world.zy * s, LIT_DPDX.zy * s, LIT_DPDY.zy * s) * w.x + LIT_TEX_W(v_world.xz * s, LIT_DPDX.xz * s, LIT_DPDY.xz * s) * w.y +
-                LIT_TEX_W(v_world.xy * s, LIT_DPDX.xy * s, LIT_DPDY.xy * s) * w.z;
-        } else {
-            t = LIT_TEX(v_uv * max(MAT_PARAMS.w, 1e-3));
-        }
-        base *= t;
-    }
-#ifdef LIT_ALPHA_MASK
-    if (base.a < pbr_alpha_cutoff()) discard;
-    base.a = 1.0;
-#endif
-    vec2 map_uv = v_uv * max(MAT_PARAMS.w, 1e-3);   // the albedo's uv (glTF maps share it)
-#ifdef LIT_COVER
-    if ((flags & MAT_COVER) != 0u) {
-        cover_base(flags, LIT_COVER_IN, LIT_COVER_PIVOT, map_uv, base.rgb);
-        // the back-face flip also turned the clump dome downward: blades are lit from above on both sides
-        n = normalize(vec3(n.x, abs(n.y), n.z));
-    }
-#endif
-#ifdef PBR_MAPS
-    n = pbr_normal(flags, map_uv, v_world, n);
-#endif
-    float surf_rough = -1.0;   // >= 0: the surface textures' roughness replaces the material's
-    float surf_metal = -1.0;   // >= 0: the metal layers' metallic replaces the material's
-    float surf_ao = 1.0;       // the surface layers' baked AO (x SSAO)
-#ifdef LIT_SURFACES
-    if (frame.surf_info.y > 0.5) {
-        if ((flags & MAT_TERRAIN) != 0u && frame.surf_map.w > 0.5) {
-            if (frame.surf_info.z > 0.5) terrain_shade(v_world, n, base, 0.82 + 0.36 * v_color.a, surf_rough, surf_ao);   // docs/TERRAIN_SHADING.md
-            else surf_terrain(v_world, n, base, 0.82 + 0.36 * v_color.a, surf_rough, surf_ao);
-        }
-        else if ((flags & MAT_LAYERED) != 0u) surf_layered(v_world, v_uv, v_color, n, base, surf_rough, surf_metal, surf_ao);
-    }
-    if ((flags & (MAT_TERRAIN | MAT_LAYERED)) != 0u) base.a = MAT_COLOR.a;   // the vertex alpha is a layer / variation
-#endif
-    if ((flags & MAT_CHECKER) != 0u) {
-        vec2 c = floor(v_world.xz * 0.25);
-        float k = mod(c.x + c.y, 2.0);
-        base.rgb *= mix(0.8, 1.0, k);
-    }
-    if ((flags & MAT_GRID) != 0u && frame.params.x > 0.5) base.rgb = apply_grid(base.rgb, v_world, n);
-    if ((flags & MAT_GRID_FINE) != 0u) base.rgb = apply_fine_grid(base.rgb, v_world, n);
-    if ((flags & MAT_GRID_MOA) != 0u) base.rgb = apply_moa_grid(base.rgb, v_world, n, MAT_PARAMS.w);
-#ifdef LIT_BASE_HOOK
-    LIT_BASE_HOOK
-#endif
+#include "lit_surface.glsl"
 
     vec3 color;
     if ((flags & MAT_UNLIT) != 0u) {
         color = base.rgb;
     } else {
         vec3 v = normalize(frame.camera_pos.xyz - v_world);
+#ifdef LIT_DEFERRED_MATERIAL
+        // The deferred lighting of classic content (classic_deferred.frag): the G-buffer holds the
+        // material after the weather (albedo, roughness, metallic, normal, snow).
+        LIT_DEFERRED_MATERIAL
+#else
         float rough = clamp(surf_rough >= 0.0 ? surf_rough : MAT_PARAMS.x, 0.04, 1.0);
         float metal = clamp(surf_metal >= 0.0 ? surf_metal : MAT_PARAMS.y, 0.0, 1.0);
 #ifdef PBR_MAPS
@@ -211,6 +88,7 @@ void main() {
         bool vm = (flags & MAT_VIEWMODEL) != 0u;
         // Weather: wet / puddles / snow (shaders/weather.glsl; the G-buffer applies the same terms).
         float wx_snow = weather_surface(v_world, n, albedo, rough, metal, vm);
+#endif
         vec2 suv = ss_main_uv(v_world, gl_FragCoord.xy * frame.screen.zw);
         // Ambient occlusion (docs/RENDERING_POST.md "Foliage-aware AO"), indirect light only (diffuse ambient,
         // SSGI, specular occlusion): the screen-space AO at the global intensity, weighted per material

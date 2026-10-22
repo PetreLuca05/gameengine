@@ -87,6 +87,7 @@ static struct {
     u32 frame_index;
     u32 sort_n;
     u32 last_alpha, last_distort;
+    u32 last_sub;           // sub-emitter spawns the read-back frame queued for its next frame
     int frames_since_spawn;
     RenderVfxFrame in;      // last submitted frame input (counts / settings)
     RenderVfxStats stats;
@@ -955,6 +956,7 @@ static void read_back(VfxFrameRes *f) {
         X.stats.distort = c.distort;
         X.last_alpha = c.alpha;
         X.last_distort = c.distort;
+        X.last_sub = c.sub;
     }
     u64 ts[8];
     int base = (int)R->frame_slot * 8;
@@ -1023,6 +1025,21 @@ void vkx_record_compute(VkCommandBuffer cmd) {
     u->caps[3] = (X.in.lighting ? 1u : 0u) | (X.in.collision ? 2u : 0u);
     u->misc = v4(0, 0, (float)(f->sprite_add + f->sprite_alpha), (float)f->decal_count);
     X.prev_vp = R->view_proj;
+    // docs/perf/FINDINGS.md PF-0038: no particle alive, none spawned, no sub-emitter spawn queued: the
+    // simulation would leave every list, count and draw argument at zero (51 dispatches, 55 barriers).
+    // The read-back counters (two frames old) count only from a frame after the last spawn. The frame
+    // index still advances: the spawn hashes and the alive list parity of later frames are unchanged.
+    if (prof_fix_enabled(PFX_VFX_IDLE_SKIP) && !X.need_reset && !f->spawn_particles && X.frames_since_spawn > FRAMES_IN_FLIGHT && f->readback_valid &&
+        !X.stats.alive && !X.last_sub) {
+        mem_barrier(cmd, VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_WRITE_BIT, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+        X.frame_index++;
+        X.depth_valid = true;
+        X.frames_since_spawn++;
+        X.stats.sort_n = n;
+        vkx_timestamp(cmd, 1);
+        return;
+    }
 
     VkDescriptorSet set = f->set;
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, X.comp_layout, 0, 1, &set, 0, NULL);

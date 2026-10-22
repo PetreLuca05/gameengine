@@ -85,4 +85,7 @@ void main() {
     o_material = vec4(wx_rough, metal, float(gf) / 255.0, clamp(emissive / 8.0, 0.0, 1.0));
     vec2 cur = v_cur_clip.xy / v_cur_clip.w, prev = v_prev_clip.xy / v_prev_clip.w;
     o_velocity = (cur - prev) * 0.5;   // NDC -> UV
+#ifdef GB_DEFERRED
+#include "classic_deferred_gbuffer.glsl"
+#endif
 }

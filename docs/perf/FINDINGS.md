@@ -30,6 +30,14 @@ Generated from `docs/perf/fixes.json` by `tools/perf_audit/perf_audit.py finding
 | PF-0033 | R12 off-screen animation: the presentation post-pass (chars_present_tick) chose a character's update rate and its foot IK / lean / turn from its projected size alone, so the zombies behind the camera or beside the view were posed like the ones in front of it (every tick with IK at LOD0), and with a horde the anim_eval_budget's 64 post-passes per tick went to them as much as to what is on screen (horde500: 40 - 85 % of the characters outside the view, depending on the camera) | Characters outside the view pose at the cheap rate without IK (frustum-aware animation LOD) **(visual trade-off)** | closed | S | DESKTOP-SN4N74U | CLOSED: counter:anim_eval_outside 42.0 -> 12.0 (-71.43%, p=0); images differ (visual trade-off, by design); state identical |
 | PF-0034 | R09 per-character animation cost with a horde (the step toward 1000+ zombies): every drawn character interpolated its own 65-bone pose, built its own skeleton palette and gathered one palette per part every frame, also the far ones (LOD2 / LOD3, < 60 px) that walk the same few clips: horde500 ~6.5 ms of worker time per frame (pose 4.6 + gathers 1.9), 1.75 MB of palettes; 1000 zombies ~12.5 ms and 3.35 MB | Far characters share one sampled pose per clip / phase bucket (shared pose cache) **(visual trade-off)** | closed | L | DESKTOP-SN4N74U | CLOSED: counter:skin_palette_bytes 1749760.0 -> 905536.0 (-48.25%, p=0); images differ (visual trade-off, by design); state identical |
 | PF-0035 | R14 textures stored uncompressed (F-1a9828 .. F-a94519, static): every content texture was RGBA8 (only assets/textures/hazard.ktx2 pre-encoded). The 4096^2 Ch*_1001 maps the rule names are source art (the game loads their 1024 / 2048 skin atlases); the textures actually resident are the terrain (216 MB) and surface arrays, the tree / grass / foliage / impostor module textures and the skins: 581 MB of RGBA8 levels in a vegetation session | World, terrain and foliage textures block-compressed (BC7, encoded on the jobs, cached on disk) **(visual trade-off)** | implemented, measured A / B in fresh processes (VRAM, GPU, images). A mid-session toggle (r_texture_compress / perf_fix_disable PF-0035) replaces the world textures at once and reloads terrain at the next map, while trees, grass, foliage masks, impostors and surfaces keep their first format: a valid A / B needs one process per side. | L | DESKTOP-SN4N74U | VRAM -435 MB allocated / -543 MB usage on the vegetation map (-27 / -30%), GPU frame -2.6 .. -8.2%; images differ (visual trade-off, by design) |
+| PF-0036 | 300 fps plan (2026-10-22, dense foliage): an orthographic cascade tile picks an instance's LOD from its scale and the tile's texel size only, never from the camera, so an instance inside a LOD cross-fade band stayed there for good: drawn twice into the shadow map every frame (the finer and the coarser LOD, each dithered over its share of the threshold range) through the alpha-tested pipelines, opaque bark included | Sun cascades draw the finer LOD of a LOD band alone (no dithered LOD pair) **(visual trade-off)** | implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify) | S | - | - |
+| PF-0037 | 300 fps plan (2026-10-22): the builder always exports 4 LODs; cards the simplifier cannot reduce are carried through unchanged, so 54 of the vegetation map's 70 meshes (every grass clump, ground cover and small plant) have 4 identical LODs: each LOD switch of them was a cross-fade of a mesh with itself (both parts dithered, through the alpha-tested pipelines) and their instances split over 4 batches per view | Classic LODs holding their finer neighbour's exact triangles picked as that LOD | implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify) | S | - | - |
+| PF-0038 | 300 fps plan (2026-10-22): vfx_sim recorded its whole chain every frame with no particle alive (begin, sub-emitters, arguments, update, draw arguments and a 46-dispatch bitonic sort of at least 512 entries: 51 dispatches and 55 barriers, 0.25 - 0.8 ms of scope in the forest scenes, the first sync point of the frame) | GPU particle simulation skipped while nothing is alive, spawned or queued | implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify) | S | - | - |
+| PF-0039 | 300 fps plan (2026-10-22): the classic main view was drawn twice, the G-buffer prepass and the lit pass at depth EQUAL, the second time with the full wind deformation again, for about one shaded fragment per pixel: in the broadleaf forest at Low the lit pass cost 5.0 ms for 634 k fragments (geometry bound; the prepass 4.5 ms), at Modern 6.3 ms | Classic content lit by one full-screen pass from its prepass (deferred lighting, no second geometry pass) | implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify) | L | - | - |
+| PF-0040 | 300 fps plan (2026-10-22): classic:cull_views held the main thread 1.2 - 3.7 ms per frame in the vegetation scenes (0.5 - 1.7 ms exclusive): each view's cell walk, the packing of the culled instances and the emit (key and depth bucket counting sort, a clear of keys x 32 buckets per view, the instances scattered 48 B at a time into the write-combined instance buffer, the batch sort) ran one view after the other on the main thread | The classic views' cell walks, packing and emit on the job system (the same instance streams) | implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify) | M | - | - |
+| PF-0041 | 300 fps plan (2026-10-22): the classic culling ran inside render:prepare on the main thread right after compute_matrices; the rest of the frame's preparation (skinned passes, dynamic buffers, the particle, wind and rain recording) waited for it, although none of it reads the culling's output | Classic culling as a job overlapping the frame's preparation (joined before the frame graph) | implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify) | S | - | - |
+| PF-0042 | 300 fps plan (2026-10-22): r_shader_hotreload (on by default in dev builds) looked at about 170 shader sources and includes once a second on the main thread (one file stat each), a hitch every second on Windows where a stat costs tens of microseconds | The shader hot reload's source poll (file stats) on a job | implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify) | S | - | - |
+| PF-0043 | 300 fps plan (2026-10-22): one FIFO held the background jobs (terrain chunk generation, BC7 encodes, decodes: milliseconds each) and the frame's parallel_for helpers alike, so a loop's helpers waited behind them and the caller ran most of the loop alone (frame time spikes while streaming) | Frame work ahead of background jobs (parallel_for helpers, frame jobs on an urgent queue) | implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify) | S | - | - |
 
 ## PF-0001: Empty shadow maps are not re-cleared every frame
 
@@ -358,3 +366,92 @@ Each loader keeps building its RGBA8 mip chain as before (the GPU blit chain's f
 - What stays identical: The game state (no rendering decision feeds the simulation), the mip chains' filters, the texture sizes and sampling, the r_texture_quality levels; textures that are not compressed (VFX atlas, classic impostors, UI, KTX2 files, runtime data maps). The image differs by design: the BC7 approximation of each texel (codec error bounds in tests/test_bc_codec.c; bitstreams checked bit-exact against Pillow's BC7 decoder by tools/tests/bc_crosscheck.py).
 
 - Verification run (DESKTOP-SN4N74U, 2026-10-18): A / B by tools/tests/tex_bc_compare.py (r_texture_compress 0 vs 1, alternating) and uncapped GPU captures (240 frames x 3 alternating runs): vegetation VMA allocated 1614 -> 1179 MB (-27%), usage 1823 -> 1280 MB (-30%); GPU frame -2.6 .. -8.2%; images differ (visual trade-off, by design: 35.5 - 37.1 dB on vegetation views)
+
+## PF-0036: Sun cascades draw the finer LOD of a LOD band alone (no dithered LOD pair)
+
+cascade_view sets one_lod (perf_fix_disable PF-0036 clears it); cull_instance then drops the coarser part of a band (cw = 0): one part, the finer LOD, not fading, so opaque materials go back to the depth-only pipeline without a fragment shader.
+
+- Rule / finding: R02 300 fps plan (2026-10-22, dense foliage): an orthographic cascade tile picks an instance's LOD from its scale and the tile's texel size only, never from the camera, so an instance inside a LOD cross-fade band stayed there for good: drawn twice into the shadow map every frame (the finer and the coarser LOD, each dithered over its share of the threshold range) through the alpha-tested pipelines, opaque bark included
+- Code: `src/render/vk_classic.c cascade_view (ClCull.one_lod), cull_instance`
+- Metrics (perf_verify): `scope:shadow_sun`, `gpu_frame`
+- Scenes: veg_forest_pine, veg_forest_broadleaf, veg_meadow, foliage
+- **Visual trade-off** (not fidelity neutral): Not a sacrifice: the instances of a band cast the finer LOD's shadow whole instead of a dither of the finer and the coarser LOD (the shadow keeps at least the detail it had; an instance never switches LOD in a cascade, so nothing pops). The shadow maps are not bit-identical to the dithered pair's, hence filed with the image-changing fixes.
+- What stays identical: -
+
+
+## PF-0037: Classic LODs holding their finer neighbour's exact triangles picked as that LOD
+
+At registration each LOD records the first LOD with exactly its triangles (the same DAG cut of a decoded mesh, or the same exported vertices and indices). cull_instance picks that LOD instead, and drops a band's coarser part when it is the same mesh as the finer one. Both paths (cross-fade and legacy) and every view.
+
+- Rule / finding: R02 300 fps plan (2026-10-22): the builder always exports 4 LODs; cards the simplifier cannot reduce are carried through unchanged, so 54 of the vegetation map's 70 meshes (every grass clump, ground cover and small plant) have 4 identical LODs: each LOD switch of them was a cross-fade of a mesh with itself (both parts dithered, through the alpha-tested pipelines) and their instances split over 4 batches per view
+- Code: `src/render/vk_classic.c cut_same / exported_same, vkc_register_mesh (ClMesh.lod_same), cull_instance`
+- Metrics (perf_verify): `scope:prepass`, `scope:opaque`, `scope:shadow_sun`, `gpu_frame`
+- Scenes: veg_meadow, veg_forest_pine, foliage
+- Why fidelity-neutral: The same triangles at the same instances: a cross-fade between two copies of one mesh covers every pixel once (the two dither intervals partition [0, 1)), so drawing the mesh once whole gives the same depth, G-buffer and lit pixels; batches of identical meshes merge (fewer draws). The LOD debug tints show the first LOD's level.
+
+
+## PF-0038: GPU particle simulation skipped while nothing is alive, spawned or queued
+
+When nothing spawns this frame, the read-back counters (two frames old, from a frame after the last spawn) show no particle alive and no sub-emitter spawn queued, the simulation is not recorded: only the host-write barrier and the timestamps. The frame index still advances.
+
+- Rule / finding: R01 300 fps plan (2026-10-22): vfx_sim recorded its whole chain every frame with no particle alive (begin, sub-emitters, arguments, update, draw arguments and a 46-dispatch bitonic sort of at least 512 entries: 51 dispatches and 55 barriers, 0.25 - 0.8 ms of scope in the forest scenes, the first sync point of the frame)
+- Code: `src/render/vk_vfx.c vkx_record_compute, read_back (last_sub)`
+- Metrics (perf_verify): `scope:vfx_sim`, `gpu_frame`
+- Scenes: veg_forest_pine, veg_meadow, devroom
+- Why fidelity-neutral: With no particle alive and none spawned the chain would leave every list, count and draw argument at zero; the counters it skips writing already are zero. The frame index (spawn hashes, alive list parity) advances as before, so the first spawn after an idle stretch hashes and lands exactly as it would have.
+
+
+## PF-0039: Classic content lit by one full-screen pass from its prepass (deferred lighting, no second geometry pass)
+
+A deferrable classic material (no emissive, highlight, glass, caustics or facade window grid) draws its prepass with the lit pass's surface stage, material and weather terms appended (lit_surface.glsl: the same code) and writes them to two extra targets: RGBA16F albedo + roughness after the weather, RGBA16UI baked AO / snow / ground cover thickness (half) and flags + AO byte. A full-screen pass before the opaque pass lights every pixel those materials kept, with lit_body.glsl's lighting on the stored terms (the world position from the depth and the prepass's view-projection; ground cover facing down is turned up and gets its puddle normal as the lit pass does); the lit pass skips those materials. Every other pixel is discarded there and lit by the opaque pass as before, which also draws over any pixel a later prepass draw took from classic content.
+
+- Rule / finding: R02 300 fps plan (2026-10-22): the classic main view was drawn twice, the G-buffer prepass and the lit pass at depth EQUAL, the second time with the full wind deformation again, for about one shaded fragment per pixel: in the broadleaf forest at Low the lit pass cost 5.0 ms for 634 k fragments (geometry bound; the prepass 4.5 ms), at Modern 6.3 ms
+- Code: `shaders/classic_deferred.glsl (targets, flags), classic_gbuffer_def(_clip).frag + classic_deferred_gbuffer.glsl (the prepass of a deferred material), classic_deferred.frag (the full-screen lighting)`, `shaders/lit_surface.glsl / lit_surface_fn.glsl (the lit body's surface stage, shared, textually unchanged: the forward shaders compile to the same SPIR-V), lit_body.glsl LIT_DEFERRED_MATERIAL`, `src/render/vk_classic.c cl_deferred_init, vkc_deferred_begin, vkc_draw_deferred, mat_deferrable, draw_view; render.c build_frame_graph (classic_deferred pass, gb_cl_albedo / gb_cl_params), begin_gbuffer, exec_opaque; vk_pipelines.c (prepass pipelines bind the two targets, masked)`
+- Metrics (perf_verify): `scope:opaque`, `scope:prepass`, `scope:classic_deferred`, `gpu_frame`
+- Scenes: veg_forest_pine, veg_forest_broadleaf, veg_meadow, foliage
+- Why fidelity-neutral: The lighting code and its inputs are the lit pass's: the same surface stage (shared include), material and weather terms, the same lighting body. What differs is the precision of the hand-over: the albedo and roughness in half floats, the metallic and the normal in the G-buffer's formats (8 bit, RG16 octahedral), the position reconstructed from the 32 bit depth. Dev room A / B (Linux container, lavapipe, 1600 x 900, dev_fixed_fps 60; two runs of one side are bit-identical, so every difference is the fix's): the AO foliage corner (vgeo bush and grass beside the legacy ones) PSNR 73.7 dB, 0.005 % of pixels more than 2 / 255 apart (max 31, one card edge); the foliage yard (foliage_test_scatter 20000: trees, bushes, grass) PSNR 62.5 dB, 0.11 % more than 2 / 255, 0.009 % more than 8 (scattered card edge pixels), HUD rows excluded.
+
+
+## PF-0040: The classic views' cell walks, packing and emit on the job system (the same instance streams)
+
+The views' cell walks run in parallel (one task list each), then the instance cull as before, then each view's packing and emit in parallel into its own range of the instance buffer, reserved in the old view order in one allocation. The emit counts only the keys the view uses, sorts the stream in cached memory and copies it into the mapped buffer in one sequential write. classic_cull_check culls the next frame both ways and compares the instance buffer and every view's batches byte for byte.
+
+- Rule / finding: R07 300 fps plan (2026-10-22): classic:cull_views held the main thread 1.2 - 3.7 ms per frame in the vegetation scenes (0.5 - 1.7 ms exclusive): each view's cell walk, the packing of the culled instances and the emit (key and depth bucket counting sort, a clear of keys x 32 buckets per view, the instances scattered 48 B at a time into the write-combined instance buffer, the batch sort) ran one view after the other on the main thread
+- Code: `src/render/vk_classic.c cull_views_par (views_tasks_range, views_emit_range, emit_multi), ClTaskList, classic_cull_check`
+- Metrics (perf_verify): `zone:classic:cull_views`, `zone:render:prepare`, `cpu_work`
+- Scenes: veg_forest_pine, veg_meadow, foliage, horde_foliage
+- Why fidelity-neutral: Every view's instances, keys, buckets, batches and their order are emit_view / emit_view_depth_order's; the instance buffer layout is the serial path's (the same ranges in the same view order). classic_cull_check (Linux container): identical in the dev room corner and foliage yard frames (4 - 5 views, inside the PF-0041 job too); screenshots with PF-0040 / PF-0041 on are bit-identical to runs before them.
+
+
+## PF-0041: Classic culling as a job overlapping the frame's preparation (joined before the frame graph)
+
+vkc_frame in three steps: begin on the main thread (frame state, descriptor sets), the culling as a job (itself parallel inside, PF-0040), end on the main thread before the frame graph (the join, then the LOD uploads; instance buffers the job replaced are handed to the deferred deletion there). Needs the batched cull (PF-0009).
+
+- Rule / finding: R07 300 fps plan (2026-10-22): the classic culling ran inside render:prepare on the main thread right after compute_matrices; the rest of the frame's preparation (skinned passes, dynamic buffers, the particle, wind and rain recording) waited for it, although none of it reads the culling's output
+- Code: `src/render/vk_vgeo.c vkg_classic_frame_begin / vkg_classic_frame_end, cull_job; vk_classic.c vkc_frame_begin / vkc_frame_cull / vkc_frame_end (inst_retired); render.c render_end_frame; jobs.h (parallel_for from a job)`
+- Metrics (perf_verify): `zone:render:prepare`, `cpu_work`
+- Scenes: veg_forest_pine, veg_meadow, foliage, horde_foliage
+- Why fidelity-neutral: The job reads only what compute_matrices and the game set before it starts (camera, cascades, scope, LOD tables) and writes only the views' batches and the instance buffer, which nothing reads before the join; the instance stream is the synchronous one.
+
+
+## PF-0042: The shader hot reload's source poll (file stats) on a job
+
+Once a second the poll submits a job that computes the sources' newest modification time; a later frame takes the result and reloads exactly as before when it is newer.
+
+- Rule / finding: R27 300 fps plan (2026-10-22): r_shader_hotreload (on by default in dev builds) looked at about 170 shader sources and includes once a second on the main thread (one file stat each), a hitch every second on Windows where a stat costs tens of microseconds
+- Code: `src/render/vk_pipelines.c render_poll_shader_hot_reload, poll_job, vkp_register_shader (published with a release barrier)`
+- Metrics (perf_verify): `zone:render_begin`, `cpu_work`
+- Scenes: devroom, veg_forest_pine
+- Why fidelity-neutral: The same comparison and reload, one or a few frames later; nothing else reads the result.
+
+
+## PF-0043: Frame work ahead of background jobs (parallel_for helpers, frame jobs on an urgent queue)
+
+A second queue for frame work: the parallel_for helpers and jobs_submit_frame (the classic culling job, PF-0041) go there, and workers and jobs_wait take it before the background queue. The precise frame cap (SDL_DelayPrecise instead of whole milliseconds, main.c) rides along: a 300 fps cap no longer truncates 3.33 ms to 3 ms.
+
+- Rule / finding: R07 300 fps plan (2026-10-22): one FIFO held the background jobs (terrain chunk generation, BC7 encodes, decodes: milliseconds each) and the frame's parallel_for helpers alike, so a loop's helpers waited behind them and the caller ran most of the loop alone (frame time spikes while streaming)
+- Code: `src/core/jobs.c submit, pop_any, jobs_submit_frame, jobs_parallel_for (helpers); jobs.h`
+- Metrics (perf_verify): `wait:parfor_tail`, `cpu_work`
+- Scenes: veg_forest_pine, veg_meadow, horde_foliage
+- Why fidelity-neutral: Only the order in which workers pick up queued jobs changes; every loop and job runs the same code with the same results (parallel_for outputs do not depend on which thread runs a chunk).
+

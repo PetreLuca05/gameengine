@@ -1812,6 +1812,9 @@ static struct {
     bool any_skin_vm;
     VkDeviceSize line_off[2], text_off, ui_voff, ui_ioff;
     FgRes hdr, depth, vm_depth, normal, material, velocity, swap, scene_copy, ldr;
+    FgRes cl_albedo, cl_params;   // classic deferred lighting targets (PF-0039; FG_NONE when off)
+    bool deferred;
+    mat4 inv_vp;            // the prepass's (jittered) view-projection, inverted (the deferred pass)
     int shadows;            // the shadow maps' marker pass (render_end_frame records them there)
     PostLitInputs lit;
     // Scope picture-in-picture (RSIGHT_SCOPE_PIP while aiming)
@@ -1850,9 +1853,10 @@ static void begin_pass(VkCommandBuffer cmd, VkImageView color, bool clear_color,
 }
 
 static void begin_gbuffer(VkCommandBuffer cmd, VkImageView depth, bool clear) {
-    VkRenderingAttachmentInfo ca[3];
-    VkImageView views[3] = { fg_view(F.normal), fg_view(F.material), fg_view(F.velocity) };
-    for (int i = 0; i < 3; i++) {
+    VkRenderingAttachmentInfo ca[GB_COLORS];
+    // the classic deferred targets (PF-0039): null views (writes discarded) when the frame does not use them
+    VkImageView views[GB_COLORS] = { fg_view(F.normal), fg_view(F.material), fg_view(F.velocity), fg_view(F.cl_albedo), fg_view(F.cl_params) };
+    for (int i = 0; i < GB_COLORS; i++) {
         ca[i] = (VkRenderingAttachmentInfo){ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
         ca[i].imageView = views[i];
         ca[i].imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -1861,6 +1865,9 @@ static void begin_gbuffer(VkCommandBuffer cmd, VkImageView depth, bool clear) {
     }
     // Sky: normal 0, material roughness 1, velocity 0 (camera-only reprojection reconstructs it).
     ca[1].clearValue.color.float32[0] = 1.0f;
+    // Deferred targets: the params' flags cleared (0: not a deferred pixel); the albedo is read only
+    // where a deferred material wrote them
+    if (clear) ca[3].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
     da.imageView = depth;
     da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
@@ -1871,7 +1878,7 @@ static void begin_gbuffer(VkCommandBuffer cmd, VkImageView depth, bool clear) {
     ri.renderArea.extent.width = R->hdr.w;
     ri.renderArea.extent.height = R->hdr.h;
     ri.layerCount = 1;
-    ri.colorAttachmentCount = 3;
+    ri.colorAttachmentCount = GB_COLORS;
     ri.pColorAttachments = ca;
     ri.pDepthAttachment = &da;
     vkCmdBeginRendering(cmd, &ri);
@@ -1911,10 +1918,22 @@ static void exec_prepass(VkCommandBuffer cmd, void *u) {
     vkCmdEndRendering(cmd);
 }
 
+// Classic deferred lighting (PF-0039): clears HDR and lights the pixels deferred classic materials kept in
+// the prepass; the opaque pass then draws everything else over it.
+static void exec_classic_deferred(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    begin_pass(cmd, R->hdr.view, true, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED, false);
+    bind_frame(cmd);
+    post_push_lit_inputs(cmd, &F.lit, false);
+    VkImageView views[5] = { fg_view(F.normal), fg_view(F.material), fg_view(F.cl_albedo), fg_view(F.cl_params), R->depth.view };
+    vkc_draw_deferred(cmd, views, F.inv_vp);
+    vkCmdEndRendering(cmd);
+}
+
 // Lit static opaque (depth from the prepass, LESS_OR_EQUAL: shades each pixel once).
 static void exec_opaque(VkCommandBuffer cmd, void *u) {
     (void)u;
-    begin_pass(cmd, R->hdr.view, true, R->depth.view, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, false);
+    begin_pass(cmd, R->hdr.view, !F.deferred, R->depth.view, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, false);
     bind_frame(cmd);
     post_push_lit_inputs(cmd, &F.lit, false);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
@@ -2021,9 +2040,10 @@ static void draw_precip(VkCommandBuffer cmd, VkDescriptorSet frame_set) {
 // writes their velocity for TAA. Then the lit viewmodel + overlay lines.
 static void exec_vm_prepass(VkCommandBuffer cmd, void *u) {
     (void)u;
-    VkRenderingAttachmentInfo ca[3];
-    VkImageView views[3] = { fg_view(F.normal), fg_view(F.material), fg_view(F.velocity) };
-    for (int i = 0; i < 3; i++) {
+    VkRenderingAttachmentInfo ca[GB_COLORS];
+    // the prepass pipelines' classic deferred targets (PF-0039): null views here
+    VkImageView views[GB_COLORS] = { fg_view(F.normal), fg_view(F.material), fg_view(F.velocity), VK_NULL_HANDLE, VK_NULL_HANDLE };
+    for (int i = 0; i < GB_COLORS; i++) {
         ca[i] = (VkRenderingAttachmentInfo){ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
         ca[i].imageView = views[i];
         ca[i].imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -2040,7 +2060,7 @@ static void exec_vm_prepass(VkCommandBuffer cmd, void *u) {
     ri.renderArea.extent.width = R->hdr.w;
     ri.renderArea.extent.height = R->hdr.h;
     ri.layerCount = 1;
-    ri.colorAttachmentCount = 3;
+    ri.colorAttachmentCount = GB_COLORS;
     ri.pColorAttachments = ca;
     ri.pDepthAttachment = &da;
     vkCmdBeginRendering(cmd, &ri);
@@ -2426,6 +2446,18 @@ static void build_frame_graph(FrameData *fd) {
         gd.format = GB_VELOCITY_FORMAT;
         F.velocity = fg_texture(&gd);
     }
+    // Classic deferred lighting (PF-0039): the targets its materials' prepass writes beside the G-buffer.
+    F.cl_albedo = F.cl_params = FG_NONE;
+    F.deferred = vkc_deferred_begin(true);
+    if (F.deferred) {
+        gd.name = "gb_cl_albedo";
+        gd.format = GB_ALBEDO_FORMAT;
+        F.cl_albedo = fg_texture(&gd);
+        gd.name = "gb_cl_params";
+        gd.format = GB_PARAMS_FORMAT;
+        F.cl_params = fg_texture(&gd);
+        F.inv_vp = mat4_inverse(fd->view_proj);
+    }
 
     // The sun / moon / viewmodel / local light shadow maps (recorded at this marker by render_end_frame):
     // first, as before, or after the prepass when this frame runs async compute (PF-0027), so the
@@ -2485,6 +2517,8 @@ static void build_frame_graph(FrameData *fd) {
     fg_write(p, F.normal, FG_COLOR);
     fg_write(p, F.material, FG_COLOR);
     fg_write(p, F.velocity, FG_COLOR);
+    fg_write(p, F.cl_albedo, FG_COLOR);
+    fg_write(p, F.cl_params, FG_COLOR);
     // Async compute: an async pass starts after the graphics work declared before it, so the sky and
     // the screen-space chain (one batch after the prepass) overlap the shadow maps declared next.
     if (async_order) sky_build();
@@ -2497,6 +2531,21 @@ static void build_frame_graph(FrameData *fd) {
     // z: AO intensity as the lit pass' lerp weight (above 1 the GTAO power strengthens it instead, gtao.comp)
     fd->post_params = v4(ps->ssr_intensity, ps->ssgi_intensity, fminf(ps->ao_intensity, 1.0f), 1.0f);
 
+    if (F.deferred) {
+        p = fg_pass("classic_deferred", exec_classic_deferred, NULL);
+        fg_after(p, sky_last_pass());
+        fg_write(p, F.hdr, FG_COLOR);
+        fg_read(p, F.normal, FG_SAMPLED);
+        fg_read(p, F.material, FG_SAMPLED);
+        fg_read(p, F.cl_albedo, FG_SAMPLED);
+        fg_read(p, F.cl_params, FG_SAMPLED);
+        fg_read(p, F.depth, FG_SAMPLED);
+        if (F.lit.ao_on) fg_read(p, F.lit.ao, FG_SAMPLED);
+        if (F.lit.contact_on) fg_read(p, F.lit.contact, FG_SAMPLED);
+        if (F.lit.ssr_on) fg_read(p, F.lit.ssr, FG_SAMPLED);
+        if (F.lit.ssgi_on) fg_read(p, F.lit.ssgi, FG_SAMPLED);
+        if (p < 0) F.deferred = vkc_deferred_begin(false);   // r_post_disable: the lit pass lights it
+    }
     p = fg_pass("opaque", exec_opaque, NULL);
     fg_after(p, sky_last_pass());   // the environment / SH / cloud shadow (async queue: PF-0027)
     fg_write(p, F.hdr, FG_COLOR);
@@ -2718,7 +2767,7 @@ void render_end_frame(void) {
     PROF_BEGIN("render:prepare");
     FrameData *fd = (FrameData *)f->ubo.mapped;
     compute_matrices(fd);
-    vkg_classic_frame();   // the classic renderer's culling / LOD / instance batches
+    vkg_classic_frame_begin();   // the classic renderer's culling / LOD / instance batches (a job: PF-0041, joined before the graph)
     memset(&F, 0, sizeof(F));
     F.f = f;
 
@@ -2799,6 +2848,7 @@ void render_end_frame(void) {
     // ---------------------------------------------------------- frame graph: shadows, scene, post, UI
     // Declared first; the shadow maps are recorded at its "shadows" marker on the graphics queue, the
     // async passes into the async queue's batches (fg.c, PF-0027). Everything above is the pre batch.
+    vkg_classic_frame_end();   // the culling joined, its LOD uploads
     PROF_BEGIN("render:frame_graph");
     build_frame_graph(fd);
     cmd = fg_exec_begin(cmd);

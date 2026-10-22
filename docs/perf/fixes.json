@@ -2840,5 +2840,183 @@
    "summary": "VRAM -435 MB allocated / -543 MB usage on the vegetation map (-27 / -30%), GPU frame -2.6 .. -8.2%; images differ (visual trade-off, by design)",
    "machine": "DESKTOP-SN4N74U"
   }
+ },
+ "PF-0036": {
+  "title": "Sun cascades draw the finer LOD of a LOD band alone (no dithered LOD pair)",
+  "rule": "R02",
+  "finding": "300 fps plan (2026-10-22, dense foliage): an orthographic cascade tile picks an instance's LOD from its scale and the tile's texel size only, never from the camera, so an instance inside a LOD cross-fade band stayed there for good: drawn twice into the shadow map every frame (the finer and the coarser LOD, each dithered over its share of the threshold range) through the alpha-tested pipelines, opaque bark included",
+  "effort": "S",
+  "status": "implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify)",
+  "tradeoff": "Not a sacrifice: the instances of a band cast the finer LOD's shadow whole instead of a dither of the finer and the coarser LOD (the shadow keeps at least the detail it had; an instance never switches LOD in a cascade, so nothing pops). The shadow maps are not bit-identical to the dithered pair's, hence filed with the image-changing fixes.",
+  "code": [
+   "src/render/vk_classic.c cascade_view (ClCull.one_lod), cull_instance"
+  ],
+  "description": "cascade_view sets one_lod (perf_fix_disable PF-0036 clears it); cull_instance then drops the coarser part of a band (cw = 0): one part, the finer LOD, not fading, so opaque materials go back to the depth-only pipeline without a fragment shader.",
+  "metrics": [
+   "scope:shadow_sun",
+   "gpu_frame"
+  ],
+  "scenes": [
+   "veg_forest_pine",
+   "veg_forest_broadleaf",
+   "veg_meadow",
+   "foliage"
+  ]
+ },
+ "PF-0037": {
+  "title": "Classic LODs holding their finer neighbour's exact triangles picked as that LOD",
+  "rule": "R02",
+  "finding": "300 fps plan (2026-10-22): the builder always exports 4 LODs; cards the simplifier cannot reduce are carried through unchanged, so 54 of the vegetation map's 70 meshes (every grass clump, ground cover and small plant) have 4 identical LODs: each LOD switch of them was a cross-fade of a mesh with itself (both parts dithered, through the alpha-tested pipelines) and their instances split over 4 batches per view",
+  "effort": "S",
+  "status": "implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify)",
+  "code": [
+   "src/render/vk_classic.c cut_same / exported_same, vkc_register_mesh (ClMesh.lod_same), cull_instance"
+  ],
+  "description": "At registration each LOD records the first LOD with exactly its triangles (the same DAG cut of a decoded mesh, or the same exported vertices and indices). cull_instance picks that LOD instead, and drops a band's coarser part when it is the same mesh as the finer one. Both paths (cross-fade and legacy) and every view.",
+  "neutral": "The same triangles at the same instances: a cross-fade between two copies of one mesh covers every pixel once (the two dither intervals partition [0, 1)), so drawing the mesh once whole gives the same depth, G-buffer and lit pixels; batches of identical meshes merge (fewer draws). The LOD debug tints show the first LOD's level.",
+  "metrics": [
+   "scope:prepass",
+   "scope:opaque",
+   "scope:shadow_sun",
+   "gpu_frame"
+  ],
+  "scenes": [
+   "veg_meadow",
+   "veg_forest_pine",
+   "foliage"
+  ]
+ },
+ "PF-0038": {
+  "title": "GPU particle simulation skipped while nothing is alive, spawned or queued",
+  "rule": "R01",
+  "finding": "300 fps plan (2026-10-22): vfx_sim recorded its whole chain every frame with no particle alive (begin, sub-emitters, arguments, update, draw arguments and a 46-dispatch bitonic sort of at least 512 entries: 51 dispatches and 55 barriers, 0.25 - 0.8 ms of scope in the forest scenes, the first sync point of the frame)",
+  "effort": "S",
+  "status": "implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify)",
+  "code": [
+   "src/render/vk_vfx.c vkx_record_compute, read_back (last_sub)"
+  ],
+  "description": "When nothing spawns this frame, the read-back counters (two frames old, from a frame after the last spawn) show no particle alive and no sub-emitter spawn queued, the simulation is not recorded: only the host-write barrier and the timestamps. The frame index still advances.",
+  "neutral": "With no particle alive and none spawned the chain would leave every list, count and draw argument at zero; the counters it skips writing already are zero. The frame index (spawn hashes, alive list parity) advances as before, so the first spawn after an idle stretch hashes and lands exactly as it would have.",
+  "metrics": [
+   "scope:vfx_sim",
+   "gpu_frame"
+  ],
+  "scenes": [
+   "veg_forest_pine",
+   "veg_meadow",
+   "devroom"
+  ]
+ },
+ "PF-0039": {
+  "title": "Classic content lit by one full-screen pass from its prepass (deferred lighting, no second geometry pass)",
+  "rule": "R02",
+  "finding": "300 fps plan (2026-10-22): the classic main view was drawn twice, the G-buffer prepass and the lit pass at depth EQUAL, the second time with the full wind deformation again, for about one shaded fragment per pixel: in the broadleaf forest at Low the lit pass cost 5.0 ms for 634 k fragments (geometry bound; the prepass 4.5 ms), at Modern 6.3 ms",
+  "effort": "L",
+  "status": "implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify)",
+  "code": [
+   "shaders/classic_deferred.glsl (targets, flags), classic_gbuffer_def(_clip).frag + classic_deferred_gbuffer.glsl (the prepass of a deferred material), classic_deferred.frag (the full-screen lighting)",
+   "shaders/lit_surface.glsl / lit_surface_fn.glsl (the lit body's surface stage, shared, textually unchanged: the forward shaders compile to the same SPIR-V), lit_body.glsl LIT_DEFERRED_MATERIAL",
+   "src/render/vk_classic.c cl_deferred_init, vkc_deferred_begin, vkc_draw_deferred, mat_deferrable, draw_view; render.c build_frame_graph (classic_deferred pass, gb_cl_albedo / gb_cl_params), begin_gbuffer, exec_opaque; vk_pipelines.c (prepass pipelines bind the two targets, masked)"
+  ],
+  "description": "A deferrable classic material (no emissive, highlight, glass, caustics or facade window grid) draws its prepass with the lit pass's surface stage, material and weather terms appended (lit_surface.glsl: the same code) and writes them to two extra targets: RGBA16F albedo + roughness after the weather, RGBA16UI baked AO / snow / ground cover thickness (half) and flags + AO byte. A full-screen pass before the opaque pass lights every pixel those materials kept, with lit_body.glsl's lighting on the stored terms (the world position from the depth and the prepass's view-projection; ground cover facing down is turned up and gets its puddle normal as the lit pass does); the lit pass skips those materials. Every other pixel is discarded there and lit by the opaque pass as before, which also draws over any pixel a later prepass draw took from classic content.",
+  "neutral": "The lighting code and its inputs are the lit pass's: the same surface stage (shared include), material and weather terms, the same lighting body. What differs is the precision of the hand-over: the albedo and roughness in half floats, the metallic and the normal in the G-buffer's formats (8 bit, RG16 octahedral), the position reconstructed from the 32 bit depth. Dev room A / B (Linux container, lavapipe, 1600 x 900, dev_fixed_fps 60; two runs of one side are bit-identical, so every difference is the fix's): the AO foliage corner (vgeo bush and grass beside the legacy ones) PSNR 73.7 dB, 0.005 % of pixels more than 2 / 255 apart (max 31, one card edge); the foliage yard (foliage_test_scatter 20000: trees, bushes, grass) PSNR 62.5 dB, 0.11 % more than 2 / 255, 0.009 % more than 8 (scattered card edge pixels), HUD rows excluded.",
+  "metrics": [
+   "scope:opaque",
+   "scope:prepass",
+   "scope:classic_deferred",
+   "gpu_frame"
+  ],
+  "scenes": [
+   "veg_forest_pine",
+   "veg_forest_broadleaf",
+   "veg_meadow",
+   "foliage"
+  ]
+ },
+ "PF-0040": {
+  "title": "The classic views' cell walks, packing and emit on the job system (the same instance streams)",
+  "rule": "R07",
+  "finding": "300 fps plan (2026-10-22): classic:cull_views held the main thread 1.2 - 3.7 ms per frame in the vegetation scenes (0.5 - 1.7 ms exclusive): each view's cell walk, the packing of the culled instances and the emit (key and depth bucket counting sort, a clear of keys x 32 buckets per view, the instances scattered 48 B at a time into the write-combined instance buffer, the batch sort) ran one view after the other on the main thread",
+  "effort": "M",
+  "status": "implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify)",
+  "code": [
+   "src/render/vk_classic.c cull_views_par (views_tasks_range, views_emit_range, emit_multi), ClTaskList, classic_cull_check"
+  ],
+  "description": "The views' cell walks run in parallel (one task list each), then the instance cull as before, then each view's packing and emit in parallel into its own range of the instance buffer, reserved in the old view order in one allocation. The emit counts only the keys the view uses, sorts the stream in cached memory and copies it into the mapped buffer in one sequential write. classic_cull_check culls the next frame both ways and compares the instance buffer and every view's batches byte for byte.",
+  "neutral": "Every view's instances, keys, buckets, batches and their order are emit_view / emit_view_depth_order's; the instance buffer layout is the serial path's (the same ranges in the same view order). classic_cull_check (Linux container): identical in the dev room corner and foliage yard frames (4 - 5 views, inside the PF-0041 job too); screenshots with PF-0040 / PF-0041 on are bit-identical to runs before them.",
+  "metrics": [
+   "zone:classic:cull_views",
+   "zone:render:prepare",
+   "cpu_work"
+  ],
+  "scenes": [
+   "veg_forest_pine",
+   "veg_meadow",
+   "foliage",
+   "horde_foliage"
+  ]
+ },
+ "PF-0041": {
+  "title": "Classic culling as a job overlapping the frame's preparation (joined before the frame graph)",
+  "rule": "R07",
+  "finding": "300 fps plan (2026-10-22): the classic culling ran inside render:prepare on the main thread right after compute_matrices; the rest of the frame's preparation (skinned passes, dynamic buffers, the particle, wind and rain recording) waited for it, although none of it reads the culling's output",
+  "effort": "S",
+  "status": "implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify)",
+  "code": [
+   "src/render/vk_vgeo.c vkg_classic_frame_begin / vkg_classic_frame_end, cull_job; vk_classic.c vkc_frame_begin / vkc_frame_cull / vkc_frame_end (inst_retired); render.c render_end_frame; jobs.h (parallel_for from a job)"
+  ],
+  "description": "vkc_frame in three steps: begin on the main thread (frame state, descriptor sets), the culling as a job (itself parallel inside, PF-0040), end on the main thread before the frame graph (the join, then the LOD uploads; instance buffers the job replaced are handed to the deferred deletion there). Needs the batched cull (PF-0009).",
+  "neutral": "The job reads only what compute_matrices and the game set before it starts (camera, cascades, scope, LOD tables) and writes only the views' batches and the instance buffer, which nothing reads before the join; the instance stream is the synchronous one.",
+  "metrics": [
+   "zone:render:prepare",
+   "cpu_work"
+  ],
+  "scenes": [
+   "veg_forest_pine",
+   "veg_meadow",
+   "foliage",
+   "horde_foliage"
+  ]
+ },
+ "PF-0042": {
+  "title": "The shader hot reload's source poll (file stats) on a job",
+  "rule": "R27",
+  "finding": "300 fps plan (2026-10-22): r_shader_hotreload (on by default in dev builds) looked at about 170 shader sources and includes once a second on the main thread (one file stat each), a hitch every second on Windows where a stat costs tens of microseconds",
+  "effort": "S",
+  "status": "implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify)",
+  "code": [
+   "src/render/vk_pipelines.c render_poll_shader_hot_reload, poll_job, vkp_register_shader (published with a release barrier)"
+  ],
+  "description": "Once a second the poll submits a job that computes the sources' newest modification time; a later frame takes the result and reloads exactly as before when it is newer.",
+  "neutral": "The same comparison and reload, one or a few frames later; nothing else reads the result.",
+  "metrics": [
+   "zone:render_begin",
+   "cpu_work"
+  ],
+  "scenes": [
+   "devroom",
+   "veg_forest_pine"
+  ]
+ },
+ "PF-0043": {
+  "title": "Frame work ahead of background jobs (parallel_for helpers, frame jobs on an urgent queue)",
+  "rule": "R07",
+  "finding": "300 fps plan (2026-10-22): one FIFO held the background jobs (terrain chunk generation, BC7 encodes, decodes: milliseconds each) and the frame's parallel_for helpers alike, so a loop's helpers waited behind them and the caller ran most of the loop alone (frame time spikes while streaming)",
+  "effort": "S",
+  "status": "implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify)",
+  "code": [
+   "src/core/jobs.c submit, pop_any, jobs_submit_frame, jobs_parallel_for (helpers); jobs.h"
+  ],
+  "description": "A second queue for frame work: the parallel_for helpers and jobs_submit_frame (the classic culling job, PF-0041) go there, and workers and jobs_wait take it before the background queue. The precise frame cap (SDL_DelayPrecise instead of whole milliseconds, main.c) rides along: a 300 fps cap no longer truncates 3.33 ms to 3 ms.",
+  "neutral": "Only the order in which workers pick up queued jobs changes; every loop and job runs the same code with the same results (parallel_for outputs do not depend on which thread runs a chunk).",
+  "metrics": [
+   "wait:parfor_tail",
+   "cpu_work"
+  ],
+  "scenes": [
+   "veg_forest_pine",
+   "veg_meadow",
+   "horde_foliage"
+  ]
  }
 }

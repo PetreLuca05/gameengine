@@ -29,8 +29,9 @@ The cvars the classic path uses keep their names: `r_vgeo_lod_px`, `r_vgeo_shado
   transient build is gone later); meshes with one material and no colours keep a CPU copy of the exported LODs
   and upload a LOD on first use. Impostor atlases become two renderer textures at registration. Skinned meshes
   are not registered (characters use the legacy skinned path).
-- **Per frame.** `vkg_classic_frame` (render.c, after the camera) calls `vkc_frame`: culling, LOD selection and
-  instance batches for the main view, the sun cascades and the scope PiP. Before the shadow pass
+- **Per frame.** `vkg_classic_frame_begin` (render.c, after `compute_matrices`) starts `vkc_frame`'s culling,
+  LOD selection and instance batches for the main view, the sun cascades and the scope PiP as a job
+  (PF-0041); `vkg_classic_frame_end` joins it before the frame graph and uploads the LODs it asked for. Before the shadow pass
   `vkg_record_foliage` records the foliage inputs: the frame's wind, the displacement buffer, the wind tile
   upload, then the classic wind set (`vkc_wind_frame`).
 - **Point / spot light shadows** of the content: `vkg_draw_local_shadow` -> `vkc_draw_local_shadow`
@@ -64,7 +65,7 @@ pool, scene buffers and placement region copy no longer exist (CPU-only scene).
 | Culling | CPU, per frame: placement chunk bounds, then 8 m cells (frustum, per-cell foliage fade end / shadow distance), then instances (frustum, `vgeo_foliage_alpha` density + fade hash, impostor switch, LOD pick by projected error `r_vgeo_lod_px`). Cells are culled in parallel on the job system. Main view + 3 sun cascades (cascades: LOD by texel size, `r_vgeo_shadow_error_px`, mesh `shadow_max_dist`, no impostors, the caster class's cascade limit: grass in cascade 0, small plants in 0 - 1, docs/SHADOWS.md "Caster cascade limits"; cells / chunks skipped by their class mask). |
 | Batching | Instances bucketed per (mesh, LOD) into a per-frame host-visible instance stream (48 B: position + scale, quaternion, wind phase + fade). One `vkCmdDrawIndexed` per bucket and material, instanced; no per-instance draws. |
 | Prepass | G-buffer with the shared `gbuffer_body.glsl`. Opaque materials: no discard (early-z). Masked materials: alpha test on the material texture (isotropic mip); dithered fade (`VGM_DITHER_FADE`, same interleaved-gradient threshold rotated per frame); two-sided materials without back-face culling, normal flipped on back faces. |
-| Lit | Shared `lit_body.glsl` at depth EQUAL. Masked / dithered materials and impostors repeat their test (distant cards of neighbouring trees can share a depth value). |
+| Lit | Deferred (PF-0039, "Deferred lighting" below): the prepass of a deferrable material also stores the lit pass's surface terms and one full-screen pass lights them. Other materials and impostors: shared `lit_body.glsl` at depth EQUAL; masked / dithered ones repeat their test (distant cards of neighbouring trees can share a depth value). |
 | WPO | The foliage wind of docs/FOLIAGE_WIND.md, `shaders/vgeo/wpo.glsl` (`wpo_veg`) included as is in the vertex shader (`classic_vert.glsl`). Per draw (push constants): the material's `wpo_params` and `wind_params`. Per frame slot (set 4, `ClWindGpu` uniform buffer, filled by `vkc_wind_frame` after the tile upload): the field outside the tile, the tile window, time, this frame's and last frame's (velocity), the `r_foliage_wind` layers / `wind_solo`, the `wind_view` debug view, the displacement buffer window; set 4 binding 1 is the 3-image wind tile ring (`vg_wind_*`). Per instance: pivot, scale, phase (`VG_INST_PHASE / 256`). Bent / fluttering normals (`VGW_NORMALS`) come from the vertex shader; shadows displace the same way. `WPO_DISPLACE` reads the displacement buffer (`VgDisplace`). Impostors have no wind. Culling spheres grow by `max_wpo * max(scale, 1)` (`vg_wpo_margin`). |
 | Shadows | Sun cascades and point / spot light tiles: instanced, depth only, masked materials alpha-tested. |
 | Characters | The legacy GPU-skinned path. |
@@ -90,11 +91,40 @@ cull time.
 - The scope picture-in-picture draws the vgeo content through a classic view culled with the PiP projection
   (docs/LOD.md "Scopes").
 - The CPU culls every live placement cell that passes the chunk tests each frame (~0.5-2 ms with the
-  job system on the test maps).
+  job system on the test maps). Every step runs on the job system (PF-0040: the views' cell walks, the
+  instance cull, the packing and emit in parallel; `classic_cull_check` compares it with the serial path)
+  and the whole culling overlaps the rest of the frame's preparation (PF-0041).
 - No occlusion culling: the dense devroom foliage yard draws what the frustum keeps.
 - Phone views and the rain occlusion map do not show vgeo content.
 - A multi-material model mesh whose page data is not in memory falls back to the exported LODs with its
   first material only (no such content today).
+
+### Deferred lighting (PF-0039)
+
+The lit pass drew the main view's geometry a second time (the full wind deformation again) to shade about one
+fragment per pixel: in the forests that pass is geometry bound (broadleaf at Low: 5.0 ms for 634 k fragments).
+Classic content is now lit from its prepass instead:
+
+- **Deferrable** (`mat_deferrable`): every material but those with something the lit body adds after the
+  lighting (emissive or an emissive map, highlight, glass, caustics, the facade window grid). Those keep the
+  lit pass, as do impostors.
+- **Prepass** (`classic_gbuffer_def(_clip).frag`): the shared G-buffer, then the lit pass's surface stage
+  (`lit_surface.glsl`, the code `lit_body.glsl` includes), material and weather terms of the fragment
+  (`classic_deferred_gbuffer.glsl`) into two more targets (`shaders/classic_deferred.glsl`): RGBA16F albedo +
+  roughness after the weather, RGBA16UI baked AO (vertex alpha x occlusion map x ground cover), snow cover,
+  ground cover thickness and the flags + AO byte. Every prepass pipeline binds the two targets (the others do
+  not write them; null views while the frame has no deferred content).
+- **Lighting** (`classic_deferred.frag`, graph pass `classic_deferred` before `opaque`): a full-screen
+  triangle; pixels whose flags say a deferred material kept them run `lit_body.glsl`'s lighting on the stored
+  terms (`LIT_DEFERRED_MATERIAL`), the world position from the depth and the inverse of the prepass's jittered
+  view-projection; ground cover facing down is turned up and gets its puddle normal, as the lit pass does
+  (the G-buffer keeps the card's normal for the screen-space passes). Other pixels are discarded. The
+  opaque pass then loads HDR (no clear) and draws everything else, also over any pixel a later prepass draw
+  took from classic content (its flags are stale there; the forward draw wins).
+- **Precision**: albedo and roughness in half floats, metallic and normal in the G-buffer's formats, the
+  position from the 32 bit depth. Dev room A / B (lavapipe, `perf_fix_disable PF-0039`): PSNR 48 - 50 dB,
+  scattered card edge pixels.
+- `perf_fix_disable PF-0039` restores the lit pass for every classic material.
 
 ### Alpha masks (PF-0014)
 
