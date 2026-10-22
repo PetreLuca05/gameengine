@@ -71,5 +71,7 @@ Open the terminal: Ctrl+` . The default shell is PowerShell; the ".sh" scripts n
 --------
   bl <id> [<id> ...]       open item models in Blender (bl smg, bl smg att_red_dot, bl all, bl list)
                            Git Bash: ./bl ...
+                           one item: edit it, Ctrl+S = exported to the game (a running game reloads it)
+  bl <id> --from-script    throw the Blender edits away, rebuild the item from its script (backup kept)
   groundgen [--dry-run | --no-push | <recipe>...]
                            generate ground textures (needs the Higgsfield key in .env, costs money)
