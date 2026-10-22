@@ -75,6 +75,7 @@ void mm_maps_draw(GuiRect content);
 void mm_maps_background(GuiRect content, float alpha);   // the globe, before the shading and the panels
 void mm_credits_draw(GuiRect content);
 void mm_play_start(void);
+void mm_play_story(const char *chapter, const char *slot);   // a story chapter for the party (host)
 void mm_set_play_mode(int mode);       // Trials / Story (the selection follows: a development map / a chapter)
 void mm_maps_dev_bar(GuiRect content, GuiRect bar);   // Trials: the development maps bar (mm_maps.c)
 void mm_party_sync(void);              // the host's party takes the menu's map / season / time / weather (mm_scene.c)              // the party's game (host): ready, then start / the countdown

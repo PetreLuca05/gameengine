@@ -147,9 +147,31 @@ u32 mm_name_color(int member_id) { return TH->chat_name[(member_id < 0 ? 0 : mem
 
 static void draw_status(GuiRect r) {
     float av = TOK("mm_avatar");
-    GuiRect a = { r.x, r.y + (r.h - av) * 0.5f, av, av };
     bool steam = lobby_steam_running();
     const char *name = lobby_local_name();
+    char line[160];
+    const char *status;
+#ifdef DG_HAVE_STEAM
+    status = steam ? "Online · Steam" : "Offline · Steam not running · LAN only";
+#else
+    status = "LAN build (no Steam)";
+#endif
+    float ping = lobby_relay_ping_ms();
+    if (steam && ping >= 0) snprintf(line, sizeof(line), "%s  ·  relay %.0f ms  ·  v%s", status, ping, DG_VERSION);
+    else snprintf(line, sizeof(line), "%s  ·  v%s", status, DG_VERSION);
+    // Right-aligned in its slot: the widest of the two lines (name + phone chip, status) sets the width.
+    {
+        GuiText nm = { gui_s(TH->t_body), GW_SEMIBOLD, TH->text, GUI_LEFT, 0, false, true, 0 };
+        GuiText sm = { gui_s(TH->t_small), GW_MEDIUM, TH->text_dim, GUI_LEFT, 0, false, true, 0 };
+        GuiText sl = { gui_s(TH->t_small), GW_REGULAR, TH->text_dim, GUI_LEFT, 0, false, true, 0 };
+        char ph[96];
+        mm_phone_status_text(ph, sizeof(ph));
+        float pad = gui_s(TH->gap * 0.75f), chip = gd_line_height(sm.size) + pad * 3 + gd_text_width(&sm, ph);
+        float w1 = gd_text_width(&nm, name) + TOK("mm_gap") + chip, w2 = gui_s(TH->radius) * 3 + gd_text_width(&sl, line);
+        float total = av + TOK("mm_gap") * 1.5f + fmaxf(w1, w2);
+        if (total < r.w) { r.x += r.w - total; r.w = total; }
+    }
+    GuiRect a = { r.x, r.y + (r.h - av) * 0.5f, av, av };
     // Steam avatar (Steam downloads it on demand: retried every 2 s until it arrives).
     if (steam && !M->avatar && gui_time() - M->avatar_try > 2.0) {
         M->avatar_try = gui_time();
@@ -165,18 +187,7 @@ static void draw_status(GuiRect r) {
     float nw = gd_text(&nt, x, y, name);
     // The phone (docs/PHONE.md "Phone flow"): glyph + status; a click opens the Connect portal.
     mm_phone_status_chip(gui_rect(x + nw + TOK("mm_gap"), y, r.x + r.w - (x + nw + TOK("mm_gap")), lh));
-    char line[160];
-    u32 dot;
-    const char *status;
-#ifdef DG_HAVE_STEAM
-    status = steam ? "Online · Steam" : "Offline · Steam not running · LAN only";
-#else
-    status = "LAN build (no Steam)";
-#endif
-    dot = steam ? TH->ok : TH->text_faint;
-    float ping = lobby_relay_ping_ms();
-    if (steam && ping >= 0) snprintf(line, sizeof(line), "%s  ·  relay %.0f ms  ·  v%s", status, ping, DG_VERSION);
-    else snprintf(line, sizeof(line), "%s  ·  v%s", status, DG_VERSION);
+    u32 dot = steam ? TH->ok : TH->text_faint;
     float dy = y + lh + gui_s(TH->gap * 0.5f);
     float dr = gui_s(TH->radius);
     gd_circle(x + dr, dy + gd_line_height(gui_s(TH->t_small)) * 0.5f, dr, dot);

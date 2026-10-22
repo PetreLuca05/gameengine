@@ -213,13 +213,21 @@ static void draw_party(GuiRect r) {
     if (!lobby_active()) gw_label(gc_row(&c, TOK("mm_row_h")), mm_lobby_offline_text(), gui_s(TH->t_small), GW_REGULAR, TH->warning, GUI_LEFT);
 }
 
-// Story: the Continue card - a square button with the chapter's picture: the last checkpoint of the
-// saved chapter, else chapter 1 from the beginning.
-static void continue_card(GuiRect r, float appear) {
+// A story save to continue (checked every 2 s): its chapter.
+static bool story_saved(const char **chapter) {
     static double checked = -10;
     static bool saved;
-    static char chapter[48];
-    if (gui_time() - checked > 2.0) { checked = gui_time(); saved = story_continue_available(chapter, sizeof(chapter)); }
+    static char ch[48];
+    if (gui_time() - checked > 2.0) { checked = gui_time(); saved = story_continue_available(ch, sizeof(ch)); }
+    *chapter = ch;
+    return saved;
+}
+
+// Story: the Continue card - a square button with the chapter's picture (the last checkpoint of the
+// saved chapter). Shown only with a save; without one Story is a plain New game.
+static void continue_card(GuiRect r, float appear) {
+    const char *chapter;
+    bool saved = story_saved(&chapter);
     const char *ch = saved ? chapter : "01_tenth_floor";
     const MapInfo *mi = NULL;
     const MapList *ml = lobby_maps();
@@ -238,13 +246,29 @@ static void continue_card(GuiRect r, float appear) {
     gd_text(&t, r.x + pad, y, saved ? "Continue" : "New game");
     y += gd_line_height(t.size) + gui_s(TH->gap * 0.5f);
     char sub[96];
-    snprintf(sub, sizeof(sub), "%s%s", mi ? mi->name : "Chapter 1", saved ? "  ·  last checkpoint" : "  ·  from the beginning");
+    static char players_for[48];
+    static int players = 1;
+    if (strcmp(players_for, ch)) { dg_strcpy(players_for, sizeof(players_for), ch); players = story_chapter_players(ch); }
+    snprintf(sub, sizeof(sub), "%s  ·  %s%s", mi ? mi->name : "Chapter 1", players > 1 ? "co-op" : "single player", saved ? "  ·  last checkpoint" : "");
     GuiText st = { gui_s(TH->t_small + 1), GW_REGULAR, TH->text_dim, GUI_LEFT, 0, false, true, r.w - pad * 2 };
     gd_text(&st, r.x + pad, y, sub);
     gd_rect(gui_rect(r.x, r.y + r.h - gui_s(TH->accent_bar), r.w * (0.25f + 0.75f * h), gui_s(TH->accent_bar)), TH->accent);
     gd_alpha_pop();
     if (in.focused) gw_focus_ring(r, gui_s(TH->radius_panel), 1.0f);
-    if (in.clicked) { gui_sound(TH->snd_click); story_start(ch, saved ? "auto" : NULL); }
+    if (in.clicked && lobby_is_host()) { gui_sound(TH->snd_click); mm_play_story(ch, saved ? "auto" : NULL); }
+    if (in.hovered && !lobby_is_host()) gui_tooltip(id, "The party's host starts the chapter");
+}
+
+// A story chapter. Co-op ("players" > 1 in its JSON): for the party (the host) - its map, then the
+// usual start (ready, start / the countdown); everyone in the party plays it. Single-player: alone, at
+// once (the party closes: the chapter isn't reachable). Without a party: alone.
+void mm_play_story(const char *chapter, const char *slot) {
+    if (story_chapter_players(chapter) > 1 && lobby_active()) {
+        if (lobby_is_host() && in_lobby_phase() && lobby_set_story(chapter, slot)) mm_play_start();
+        return;
+    }
+    if (lobby_active()) lobby_leave("a single-player chapter");
+    story_start(chapter, slot);
 }
 
 static void draw_main(GuiRect content) {
@@ -252,13 +276,17 @@ static void draw_main(GuiRect content) {
     MmLayout *L = &M->play;
     const Lobby *lb = lobby_get();
     bool story = M->play_mode == PM_STORY;
+    const char *saved_chapter;
+    bool saved = story_saved(&saved_chapter);
     bool host = lobby_is_host(), guest = lobby_active() && !host;
     // Each mode's nodes; "Leave party" only in someone else's party.
     for (int i = 0; i < L->count; i++) {
         LayoutNode *n = &L->nodes[i];
-        if (!strcmp(n->id, "card") || !strcmp(n->id, "chapters")) n->hidden = !story;
-        if (!strcmp(n->id, "start") || !strcmp(n->id, "join") || !strcmp(n->id, "side") || !strcmp(n->id, "mapbar")) n->hidden = story;
-        if (!strcmp(n->id, "leave")) n->hidden = story || !guest;
+        if (!strcmp(n->id, "card") || !strcmp(n->id, "chapters")) n->hidden = !story || !saved;
+        if (!strcmp(n->id, "newgame")) n->hidden = !story || saved || guest;
+        if (!strcmp(n->id, "join") || !strcmp(n->id, "mapbar")) n->hidden = story;
+        if (!strcmp(n->id, "start")) n->hidden = story && !guest;   // Story: the host starts with Continue / New game, a guest readies up
+        if (!strcmp(n->id, "leave")) n->hidden = !guest;
     }
     mm_layout_solve(L, content);
     start_pending();
@@ -266,20 +294,24 @@ static void draw_main(GuiRect content) {
     float t = gui_anim_t(gui_id("mm_tab_in"));
     int k = 0;
     const LobbyMember *me = lobby_local((Lobby *)lb);
+    {
+        // Trials (the party, the development maps) | Story (the chapters, single player): centred under
+        // the tab bar (gw_tabs lays out from its rect's left: the labels measured as it does).
+        static const char *const modes[2] = { "Trials", "Story" };
+        GuiRect mr = mm_node(L, "mode");
+        GuiText tt = { gui_s(TH->t_small + 1), GW_SEMIBOLD, TH->text_dim, GUI_LEFT, TH->tracking_caps, true, false, 0 };
+        float w = gd_text_width(&tt, modes[0]) + gd_text_width(&tt, modes[1]) + gui_s(26);
+        mr = gui_rect(mr.x + (mr.w - w) * 0.5f, mr.y, w, mr.h);
+        gd_alpha_push(gui_ease_out(saturate(t / fmaxf(0.01f, TH->menu_in))));
+        int sel = gw_tabs(gui_id("mm_play_mode"), mr, modes, 2, story ? 1 : 0);
+        gd_alpha_pop();
+        if (sel != (story ? 1 : 0)) { mm_set_play_mode(sel == 1 ? PM_STORY : PM_TRIALS); gui_sound(TH->snd_tab); }
+    }
     for (int i = 0; i < L->count; i++) {
         LayoutNode *n = &L->nodes[i];
         if (n->parent != stack || n->hidden) continue;
         float appear = saturate((t - (float)k * TH->menu_stagger) / fmaxf(0.01f, TH->menu_in));
         k++;
-        if (!strcmp(n->id, "mode")) {
-            // Trials (the party, the development maps) | Story (the chapters, single player).
-            static const char *const modes[2] = { "Trials", "Story" };
-            gd_alpha_push(gui_ease_out(appear));
-            int sel = gw_tabs(gui_id("mm_play_mode"), n->rect, modes, 2, story ? 1 : 0);
-            gd_alpha_pop();
-            if (sel != (story ? 1 : 0)) { mm_set_play_mode(sel == 1 ? PM_STORY : PM_TRIALS); gui_sound(TH->snd_tab); }
-            continue;
-        }
         if (!strcmp(n->id, "card")) { continue_card(n->rect, appear); continue; }
         if (!n->action[0]) continue;
         bool enabled = true;
@@ -304,15 +336,14 @@ static void draw_main(GuiRect content) {
                 else mm_play_start();
             } else if (!strcmp(n->action, "join")) { M->play_page = PP_BROWSER; P.source = steam() ? BS_STEAM : BS_LAN; refresh(P.source); gui_set_focus(0); }
             else if (!strcmp(n->action, "leave")) lobby_leave("left the party");   // the menu makes a new party of your own
+            else if (!strcmp(n->action, "newgame")) mm_play_story("01_tenth_floor", NULL);
             else if (!strcmp(n->action, "chapters")) { M->play_page = PP_CHAPTERS; gui_anim_restart(gui_id("mm_tab_in")); gui_set_focus(0); }
         }
         if (!enabled && tip && gui_rect_contains(n->rect, gui_mouse().x, gui_mouse().y)) gui_tooltip(id, tip);
         if (!gui_focus() && !strcmp(n->action, "start") && gui_nav_mode()) gui_set_focus(id);
     }
-    if (!story) {
-        draw_party(mm_node(L, "side"));
-        mm_maps_dev_bar(content, mm_node(L, "mapbar"));   // the development maps (the party's map)
-    }
+    draw_party(mm_node(L, "side"));
+    if (!story) mm_maps_dev_bar(content, mm_node(L, "mapbar"));   // the development maps (the party's map)
 }
 
 // ------------------------------------------------------------------ browser

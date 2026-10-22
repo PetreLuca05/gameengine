@@ -83,6 +83,8 @@ void story_handle_event(const GameEvent *ev);    // EV_STORY, every machine
 void story_frame(World *w, float dt);            // every machine, per frame
 // Host: start a chapter (from its start, or from a save slot: "auto" = the last checkpoint).
 bool story_start(const char *chapter, const char *slot);
+int story_chapter_players(const char *chapter);   // its JSON "players": 1 single-player, more: co-op (the party plays it)
+bool story_prepare(const char *chapter, const char *slot, char *map_out, int map_size, bool *solo_out);   // for the next level load (the party's start)
 void story_stop(void);
 // Saves (<pref>/saves/story/<chapter>_<slot>.json): the Continue entry reads the newest.
 bool story_save_path(const char *chapter, const char *slot, char *out, int size);

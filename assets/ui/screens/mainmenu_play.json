@@ -1,11 +1,12 @@
 {
-  "_doc": "Play tab: the mode switch (Trials / Story) over the button stack bottom left. Story: the Continue card (square) and Chapter select. Trials: Start game, Join, Leave party (only in someone else's party), the party panel on the right and the Development maps bar at the bottom centre. The screen hides the other mode's nodes before solving.",
+  "_doc": "Play tab: the mode switch (Trials / Story) centred under the tab bar; the button stack bottom left. Story: the Continue card (square) and Chapter select; without a story save only New game. Trials: Start game, Join, Leave party (only in someone else's party), the party panel on the right and the Development maps bar at the bottom centre. The screen hides the other mode's nodes before solving.",
   "nodes": [
     { "id": "root" },
+    { "id": "mode", "parent": "root", "anchor": "top", "w": "@mm_side_w", "h": "@mm_title_h" },
     { "id": "stack", "parent": "root", "anchor": "bottom_left", "dir": "column", "align": "stretch", "w": "@mm_side_w", "gap": "@mm_gap_sm" },
-    { "id": "mode", "parent": "stack", "h": "@mm_title_h" },
     { "id": "card", "parent": "stack", "h": "@mm_side_w", "label": "Continue", "action": "continue" },
     { "id": "chapters", "parent": "stack", "h": "@mm_item_h", "label": "Chapter select", "action": "chapters" },
+    { "id": "newgame", "parent": "stack", "h": "@mm_item_h", "label": "New game", "action": "newgame" },
     { "id": "start", "parent": "stack", "h": "@mm_item_h", "label": "Start game", "action": "start" },
     { "id": "join", "parent": "stack", "h": "@mm_item_h", "label": "Join", "action": "join" },
     { "id": "leave", "parent": "stack", "h": "@mm_item_h", "label": "Leave party", "action": "leave" },

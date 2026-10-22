@@ -40,6 +40,7 @@ void lobby_apply_rules(const LobbySettings *s);   // host: the session's server 
 void lobby_kick(u8 member);
 void lobby_promote(u8 member);
 void lobby_start(bool force);
+bool lobby_set_story(const char *chapter, const char *slot);   // host: the party plays this chapter (slot: the save to continue, NULL = new)
 void lobby_cancel_start(void);
 void lobby_invite_overlay(void);        // Steam overlay invite dialog
 

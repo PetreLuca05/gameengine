@@ -9,6 +9,7 @@
 //           (map load) -> streaming done -> IN_GAME
 //   migration (lobby only): the host leaves -> LOP_MIGRATE to all (or the connection drops): every
 //           member picks the same successor (lobby_successor); it hosts, the others reconnect to it.
+#include "game/game_story.h"
 #include "lobby_net.h"
 #include "protocol.h"
 #include "core/engine.h"
@@ -692,10 +693,29 @@ const char *lobby_load_tip(void) {
     return tips[i];
 }
 
+static char g_story_slot[32];   // the host's story start: the save slot to continue ("" = from the beginning)
+
+// The party plays a story chapter: its map becomes the party's map; the host starts it as usual.
+bool lobby_set_story(const char *chapter, const char *slot) {
+    if (!S || !S->L.is_host) return false;
+    for (int i = 0; i < S->maps.count; i++) {
+        if (strcmp(S->maps.maps[i].chapter, chapter)) continue;
+        LobbySettings s = S->L.settings;
+        dg_strcpy(s.map, sizeof(s.map), S->maps.maps[i].id);
+        lobby_set_settings(&s);
+        dg_strcpy(g_story_slot, sizeof(g_story_slot), slot ? slot : "");
+        return true;
+    }
+    return false;
+}
+
 static void host_load_map(void) {
     const MapInfo *mi = maplist_find(&S->maps, S->L.settings.map);
     const char *level = mi ? mi->level : S->L.settings.map;
     log_info("lobby: loading '%s' (%s)", S->L.settings.map, level);
+    // A chapter map: the chapter starts on it (from the host's save slot when continuing), for everyone.
+    if (mi && mi->chapter[0]) story_prepare(mi->chapter, g_story_slot[0] ? g_story_slot : NULL, NULL, 0, NULL);
+    g_story_slot[0] = 0;
     mainmenu_leave_scene();
     // The load blocks: the members' unanswered packets must not drop them meanwhile (their acks are
     // read only after it), nor during their own load after the welcome.

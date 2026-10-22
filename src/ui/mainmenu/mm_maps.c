@@ -28,7 +28,7 @@ static int map_group(const MapInfo *m) { return m->chapter[0] ? MG_CHAPTER1 : MG
 // A season in a few words, from its weights: "mostly rain", "mostly snow", "mostly fair" ...
 // Story chapter maps start their chapter (docs/STORY.md); every other map hosts a lobby.
 static void host_map(const MapInfo *m) {
-    if (m && m->chapter[0]) story_start(m->chapter, NULL);
+    if (m && m->chapter[0]) mm_play_story(m->chapter, NULL);   // the chapter for the whole party
     else if (m) { mm_select_map(m->id); mm_play_start(); }   // the party's game on this map
 }
 

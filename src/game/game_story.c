@@ -1019,6 +1019,39 @@ void story_stop(void) {
     if (G && G->world && G->world->authority) send(G->world, -1, SEVT_CHAPTER, "", 0, 0, 0, v3(0, 0, 0));
 }
 
+// The chapter (and the save slot to continue, NULL = from the beginning) for the next level load:
+// story_level_loaded starts it there. The party's start uses it (the lobby loads the chapter's map).
+bool story_prepare(const char *chapter, const char *slot, char *map_out, int map_size, bool *solo_out) {
+    StoryScript tmp;
+    bool tmp_ok = false;
+    StoryDef *d = load_def(chapter, &tmp, &tmp_ok);
+    if (!d) return false;
+    char *save = NULL;
+    if (slot && slot[0]) {
+        char path[600];
+        if (story_save_path(chapter, slot, path, sizeof(path))) save = platform_read_file(path, NULL);
+        if (!save) log_warn("story: no save '%s' for %s, starting from the beginning", slot, chapter);
+    }
+    if (map_out) dg_strcpy(map_out, (size_t)map_size, d->map);
+    if (solo_out) *solo_out = d->players <= 1;
+    free(d);
+    if (tmp_ok) story_script_free(&tmp);
+    story_stop();
+    dg_strcpy(SR.pending, sizeof(SR.pending), chapter);
+    SR.pending_save = save;
+    return true;
+}
+
+int story_chapter_players(const char *chapter) {
+    StoryScript tmp;
+    bool tmp_ok = false;
+    StoryDef *d = load_def(chapter, &tmp, &tmp_ok);
+    int n = d ? d->players : 1;
+    free(d);
+    if (tmp_ok) story_script_free(&tmp);
+    return n;
+}
+
 bool story_start(const char *chapter, const char *slot) {
     StoryScript tmp;
     bool tmp_ok = false;
