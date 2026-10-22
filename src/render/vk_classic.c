@@ -141,6 +141,7 @@ static struct {
     GpuBuffer inst_spare;           // PF-0046: a larger instance buffer allocated ahead on a job
     u32 inst_spare_cap;
     JobCounter inst_spare_job;
+    u32 cull_slot;                  // the frame slot whose instance buffer holds the views' streams
     ClInst *tmp;                    // gathered instances of one view
     u32 *tmp_key;
     u32 tmp_n, tmp_cap;
@@ -413,12 +414,15 @@ void vkc_draw_deferred(VkCommandBuffer cmd, const VkImageView views[5], mat4 inv
 }
 
 static void cmd_classic_cull_check(int argc, const char **argv);
+static void cmd_occlusion_probe(int argc, const char **argv);
 
 void vkc_init(void) {
     C.impostor_px = cvar_reg_float("r_classic_impostor_px", 64.0f, 0.0f, 1024.0f, CVAR_LOCKED,
                                    "classic renderer: trees with an impostor atlas draw it below this projected size (pixels across, 0 = never)");
     cmd_register("classic_cull_check", cmd_classic_cull_check,
                  "classic renderer: cull the next frame's views by the serial and the parallel path (PF-0040) and compare their instance streams");
+    cmd_register("classic_occlusion_probe", cmd_occlusion_probe,
+                 "classic renderer: the last frame's main view instances (and triangles) hidden behind its depth buffer (an occlusion culling estimate)");
     {   // sun shadow caster cascade limits (shadow_casters.h)
         char path[512], err[160] = "";
         platform_data_path("assets/render/shadow_casters.json", path, sizeof(path));
@@ -1505,6 +1509,122 @@ static void cull_views_par(const ClCull *views, ClView *const *outs, const mat4 
     jobs_parallel_for(nv, 1, views_emit_range, base);
 }
 
+// classic_occlusion_probe: how much of the last frame's main view an exact occlusion cull would have
+// removed. The depth buffer is read back, reduced to a max-depth pyramid, and every drawn instance's
+// culling sphere (cull_instance's, WPO margin included) is tested against the farthest depth under its
+// screen rectangle: hidden when its nearest point lies behind it. An upper bound for an HZB cull
+// built from this depth (a real one tests against the previous frame's, or a first pass's).
+static void cmd_occlusion_probe(int argc, const char **argv) {
+    (void)argc, (void)argv;
+    if (!C.scene || !C.inst[C.cull_slot].mapped) return;
+    vkDeviceWaitIdle(R->device);
+    u32 w = R->depth.w, h = R->depth.h;
+    GpuBuffer rb = vkr_buffer_create_readback((VkDeviceSize)w * h * 4);
+    VkCommandPoolCreateInfo pci = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    pci.queueFamilyIndex = R->queue_family;
+    VkCommandPool pool;
+    VK_CHECK(vkCreateCommandPool(R->device, &pci, NULL, &pool));
+    VkCommandBufferAllocateInfo ai = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+    ai.commandPool = pool;
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.commandBufferCount = 1;
+    VkCommandBuffer cmd;
+    VK_CHECK(vkAllocateCommandBuffers(R->device, &ai, &cmd));
+    VkCommandBufferBeginInfo bi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_CHECK(vkBeginCommandBuffer(cmd, &bi));
+    VkImageLayout old = R->depth.layout;
+    vkr_image_barrier(cmd, R->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT, old, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                      VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT, 1);
+    VkBufferImageCopy region = { 0 };
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent = (VkExtent3D){ w, h, 1 };
+    vkCmdCopyImageToBuffer(cmd, R->depth.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, rb.buffer, 1, &region);
+    vkr_image_barrier(cmd, R->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, old, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                      VK_ACCESS_2_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT, 1);
+    VK_CHECK(vkEndCommandBuffer(cmd));
+    VkCommandBufferSubmitInfo cbi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
+    cbi.commandBuffer = cmd;
+    VkSubmitInfo2 si = { VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+    si.commandBufferInfoCount = 1;
+    si.pCommandBufferInfos = &cbi;
+    VK_CHECK(vkQueueSubmit2(R->queue, 1, &si, VK_NULL_HANDLE));
+    VK_CHECK(vkQueueWaitIdle(R->queue));
+    vkDestroyCommandPool(R->device, pool, NULL);
+    vmaInvalidateAllocation(R->vma, rb.alloc, 0, VK_WHOLE_SIZE);
+    // max-depth pyramid (standard depth: 0 near, 1 far; a level's texel holds its 2 x 2 (and odd edge) maximum)
+    u32 lw[16], lh[16], nl = 1;
+    float *lv[16];
+    lw[0] = w, lh[0] = h;
+    lv[0] = (float *)malloc(sizeof(float) * w * h);
+    memcpy(lv[0], rb.mapped, sizeof(float) * w * h);
+    vkr_buffer_destroy_now(&rb);
+    while (nl < 16 && (lw[nl - 1] > 1 || lh[nl - 1] > 1)) {
+        u32 sw = lw[nl - 1], sh = lh[nl - 1], dw = DG_MAX(sw / 2, 1u), dh = DG_MAX(sh / 2, 1u);
+        float *d = (float *)malloc(sizeof(float) * dw * dh);
+        for (u32 y = 0; y < dh; y++)
+            for (u32 x = 0; x < dw; x++) {
+                u32 x1 = (x == dw - 1) ? sw - 1 : 2 * x + 1, y1 = (y == dh - 1) ? sh - 1 : 2 * y + 1;
+                float m = 0.0f;
+                for (u32 yy = 2 * y; yy <= y1; yy++)
+                    for (u32 xx = 2 * x; xx <= x1; xx++) m = fmaxf(m, lv[nl - 1][yy * sw + xx]);
+                d[y * dw + x] = m;
+            }
+        lw[nl] = dw, lh[nl] = dh, lv[nl] = d;
+        nl++;
+    }
+    // the last frame's main view stream (its slot's instance buffer: WC memory, copied once)
+    const ClView *v = &C.view[0];
+    u32 slot = C.cull_slot;
+    u64 inst = 0, hid = 0, tris = 0, tris_hid = 0;
+    mat4 view = R->view, proj = R->proj;
+    for (u32 b = 0; b < v->batch_count; b++) {
+        const ClBatch *bt = &v->batches[b];
+        u32 mesh = bt->key >> CL_KEY_SHIFT, lod = bt->key & 7u;
+        if (lod == CL_IMPOSTOR || mesh >= C.scene->mesh_count) continue;
+        const VgMesh *m = &C.scene->meshes[mesh];
+        u32 t = C.mesh[mesh_drawn(mesh)].lods[lod].tris;
+        ClInst *ci = (ClInst *)malloc(sizeof(ClInst) * (bt->count + 1));
+        memcpy(ci, (const ClInst *)C.inst[slot].mapped + bt->first, sizeof(ClInst) * bt->count);
+        for (u32 i = 0; i < bt->count; i++) {
+            float sc = ci[i].pos[3];
+            quat q = { ci[i].rot[0], ci[i].rot[1], ci[i].rot[2], ci[i].rot[3] };
+            vec3 c = v3_add(v3(ci[i].pos[0], ci[i].pos[1], ci[i].pos[2]), quat_rotate(q, v3(m->center[0] * sc, m->center[1] * sc, m->center[2] * sc)));
+            float r = m->radius * sc + m->max_wpo * fmaxf(sc, 1.0f);
+            inst++, tris += t;
+            vec3 vc = mat4_mul_point(view, c);
+            float zn = -vc.z - r;   // the nearest distance along the view axis
+            if (zn <= R->cam.znear) continue;
+            float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+            for (int k = 0; k < 8; k++) {
+                vec3 cp = v3(vc.x + ((k & 1) ? r : -r), vc.y + ((k & 2) ? r : -r), vc.z + ((k & 4) ? r : -r));
+                vec4 cl = mat4_mul_v4(proj, v4(cp.x, cp.y, cp.z, 1.0f));
+                float nx = cl.x / cl.w, ny = cl.y / cl.w;
+                x0 = fminf(x0, nx), x1 = fmaxf(x1, nx), y0 = fminf(y0, ny), y1 = fmaxf(y1, ny);
+            }
+            vec4 cz = mat4_mul_v4(proj, v4(0, 0, -zn, 1.0f));
+            float dn = cz.z / cz.w;   // the sphere's nearest depth
+            float px0 = DG_CLAMP((x0 * 0.5f + 0.5f) * (float)w, 0.0f, (float)w - 1), px1 = DG_CLAMP((x1 * 0.5f + 0.5f) * (float)w, 0.0f, (float)w - 1);
+            float py0 = DG_CLAMP((y0 * 0.5f + 0.5f) * (float)h, 0.0f, (float)h - 1), py1 = DG_CLAMP((y1 * 0.5f + 0.5f) * (float)h, 0.0f, (float)h - 1);
+            float span = fmaxf(px1 - px0, py1 - py0);
+            u32 L = 0;
+            while (L + 1 < nl && span > 2.0f) span *= 0.5f, L++;
+            u32 ax = (u32)px0 >> L, bx = (u32)px1 >> L, ay = (u32)py0 >> L, by = (u32)py1 >> L;
+            float far_d = 0.0f;
+            for (u32 y = ay; y <= by && y < lh[L]; y++)
+                for (u32 x = ax; x <= bx && x < lw[L]; x++) far_d = fmaxf(far_d, lv[L][y * lw[L] + x]);
+            if (dn > far_d) hid++, tris_hid += t;
+        }
+        free(ci);
+    }
+    for (u32 l = 0; l < nl; l++) free(lv[l]);
+    log_info("classic_occlusion_probe: %llu instances, %llu hidden (%.1f %%); %llu triangles, %llu hidden (%.1f %%)", (unsigned long long)inst,
+             (unsigned long long)hid, inst ? 100.0 * (double)hid / (double)inst : 0.0, (unsigned long long)tris, (unsigned long long)tris_hid,
+             tris ? 100.0 * (double)tris_hid / (double)tris : 0.0);
+}
+
 // classic_cull_check: the next frame's views culled by both paths (cull_views, cull_views_par), their
 // instance streams and batches compared byte for byte (logged).
 static bool g_cull_check;
@@ -1632,6 +1752,7 @@ bool vkc_frame_begin(const VgScene *s, const VgDisplace *disp, float density, fl
     FA.cull = FA.pip_lods = false;
     C.scene = NULL;
     C.inst_used = 0;
+    C.cull_slot = R->frame_slot;
     C.draws = C.tris = C.tris_shadow = C.local_instances = 0;
     C.lod_new = lod_active();
     C.lod_dedupe = prof_fix_enabled(PFX_LOD_DEDUPE);

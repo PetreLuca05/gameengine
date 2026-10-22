@@ -351,6 +351,37 @@ not the average: a frame in five that runs the 60 Hz sim tick, or a hitch once a
   main view / the sun cascades kept), `classic_tris` / `classic_tris_shadow` (triangles drawn: every main
   view pass / every shadow view). The vegetation zones are geometry bound; these say where the triangles go.
 - The work towards the budget is listed in [perf/FINDINGS.md](perf/FINDINGS.md) from PF-0036 on.
+- `classic_occlusion_probe` (console): the last frame's main view instances and triangles hidden behind
+  its depth buffer (max-depth pyramid, every instance's culling sphere): the upper bound of what an
+  occlusion cull could take from the classic main view.
+
+### What was measured and left out (2026-10-22)
+
+The fixes above are the fidelity-neutral part of the plan. These were looked at and not done, with the
+numbers that decided it, so they are not re-investigated from scratch:
+
+- **GPU occlusion culling (HZB) of the classic main view.** `classic_occlusion_probe` on the vegetation map
+  at Low (an exact test against the frame's own full depth, so an upper bound): pine forest interior
+  1 - 3 % of the triangles hidden (26 % of the instances: grass clumps behind trunks, the trees stay
+  visible), broadleaf interior 18 % (50 % of the instances), meadow 1 - 4 %; the dev room's classic
+  content is a few instances (its geometry is legacy draw items) and the foliage yard 0.2 %. A two-pass
+  cull (last frame's depth, then this frame's) gets less than that and costs a pyramid, two culls and a
+  split prepass (~0.2 - 0.3 ms): break-even outside the broadleaf zone.
+- **Sun shadow fragment work.** At Modern the forests' shadow pass runs ~0.7 - 1 G alpha-tested fragment
+  invocations per frame (~80 per texel of the three tiles drawn): leaf cards, under late depth testing
+  (the alpha test discards), so draw order barely matters (PF-0012 front to back: -2.5 % fragments).
+  Leaf card trimming does not pay: the Tree It leaf textures are 8 - 16 % opaque, but their convex hull
+  inside each card triangle (conservative through mip 4) keeps 66 - 94 % of the card area (56 - 78 %
+  even at the base level) for several times the triangles. A light-space occlusion cull meets the same
+  leaky canopies. What remains are fidelity choices (cascade count / resolution, PF-0028's interval).
+- **Card-thinning LODs (fewer leaf cards at distance).** A visual change (fewer, larger cards), even
+  inside the 2 px LOD error: left to a fidelity decision.
+- **Wind tile on the GPU.** ~1.6 ms of worker time (PF-0010 already spreads it over the jobs, 0.26 ms on
+  the main thread); a GPU port changes the field's float results. Not worth the difference.
+- **Jolt's own thread pool** (cores - 1 threads beside the engine's cores - 1 workers): they overlap only
+  during the physics step; capping it buys little in the foliage scenes.
+- **Post merges** (sky + fog_apply, a single-pass downsampler for bloom / exposure): ~0.05 - 0.1 ms each
+  at 1600 x 900 for shader surgery; motion blur already copies still pixels.
 
 ## CI
 

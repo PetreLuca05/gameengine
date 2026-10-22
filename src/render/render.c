@@ -2462,6 +2462,7 @@ static void build_frame_graph(FrameData *fd) {
         gd.format = GB_VELOCITY_FORMAT;
         F.velocity = fg_texture(&gd);
     }
+    fd->frame_info = v4(F.velocity != FG_NONE || !prof_fix_enabled(PFX_VELOCITY_SKIP) ? 1.0f : 0.0f, 0, 0, 0);
     // Classic deferred lighting (PF-0039): the targets its materials' prepass writes beside the G-buffer.
     F.cl_albedo = F.cl_params = FG_NONE;
     F.deferred = vkc_deferred_begin(true);

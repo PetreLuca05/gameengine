@@ -42,7 +42,7 @@ void main() {
     gl_Position = frame.view_proj * vec4(w, 1.0);
     v_cur_clip = frame.view_proj_nj * vec4(w, 1.0);
     vec3 pw = w;
-    if (pc.flags.y != 0u) {
+    if (pc.flags.y != 0u && frame.frame_info.x > 0.5) {   // last frame's wind only for a velocity something reads (PF-0048)
         vec3 np = n;
         pw = base + cl_wpo(base, n, i_pos.xyz, i_pos.w, in_color, i_misc.x, true, layers & ~VGW_NORMALS, np);
     }

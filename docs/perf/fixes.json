@@ -3111,5 +3111,27 @@
    "veg_forest_broadleaf",
    "devroom"
   ]
+ },
+ "PF-0048": {
+  "title": "Without a G-buffer velocity reader, the classic vertex stage skips last frame's wind",
+  "rule": "R02",
+  "finding": "300 fps plan (2026-10-22): every classic WPO draw of the prepass evaluated the full wind deformation twice per vertex (this frame's and last frame's, the latter only for the velocity), also at Low / Off where nothing reads the velocity (no TAA, motion blur or temporal pass: post_needs_velocity() already drops the target and the writes go to a null attachment)",
+  "effort": "S",
+  "status": "implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify)",
+  "code": [
+   "shaders/classic_vert.glsl (frame.frame_info.x)",
+   "src/render/render.c build_frame_graph (fd->frame_info), vk_internal.h FrameData, shaders/common.glsl, shader_layout.h"
+  ],
+  "description": "build_frame_graph writes frame_info.x = 1 when the frame has a velocity target (or PF-0048 is off); classic_vert.glsl evaluates last frame's wind only then. The previous clip position is otherwise this frame's (a velocity of zero that goes nowhere).",
+  "neutral": "Only the velocity (written to a null attachment, read by nothing) changes; the position, gl_Position (invariant), the normal and every other output are the same expressions. Dev room A / B at Low (Linux container, lavapipe; the skip active, wind on): AO corner and foliage yard bit-identical. Foliage yard prepass scope 11.88 -> 11.47 ms (lavapipe, fragment bound).",
+  "metrics": [
+   "scope:prepass",
+   "gpu_frame"
+  ],
+  "scenes": [
+   "veg_forest_pine",
+   "veg_meadow",
+   "foliage"
+  ]
  }
 }

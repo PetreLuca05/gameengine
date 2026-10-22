@@ -83,6 +83,7 @@ typedef enum ProfFix {
     PFX_FILEWATCH_JOB,        // PF-0045: hot reload polls (ballistics, hand poses, terrain: stats, listings) on a job
     PFX_INST_PREGROW,         // PF-0046: the classic instance buffer's next size allocated ahead on a job
     PFX_PASS_SKIPS,           // PF-0047: scene copy / transparent / water passes skipped with no reader or nothing to draw
+    PFX_VELOCITY_SKIP,        // PF-0048: no G-buffer velocity read: the classic vertex stage skips last frame's wind
     // Visual trade-offs (not fidelity neutral: perf_verify measures them, the images differ by design):
     // perf_fix_disable "all" leaves them on, only their own id turns them off.
     PFX_SHADOW_CASTER_LIMIT,  // PF-0013: grass / small plant shadows in the near cascades only (r_shadow_caster_limit)

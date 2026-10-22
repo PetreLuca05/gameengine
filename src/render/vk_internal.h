@@ -239,6 +239,9 @@ typedef struct FrameData {
     // level, 1..2 flicker (the off share).
     vec4 city;
     vec4 city_power[2];
+    // x 1 = something reads the G-buffer velocity this frame (TAA / TAA-U, motion blur, temporal passes);
+    // without, the classic vertex stage skips last frame's wind (docs/perf/FINDINGS.md PF-0048).
+    vec4 frame_info;
 } FrameData;
 
 typedef struct PushLit {

@@ -94,7 +94,9 @@ cull time.
   job system on the test maps). Every step runs on the job system (PF-0040: the views' cell walks, the
   instance cull, the packing and emit in parallel; `classic_cull_check` compares it with the serial path)
   and the whole culling overlaps the rest of the frame's preparation (PF-0041).
-- No occlusion culling: the dense devroom foliage yard draws what the frustum keeps.
+- No occlusion culling: the dense devroom foliage yard draws what the frustum keeps. `classic_occlusion_probe`
+  measures what one could take (docs/PERF_AUDIT.md "What was measured and left out": 1 - 18 % of the main
+  view's triangles in the vegetation map).
 - Phone views and the rain occlusion map do not show vgeo content.
 - A multi-material model mesh whose page data is not in memory falls back to the exported LODs with its
   first material only (no such content today).
