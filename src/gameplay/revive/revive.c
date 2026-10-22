@@ -11,6 +11,7 @@
 #include "physics/physics.h"
 #include "net/spectate.h"
 #include "game/game_internal.h"
+#include "game/game_stats.h"
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "core/log.h"
@@ -287,6 +288,7 @@ bool revive_sv_down(World *w, int slot, EntityId attacker) {
     if (eq < INV_SEL_COUNT && inv_sel(&p->inv, eq)->item && !(r->keep_sidearm && is_sidearm(w, inv_sel(&p->inv, eq)->item)))
         drop_slot(w, slot, inv_item_of(&p->inv, inv_sel(&p->inv, eq)));
     push_event(w, RVE_DOWNED, p->ent, attacker, RV.rules.bleed_time, p->sim.move.pos, p->name, EVENT_ALL);
+    stats_sv_down(w, slot);   // docs/STATS.md (times downed, the killstreak ends)
     ev_sound(w, "downed", p->sim.move.pos, 0.9f, EVENT_ALL);
     if (r->auto_ping_down) game_sv_auto_ping(w, slot, PING_HELP, v3_add(p->sim.move.pos, v3(0, 0.9f, 0)));
     log_info("revive: %s is down (bleed-out %.0f s)", p->name, (float)p->sim.down.bleed_total / REVIVE_HZ);
@@ -310,6 +312,7 @@ bool revive_sv_revive(World *w, int slot, int reviver) {
     w->health[i].hp = fminf(w->health[i].max_hp, fmaxf(1.0f, RV.rules.revive_hp));
     EntityId by = reviver >= 0 && reviver < MAX_PLAYERS ? w->players[reviver].ent : ENT_NONE;
     push_event(w, RVE_REVIVED, p->ent, by, 0, p->sim.move.pos, reviver >= 0 ? w->players[reviver].name : "", EVENT_ALL);
+    stats_sv_revive(w, reviver, slot);   // docs/STATS.md (revives given)
     ev_sound(w, "revived", p->sim.move.pos, 0.8f, EVENT_ALL);
     log_info("revive: %s revived%s%s", p->name, reviver >= 0 ? " by " : "", reviver >= 0 ? w->players[reviver].name : "");
     return true;

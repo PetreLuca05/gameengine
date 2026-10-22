@@ -539,6 +539,8 @@ static void tab_hud(GuiCursor *c) {
     section(c, "Interface");
     row_slider_cvar(c, "UI scale", "ui_scale", 0, 3, 0.05f, "%.2f", "0 = automatic from the resolution.");
     row_slider_cvar(c, "Safe area", "ui_safe_area", -1, 0.15f, 0.005f, "%.3f", "Margin around menus and the HUD (-1 = theme default).");
+    static const char *const units[2] = { "Metric (m / km)", "Imperial (ft / mi)" };
+    row_combo_cvar(c, "Units", "ui_units", units, 2, "Distances in the Stats tab (docs/STATS.md).");
     hud_crosshair(c);
     section(c, "Layout");
     row_slider_cvar(c, "HUD opacity", "hud_opacity", 0.2f, 1, 0.05f, "%.2f", "Compass, kill counter, kill feed and ping markers.");

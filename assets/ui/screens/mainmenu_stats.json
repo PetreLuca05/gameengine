@@ -1,0 +1,7 @@
+{
+  "_doc": "Stats tab (docs/STATS.md): the pause menu's Stats screen (sub-pages, charts, player selector) in a centred panel.",
+  "nodes": [
+    { "id": "root" },
+    { "id": "stats", "parent": "root", "anchor": "center", "w_pct": 0.86, "h_pct": 1.0, "min_w": "@mm_stats_min_w", "max_w": "@mm_stats_max_w" }
+  ]
+}

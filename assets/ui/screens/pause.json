@@ -6,6 +6,7 @@
     { "id": "title", "parent": "stack", "h": 44, "label": "Paused" },
     { "id": "resume", "parent": "stack", "h": 34, "label": "Resume", "action": "resume" },
     { "id": "inventory", "parent": "stack", "h": 34, "label": "Inventory", "action": "inventory", "if": "world" },
+    { "id": "stats", "parent": "stack", "h": 34, "label": "Stats", "action": "stats" },
     { "id": "settings", "parent": "stack", "h": 34, "label": "Settings", "action": "settings" },
     { "id": "lobby", "parent": "stack", "h": 34, "label": "Lobby", "action": "lobby", "if": "lobby" },
     { "id": "multiplayer", "parent": "stack", "h": 34, "label": "Multiplayer", "action": "multiplayer", "if": "!menu" },

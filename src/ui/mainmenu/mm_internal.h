@@ -9,7 +9,7 @@
 #define TH (gui_theme())
 #define TOK(n) gui_s(gui_tok(n))
 
-typedef enum MmTab { MT_PLAY, MT_PLAYER, MT_COSMETICS, MT_MAPS, MT_SETTINGS, MT_CREDITS, MT_COUNT } MmTab;
+typedef enum MmTab { MT_PLAY, MT_PLAYER, MT_COSMETICS, MT_MAPS, MT_SETTINGS, MT_STATS, MT_CREDITS, MT_COUNT } MmTab;
 typedef enum MmPlayPage { PP_MAIN, PP_BROWSER } MmPlayPage;
 
 // A screen layout (assets/ui/screens/<name>.json) solved into a rect each frame.
@@ -49,7 +49,7 @@ typedef struct MainMenu {
     int cos_slot;
     int cos_selected;              // item index, -1 none
     // layouts
-    MmLayout shell, play, browser, player, cosmetics, maps, settings, credits, lobby, loading, chat, phone_card, phone_portal;
+    MmLayout shell, play, browser, player, cosmetics, maps, settings, stats, credits, lobby, loading, chat, phone_card, phone_portal;
     // Steam avatar
     TextureId avatar;
     u64 avatar_id;

@@ -1,7 +1,7 @@
 // Main menu shell (src/ui/mainmenu/mainmenu.h, docs/MENU_LOBBY.md "Screen map").
 //
 //   splash (any key skips) -> MAIN MENU
-//     top tab bar: Play · Player · Cosmetics · Maps · Settings · Credits   (Q / E, LB / RB, 1-6, mouse)
+//     top tab bar: Play · Player · Cosmetics · Maps · Settings · Stats · Credits   (Q / E, LB / RB, 1-7, mouse)
 //                  power icon -> CONFIRM "Quit to desktop?"
 //     content: the active tab (assets/ui/screens/mainmenu_<tab>.json); in a lobby the Play tab is
 //              the lobby screen and Maps / Credits are locked; LOADING: the loading screen alone
@@ -15,6 +15,8 @@
 #include "core/platform.h"
 #include "game/game.h"
 #include "game/game_internal.h"
+#include "game/game_stats.h"
+#include "ui/ui_stats_tab.h"
 #include "game/scene.h"
 #include "audio/audio.h"
 #include "assets/assets.h"
@@ -30,7 +32,7 @@ static MainMenu g_mm;
 MainMenu *mm(void) { return &g_mm; }
 #define M (&g_mm)
 
-static const char *const k_tab_names[MT_COUNT] = { "Play", "Player", "Cosmetics", "Maps", "Settings", "Credits" };
+static const char *const k_tab_names[MT_COUNT] = { "Play", "Player", "Cosmetics", "Maps", "Settings", "Stats", "Credits" };
 
 // ------------------------------------------------------------------ layouts
 
@@ -80,6 +82,7 @@ static void load_layouts(void) {
     mm_layout_load(&M->cosmetics, "mainmenu_cosmetics");
     mm_layout_load(&M->maps, "mainmenu_maps");
     mm_layout_load(&M->settings, "mainmenu_settings");
+    mm_layout_load(&M->stats, "mainmenu_stats");
     mm_layout_load(&M->credits, "mainmenu_credits");
     mm_layout_load(&M->lobby, "mainmenu_lobby");
     mm_layout_load(&M->loading, "mainmenu_loading");
@@ -287,6 +290,7 @@ static void set_tab(int tab) {
     if (tab == M->tab || !tab_allowed(tab, NULL)) return;
     M->tab = tab;
     M->play_page = PP_MAIN;
+    if (tab == MT_STATS) stats_tab_open();   // charts rebuilt, the player list refreshed
     gui_set_focus(0);
     gui_anim_restart(gui_id("mm_tab_in"));
     M->env_dirty = true;   // the Player tab's studio light <-> the map's look
@@ -312,7 +316,7 @@ static void draw_tabbar(GuiRect bar) {
 }
 
 static void tab_keys(void) {
-    // 1-6, Q / E, LB / RB (the settings tab's own LB / RB go first: it consumes them).
+    // 1-7, Q / E, LB / RB (the settings and stats tabs' own LB / RB go first: they consume them).
     for (int i = 0; i < MT_COUNT; i++) if (gui_key_pressed(SDL_SCANCODE_1 + i)) { set_tab(i); gui_sound(TH->snd_tab); }
     int dir = gui_nav(NAV_TAB_NEXT) ? 1 : (gui_nav(NAV_TAB_PREV) ? -1 : 0);
     if (!dir) return;
@@ -368,6 +372,14 @@ bool mainmenu_draw(bool top) {
     case MT_SETTINGS: {
         mm_layout_solve(&M->settings, content);
         settings_draw(mm_node(&M->settings, "settings"));
+        break;
+    }
+    case MT_STATS: {
+        // docs/STATS.md: the same tab as pause > Stats, in a panel.
+        mm_layout_solve(&M->stats, content);
+        GuiRect sr = mm_node(&M->stats, "stats");
+        mm_panel(sr);
+        stats_tab_draw(gui_rect_inset(sr, gui_s(TH->pad + 6)));
         break;
     }
     case MT_CREDITS: mm_credits_draw(content); break;
@@ -428,6 +440,7 @@ void mainmenu_enter(const char *message) {
     // The background world: a local dev room nobody can join (the lobby hosts from it when asked).
     Game *g = game();
     bool have_bg = g && g->world && g->mode == GM_HOST && !strcmp(g->map, "devroom") && net_role() != NET_CLIENT && lobby_state() != LS_IN_GAME;
+    game_stats_level_leaving();   // a game left for the menu: its match is recorded (docs/STATS.md)
     menus_close_all();
     if (!have_bg) game_host_ex("devroom", GH_NO_AUTOHOST);
     mm_scene_enter();

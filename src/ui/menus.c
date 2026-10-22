@@ -4,6 +4,7 @@
 //     PAUSE ── Settings ─────> SETTINGS   (centred modal: tabs, scroll; the stack stays visible)
 //     PAUSE ── Multiplayer ──> MULTIPLAYER
 //     PAUSE ── Inventory ────> INVENTORY  (also Tab / I / pad Back straight from the game)
+//     PAUSE ── Stats ────────> STATS      (centred modal: sub-pages, charts; docs/STATS.md)
 //     PAUSE ── Disconnect / Quit ──> CONFIRM
 //     SETTINGS ── resolution / mode change ──> CONFIRM (keep? 15 s countdown, reverts)
 //     INVENTORY ── drop outside (non-stackable) ──> CONFIRM
@@ -36,6 +37,7 @@
 #include "mainmenu/mainmenu.h"
 #include "net/lobby_net.h"
 #include "pause/commands_tab.h"
+#include "ui_stats_tab.h"
 #include "hud/hud_internal.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -59,7 +61,7 @@ typedef struct Menus {
 #define M (g_engine.menus)
 #define TH (gui_theme())
 
-static const char *k_names[SCR_COUNT] = { "none", "pause", "settings", "multiplayer", "inventory", "bench", "confirm", "mainmenu", "chat", "lobby", "commands", "phone" };
+static const char *k_names[SCR_COUNT] = { "none", "pause", "settings", "multiplayer", "inventory", "bench", "confirm", "mainmenu", "chat", "lobby", "commands", "phone", "stats" };
 const char *screen_name(int id) { return id >= 0 && id < SCR_COUNT ? k_names[id] : "?"; }
 
 static bool load_layout(void) {
@@ -230,7 +232,7 @@ static int sub_of(void) {
     // The pause entry highlighted while its sub-menu is open.
     for (int i = M->depth - 1; i >= 1; i--) {
         int s = M->stack[i];
-        if (s == SCR_SETTINGS || s == SCR_MULTIPLAYER || s == SCR_INVENTORY || s == SCR_LOBBY || s == SCR_COMMANDS) return s;
+        if (s == SCR_SETTINGS || s == SCR_MULTIPLAYER || s == SCR_INVENTORY || s == SCR_LOBBY || s == SCR_COMMANDS || s == SCR_STATS) return s;
     }
     return SCR_NONE;
 }
@@ -240,6 +242,7 @@ static void do_action(const char *action) {
     else if (!strcmp(action, "inventory")) { if (screens_top() != SCR_INVENTORY) { while (screens_top() != SCR_PAUSE && M->depth) screens_pop(); screens_push(SCR_INVENTORY); } }
     else if (!strcmp(action, "settings")) { while (screens_top() != SCR_PAUSE && M->depth) screens_pop(); settings_open(-1); screens_push(SCR_SETTINGS); }
     else if (!strcmp(action, "multiplayer")) { while (screens_top() != SCR_PAUSE && M->depth) screens_pop(); net_lan_refresh(); screens_push(SCR_MULTIPLAYER); }
+    else if (!strcmp(action, "stats")) { while (screens_top() != SCR_PAUSE && M->depth) screens_pop(); stats_tab_open(); screens_push(SCR_STATS); }
     else if (!strcmp(action, "invite")) net_steam_invite();
     else if (!strcmp(action, "lobby")) { while (screens_top() != SCR_PAUSE && M->depth) screens_pop(); screens_push(SCR_LOBBY); }
     else if (!strcmp(action, "commands")) { while (screens_top() != SCR_PAUSE && M->depth) screens_pop(); commands_tab_open(); screens_push(SCR_COMMANDS); }
@@ -291,7 +294,7 @@ static void draw_pause(bool top) {
         }
         bool selected = (!strcmp(n->action, "settings") && sub == SCR_SETTINGS) || (!strcmp(n->action, "multiplayer") && sub == SCR_MULTIPLAYER) ||
                         (!strcmp(n->action, "inventory") && sub == SCR_INVENTORY) || (!strcmp(n->action, "lobby") && sub == SCR_LOBBY) ||
-                        (!strcmp(n->action, "commands") && sub == SCR_COMMANDS);
+                        (!strcmp(n->action, "commands") && sub == SCR_COMMANDS) || (!strcmp(n->action, "stats") && sub == SCR_STATS);
         bool enabled = !(!strcmp(n->action, "inventory") && !game_local_player());
         u32 flags_default = !strcmp(n->action, "resume");
         (void)flags_default;
@@ -345,6 +348,7 @@ static void draw_confirm(bool top) {
     case CONFIRM_RESET_BINDS: yes_l = "Reset"; yes_kind = GB_DANGER; break;
     case CONFIRM_GRAPHICS_DEFAULTS: yes_l = "Reset"; yes_kind = GB_DANGER; break;
     case CONFIRM_COMMAND: yes_l = "Run"; yes_kind = GB_DANGER; break;
+    case CONFIRM_STATS_RESET: yes_l = "Reset"; yes_kind = GB_DANGER; break;
     }
     bool y = gw_button(gui_id("confirm_yes"), yes, yes_l, yes_kind, true);
     bool n = gw_button(gui_id("confirm_no"), no, no_l, GB_SECONDARY, true);
@@ -372,6 +376,7 @@ static void draw_confirm(bool top) {
         case CONFIRM_RESET_BINDS: if (yes_pressed) input_reset_bindings(); break;
         case CONFIRM_GRAPHICS_DEFAULTS: if (yes_pressed) settings_graphics_defaults(); break;
         case CONFIRM_COMMAND: commands_tab_confirm_result(yes_pressed); break;
+        case CONFIRM_STATS_RESET: stats_tab_confirm_reset(yes_pressed); break;
         }
     }
 }
@@ -398,6 +403,7 @@ static void draw_modal(int id, bool top) {
     case SCR_BENCH: close = bench_draw(screens_dialog_rect().w > 0 ? r : r); break;
     case SCR_LOBBY: close = mainmenu_lobby_page_draw(r) || !lobby_active(); break;
     case SCR_COMMANDS: close = commands_tab_draw(r); break;
+    case SCR_STATS: close = stats_tab_draw_modal(r); break;
     default: break;
     }
     gui_pop_input();
@@ -547,6 +553,7 @@ static void cmd_menu(int argc, const char **argv) {
     else if (!strcmp(page, "phone")) { do_action("settings"); settings_open(6); }
     else if (!strcmp(page, "multiplayer")) do_action("multiplayer");
     else if (!strcmp(page, "inventory")) do_action("inventory");
+    else if (!strcmp(page, "stats")) do_action("stats");
     else if (!strcmp(page, "quit")) do_action("quit");
     else if (!strcmp(page, "leave")) do_action("leave");
 }
@@ -556,7 +563,7 @@ static void cmd_ui_screen(int argc, const char **argv) {
     if (argc < 2) {
         char line[160] = "";
         for (int i = 0; i < M->depth; i++) { strncat(line, " ", sizeof(line) - strlen(line) - 1); strncat(line, screen_name(M->stack[i]), sizeof(line) - strlen(line) - 1); }
-        log_info("ui_screen <pause|settings[:tab|:normal|:debug]|multiplayer|inventory|bench|commands|copypos|confirm_quit|confirm_leave|close>  stack:%s", line[0] ? line : " (none)");
+        log_info("ui_screen <pause|settings[:tab|:normal|:debug]|multiplayer|inventory|bench|commands|stats|copypos|confirm_quit|confirm_leave|close>  stack:%s", line[0] ? line : " (none)");
         return;
     }
     const char *n = argv[1];
@@ -570,7 +577,7 @@ static void cmd_ui_screen(int argc, const char **argv) {
         if (n[8] == ':') settings_open(atoi(n + 9));
         return;
     }
-    if (!strcmp(n, "commands") || !strcmp(n, "copypos")) {
+    if (!strcmp(n, "commands") || !strcmp(n, "copypos") || !strcmp(n, "stats")) {
         if (!M->depth || M->stack[0] != SCR_PAUSE) { menus_close_all(); screens_push(SCR_PAUSE); }
         do_action(n);
         return;
@@ -719,7 +726,8 @@ void menus_init(void) {
     gd_register_commands();
     inventory_register_commands();
     commands_tab_register();
-    cmd_register("menu", cmd_menu, "open a menu: pause | settings | controls | crosshair | audio | character | phone | multiplayer | inventory | close");
+    stats_tab_register();
+    cmd_register("menu", cmd_menu, "open a menu: pause | settings | controls | crosshair | audio | character | phone | multiplayer | inventory | stats | close");
     cmd_register("inventory", cmd_inventory, "toggle the inventory screen");
     cmd_register("r_defaults", cmd_r_defaults, "every graphics setting back to its coded default (Settings > Graphics > Default; the display mode is kept)");
     cmd_register("ui_screen", cmd_ui_screen, "ui_screen <name>: open a UI screen (no args: list + current stack)");

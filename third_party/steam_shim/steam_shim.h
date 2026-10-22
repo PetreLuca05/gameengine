@@ -85,6 +85,10 @@ bool dgs_invite_friend(uint64_t steam_id);
 // Small avatar as RGBA8 (32 x 32). false while Steam still downloads it.
 bool dgs_avatar_rgba(uint64_t steam_id, int *w, int *h, uint8_t *out, int cap);
 
+// Steam Stats (docs/STATS.md "Steam"): an INT stat by its API name, then one store per batch.
+bool dgs_stat_set_int(const char *name, int32_t value);
+bool dgs_stats_store(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -17,7 +17,7 @@ typedef struct Profile {
     CosmeticUnlocks unlocks;
     char last_map[32];
     LobbySettings lobby;          // last lobby settings (the host's defaults next time)
-    // stats (stubs until the game records them)
+    // stat stubs: superseded by the player statistics (docs/STATS.md), which import them once
     u32 kills, deaths, matches;
     double playtime_s;
     char last_session[64];        // "Continue": the last session's save id ("" = none)

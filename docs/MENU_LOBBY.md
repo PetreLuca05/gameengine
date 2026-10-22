@@ -25,8 +25,8 @@ pause menu's look (thin lines, semi-transparent blurred panels, small-caps label
 launch ── splash (1.6 s, any key / click skips) ──▶ MAIN MENU
   background: the dev room, your character (3rd person, idle, your cosmetics, the held item),
               slow camera drift, lit by the selected map's season / time / weather (frozen)
-  top bar:  Play · Player · Cosmetics · Maps · Settings · Credits                  [⏻]
-            Q / E · LB / RB · 1-6 · mouse                         ⏻ ─▶ CONFIRM "Quit to desktop?"
+  top bar:  Play · Player · Cosmetics · Maps · Settings · Stats · Credits          [⏻]
+            Q / E · LB / RB · 1-7 · mouse                         ⏻ ─▶ CONFIRM "Quit to desktop?"
   ├─ Play ──┬─ Continue  (the last story checkpoint, docs/STORY.md; else the last session; greyed without)
   │         ├─ Story: 10th Floor (starts chapter 1, story_chapter 1)
   │         ├─ Host game ─────────────────────────────────────▶ LOBBY (host)
@@ -65,7 +65,7 @@ IN GAME
 
 Keyboard, mouse and gamepad all work everywhere: the spatial focus navigation of docs/UI.md, A /
 Enter accept, B / Esc back (browser → Play, a tab → Play, Play → the quit prompt), LB / RB and Q / E
-cycle the tabs (inside Settings they cycle the settings' own tabs), 1-6 jump to a tab. Key hints
+cycle the tabs (inside Settings and Stats they cycle that tab's own pages), 1-7 jump to a tab. Key hints
 show next to the tab names while the keyboard / pad drives.
 
 `--test` runs boot into the dev room as before (scripts, screenshots); `--menu` forces the menu. `--nomenu` skips the splash and the menu in a normal run (your config loads as usual): straight into `+map <id>` / `+scene <id>`, or the boot map.
@@ -247,7 +247,7 @@ cosmetics → part options → selection → cosmetics for every slot; profile J
 menu screen linted and solved at 1920×1080, 2560×1080, 1024×768, 1280×720, 3840×2160 and 3440×1440.
 
 **Scripted runs** (`tools/tests/`):
-* `mm_nav.cfg` (`--test --menu`): every tab by keys 1-6, Q / E, pad LB / RB, mouse; the browser;
+* `mm_nav.cfg` (`--test --menu`): every tab by keys 1-7, Q / E, pad LB / RB, mouse; the browser;
   Back; the quit prompt cancelled; screenshots.
 * `mm_resolutions.cfg`: the menu at 1280×720, 1920×1080, 2560×1080, 1024×768.
 * `lobby_lan.sh`: two instances on one machine (LAN): host, discovery, join, chat both ways, ready,

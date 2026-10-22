@@ -8,6 +8,8 @@
 #include "gameplay/items.h"
 #include "core/cvar.h"
 #include "core/engine.h"
+#include "gameplay/stats/stats.h"
+#include "ui/ui_chart.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -75,15 +77,14 @@ void mm_player_draw(GuiRect content) {
     }
     c.y += TOK("mm_gap");
     gw_section(gc_row(&c, TOK("mm_row_h")), "Stats");
+    // The player statistics (docs/STATS.md); the Stats tab has the rest.
+    const PlayerStats *ps = &stats_get()->life;
     char v[48];
-    snprintf(v, sizeof(v), "%u", p->kills);
-    mm_kv(&c, "Kills", v);
-    snprintf(v, sizeof(v), "%u", p->deaths);
-    mm_kv(&c, "Deaths", v);
-    snprintf(v, sizeof(v), "%u", p->matches);
-    mm_kv(&c, "Matches", v);
-    snprintf(v, sizeof(v), "%.1f h", p->playtime_s / 3600.0);
-    mm_kv(&c, "Play time", v);
+    mm_kv(&c, "Kills", chart_fmt_int(v, sizeof(v), ps->kills));
+    snprintf(v, sizeof(v), "%.2f", stats_kd(ps));
+    mm_kv(&c, "K/D", v);
+    mm_kv(&c, "Matches", chart_fmt_int(v, sizeof(v), ps->matches_played));
+    mm_kv(&c, "Play time", chart_fmt_duration(v, sizeof(v), ps->time_played_sec));
     c.y += TOK("mm_gap");
     gw_section(gc_row(&c, TOK("mm_row_h")), "Loadout");
     const CosmeticDB *db = lobby_cosmetics();

@@ -4,6 +4,7 @@
 #include "net/spectate.h"
 #include "kill_stats.h"
 #include "revive/revive.h"
+#include "game/game_stats.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -138,6 +139,9 @@ float apply_damage_ex(World *w, EntityId target, float amount, DamageType type, 
         }
         if (attacker_player >= 0 && attacker_player != victim_player && victim_player >= 0) w->players[attacker_player].kills++;
     }
+    // Player statistics (docs/STATS.md): hits, kills (zombies and players), damage taken, deaths.
+    u16 stats_item = s_source_item ? s_source_item : (ent_valid(w, attacker) ? w->item[ENT_INDEX(attacker)] : 0);
+    stats_sv_damage(w, attacker_player, victim_player, target, stats_item, dealt, headshot, killed, w->type[i] == ET_ZOMBIE || victim_player >= 0);
     chars_on_damage(w, target, dealt, part, dir, point, killed, (int)type);
     return dealt;
 }
