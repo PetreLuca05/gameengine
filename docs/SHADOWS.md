@@ -298,6 +298,27 @@ cascades 0 - 1 never lag. Measured (pine / broadleaf forest, horde in the forest
 shadow pass -14.6 %, its fragments -11 %, GPU frame -11.5 %, CPU work -5.8 %; still images pass the
 fidelity-neutral image check.
 
+### Far cascade resolution
+
+PF-0049 is a visual trade-off: `r_shadow_far_res`, fidelity feature `shadow_far_res`, default 2 at every
+level, minimum 1.
+
+- **What it does:** cascades 1 - 3 draw 1 / N of the cascade tile's texels per side, in the top-left square
+  of their atlas tile (never below 1024 texels; cascade 0 always full).
+  - At Modern (4096 tiles) the far cascades draw 2048, at High (2048) 1024.
+  - Low and Medium (1024 tiles) are unchanged.
+- **How:**
+  - `csm_layout` / the fits take each cascade's texel count (`CsmParams.tiles`), so its texel size, snap
+    grid, bias and edge border all follow it.
+  - The atlas matrix maps NDC into the square.
+  - The shadow pass scissors to the square.
+  - `frame.shadow_tile` gives `shadow_cascade` (and the last cascade's particle / decal lookups) each
+    cascade's share of its tile, for the edge test and the filter clamp.
+  - The classic renderer picks cascade LODs from the coarser texel (`R->shadow_tile_px`).
+- **Why:** the forests' shadow pass is alpha-tested leaf cards, so its fragments scale with the texels drawn.
+- **Visible:** shadows from about the first split (~10 m at Modern) are a little softer and coarser.
+  The near cascade, the viewmodel tile and the soft-shadow filter widths in metres are unchanged.
+
 ### Bias
 
 Per cascade, in metres, from its texel size t (`csm_bias`), × the low-sun factor:

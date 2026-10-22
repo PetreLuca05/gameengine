@@ -36,7 +36,7 @@ float shadow_at(vec3 wp) {
     // shadow_vp is the last cascade: its own atlas tile only (no samples of the neighbouring tiles)
     int c = clamp(int(frame.shadow_cfg3.x) - 1, 0, 3);
     vec2 lo = vec2(c & 1, c >> 1) * 0.5;
-    if (any(lessThan(uv, lo)) || any(greaterThan(uv, lo + 0.5))) return 1.0;
+    if (any(lessThan(uv, lo)) || any(greaterThan(uv, lo + 0.5 * frame.shadow_tile[c]))) return 1.0;   // its square (PF-0049)
     return mix(1.0, texture(shadow_map, vec3(uv, s.z - 4.0 * frame.shadow_bias.w)), frame.ssky0.y);   // the sky cutoff fade (docs/SHADOWS.md)
 }
 

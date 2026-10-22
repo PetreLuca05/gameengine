@@ -1714,7 +1714,8 @@ static void cascade_view(ClCull *v, u32 k, u32 tile, float shadow_px) {
     planes_of(R->shadow_vp_ndc[k], v->planes);   // the untiled matrix (render.c)
     v->ortho = v->shadow = true;
     v->layers = R->sun_shadow.culling_mask == SHADOW_LAYERS_ALL ? 0u : (R->sun_shadow.culling_mask | 0x100u);
-    v->px_scale = (float)tile / (2.0f * R->shadow_radius[k]);   // the tile's half extent (render.c)
+    u32 px = R->shadow_tile_px[k] ? R->shadow_tile_px[k] : tile;   // the texels the cascade draws (PF-0049)
+    v->px_scale = (float)px / (2.0f * R->shadow_radius[k]);   // the tile's half extent (render.c)
     v->lod_px = shadow_px;
     v->era2010 = false;
     v->nrcv = R->shadow_rcv_n[k];

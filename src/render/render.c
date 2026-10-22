@@ -96,6 +96,8 @@ void render_register_cvars(void) {
     r->r_stretch = cvar_reg_float("r_stretch", 0.0f, 0.0f, 1.0f, CVAR_LOCKED,
                                   "stretched resolution simulator: 0 normal .. 1 extreme (the 3D view squeezed into a narrower aspect, stretched to the screen)");
     r->r_shadow_min_radius = cvar_reg_float("r_shadow_min_radius", 0.0f, 0.0f, 4.0f, CVAR_TIER, "props smaller than this radius (m) cast no sun shadow");
+    r->r_shadow_far_res = cvar_reg_int("r_shadow_far_res", 2, 1, 4, CVAR_TIER,
+                                       "sun cascades 1..3 drawn at 1 / N of the cascade tile's resolution (never below 1024 texels; cascade 0 full): 1 every cascade full (PF-0049)");
     r->r_shadow_far_interval = cvar_reg_int("r_shadow_far_interval", 2, 1, 4, CVAR_TIER,
                                             "sun cascades 2 and 3 (of 4) re-rendered every N frames, alternating (the others keep last frame's tile): 1 every frame, 2 each far cascade every other frame (PF-0028)");
     r->r_shadow_caster_limit = cvar_reg_int("r_shadow_caster_limit", 1, 0, 2, CVAR_TIER,
@@ -1488,7 +1490,15 @@ static void compute_matrices(FrameData *fd) {
     float splits[4];
     int ncasc = shs_cascade_splits(&qd, splits);
     u32 tile = R->shadow_size / 2;
-    CsmParams cp = { ncasc, tile, R->shadow_dist, c->fov_deg, aspect, splits };
+    // docs/perf/FINDINGS.md PF-0049 (a visual trade-off): cascades 1..3 draw 1 / r_shadow_far_res of the
+    // tile's texels per side (never below 1024), in the top-left part of their tile. The forests' shadow
+    // pass is alpha-tested leaf cards, its fragments scale with the texels drawn; the far cascades' texels
+    // are the coarsest on screen already (their shadows lie far away), cascade 0 keeps the full tile.
+    int far_res = prof_fix_enabled(PFX_SHADOW_FAR_RES) && R->r_shadow_far_res ? DG_CLAMP(R->r_shadow_far_res->i, 1, 4) : 1;
+    u32 tiles[4];
+    for (int k = 0; k < 4; k++) tiles[k] = k == 0 || far_res <= 1 ? tile : DG_MAX(tile / (u32)far_res, DG_MIN(tile, 1024u));
+    for (int k = ncasc; k < 4; k++) tiles[k] = tiles[DG_MAX(ncasc - 1, 0)];
+    CsmParams cp = { ncasc, tile, R->shadow_dist, c->fov_deg, aspect, splits, tiles };
     csm_layout(&cp, &R->csm);
     bool close_fit = q->projection == SHADOW_CLOSE_FIT;
     float reach = q->near_plane_offset;
@@ -1501,9 +1511,9 @@ static void compute_matrices(FrameData *fd) {
         CsmTile t;
         if (close_fit) {
             float d0 = k ? splits[k - 1] * (1.0f - q->border) : 0.0f;
-            csm_fit_close(&lview, c->pos, fwd, right, upv, tan_v, tan_h, d0, splits[k], tile, reach, &t);
+            csm_fit_close(&lview, c->pos, fwd, right, upv, tan_v, tan_h, d0, splits[k], tiles[k], reach, &t);
         } else {
-            csm_fit_reach(&lview, v3_madd(c->pos, fwd, R->csm.ahead[k]), R->csm.radius[k], tile, R->csm.radius[k] + 2.0f, reach, &t);
+            csm_fit_reach(&lview, v3_madd(c->pos, fwd, R->csm.ahead[k]), R->csm.radius[k], tiles[k], R->csm.radius[k] + 2.0f, reach, &t);
         }
         float cm, nm;
         shs_bias_m(t.texel_m, sl->bias, sl->normal_bias, low_sun, &cm, &nm);
@@ -1516,12 +1526,14 @@ static void compute_matrices(FrameData *fd) {
         R->shadow_radius[k] = t.radius;
         R->shadow_center[k] = t.center;
         R->shadow_vp_ndc[k] = t.vp;
-        // NDC -> the cascade's atlas tile (x right, y down in the atlas).
+        // NDC -> the cascade's square in its atlas tile (x right, y down in the atlas): the whole tile,
+        // or its top-left part (PF-0049).
+        float part = (float)tiles[k] / (float)tile;
         mat4 tm = mat4_identity();
-        tm.m[0] = 0.5f;
-        tm.m[5] = 0.5f;
-        tm.m[12] = (k & 1) ? 0.5f : -0.5f;
-        tm.m[13] = (k >> 1) ? 0.5f : -0.5f;
+        tm.m[0] = 0.5f * part;
+        tm.m[5] = 0.5f * part;
+        tm.m[12] = ((k & 1) ? 0.0f : -1.0f) + 0.5f * part;
+        tm.m[13] = ((k >> 1) ? 0.0f : -1.0f) + 0.5f * part;
         R->shadow_vps[k] = mat4_mul(tm, t.vp);
     }
     // PF-0028 (a visual trade-off, docs/SHADOWS.md "Far cascade staggering"): with 4 cascades, 2 and 3
@@ -1533,7 +1545,7 @@ static void compute_matrices(FrameData *fd) {
     int far_interval = prof_fix_enabled(PFX_SHADOW_FAR_STAGGER) && R->r_shadow_far_interval && ncasc == 4 ? R->r_shadow_far_interval->i : 1;
     {
         int interval = far_interval;
-        u32 key = (u32)ncasc | (close_fit ? 1u << 3 : 0u) | tile << 4 | (u32)R->shadow_gen << 20;
+        u32 key = (u32)ncasc | (close_fit ? 1u << 3 : 0u) | tile << 4 | (u32)far_res << 17 | (u32)R->shadow_gen << 20;
         if (key != R->shadow_hold_key || R->camera_cut) {
             for (int k = 0; k < 4; k++) R->shadow_hold[k].valid = false;
             R->shadow_hold_key = key;
@@ -1568,6 +1580,8 @@ static void compute_matrices(FrameData *fd) {
         mpt[k] = mpt[ncasc - 1];
     }
     R->shadow_splits = v4(splits[0], splits[1], splits[2], splits[3]);
+    for (int k = 0; k < 4; k++) R->shadow_tile_px[k] = tiles[k];
+    fd->shadow_tile = v4((float)tiles[0] / (float)tile, (float)tiles[1] / (float)tile, (float)tiles[2] / (float)tile, (float)tiles[3] / (float)tile);
     R->shadow_vp = R->shadow_vps[3];
     R->shadow_bias = v4(bias[0], bias[1], bias[2], bias[3]);
 
@@ -2931,7 +2945,8 @@ void render_end_frame(void) {
                     if (!R->shadow_redraw[k]) continue;   // kept from its last frame (PF-0028)
                     extract_frustum(R->shadow_vp_ndc[k], g_shadow_planes);   // casters outside this tile's light box are skipped
                     VkViewport vp = { 0.0f, 0.0f, (float)R->shadow.w, (float)R->shadow.h, 0.0f, 1.0f };
-                    VkRect2D sc = { { (int)((k & 1) * tile), (int)((k >> 1) * tile) }, { tile, tile } };
+                    u32 px = R->shadow_tile_px[k] ? DG_MIN(R->shadow_tile_px[k], tile) : tile;   // its square (PF-0049)
+                    VkRect2D sc = { { (int)((k & 1) * tile), (int)((k >> 1) * tile) }, { px, px } };
                     vkCmdSetViewport(cmd, 0, 1, &vp);
                     vkCmdSetScissor(cmd, 0, 1, &sc);
                     g_shadow_cascade = (u32)k;

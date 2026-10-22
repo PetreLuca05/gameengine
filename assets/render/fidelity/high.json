@@ -35,6 +35,7 @@
     "shadow_min_radius": {"avail": "on", "default": 0, "min": 0},
     "shadow_caster_limit": {"avail": "on", "default": 1, "min": 1},
     "shadow_far_interval": {"avail": "on", "default": 2, "min": 1},
+    "shadow_far_res": {"avail": "on", "default": 2, "min": 1},
     "light_shadow_quality": {"avail": "on", "default": 2, "max": 2},
     "texture_quality": {"avail": "on", "default": 2, "max": 2},
     "aniso": {"avail": "on", "default": 8, "allowed": [1, 2, 4, 8, 16]},

@@ -193,14 +193,15 @@ float shadow_cascade(int c, vec3 p, vec3 n) {
     vec2 uv = sp.xy * 0.5 + 0.5;
     vec2 tile = vec2(c & 1, c >> 1) * 0.5;
     vec2 local = (uv - tile) * 2.0;
+    float part = frame.shadow_tile[c];   // the cascade's square: [0, part] of its tile (PF-0049)
     float texel = frame.params.y;
     float edge = 4.0 * texel;
-    if (any(lessThan(local, vec2(edge))) || any(greaterThan(local, vec2(1.0 - edge))) || sp.z > 1.0 || sp.z < 0.0) return -1.0;
+    if (any(lessThan(local, vec2(edge))) || any(greaterThan(local, vec2(part - edge))) || sp.z > 1.0 || sp.z < 0.0) return -1.0;
     float mpt = frame.shadow_mpt[c], span = frame.shadow_span[c];
     vec2 g = sh_receiver_gradient(frame.shadow_vps[c], n, sh_slope_limit() * mpt / (texel * span));
     float z = sp.z - frame.shadow_bias[c] - texel * length(g);
     g_sh_casc = c;
-    vec2 tmin = tile + texel * 0.5, tmax = tile + 0.5 - texel * 0.5;
+    vec2 tmin = tile + texel * 0.5, tmax = tile + 0.5 * part - texel * 0.5;
     return sh_filter(shadow_map, shadow_depth, texel, uv, z, g, tmin, tmax, mpt, span, frame.ssky0.x, frame.shadow_cfg4.x, frame.shadow_cfg4.y, frame.shadow_cfg.y,
                      sh_rotation());
 }

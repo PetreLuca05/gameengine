@@ -36,9 +36,10 @@ void csm_layout(const CsmParams *p, CsmLayout *out) {
         csm_sector_sphere(s, tc, &out->ahead[k], &r);
         // The tile is CSM_EDGE_TEXELS wider on each side than the sphere: the shader's 4-texel border
         // plus the snap (up to one texel per axis) never cut a point of the sphere off.
-        float T = (float)DG_MAX(p->tile, 32u);
+        u32 tk = p->tiles && p->tiles[k] ? p->tiles[k] : p->tile;
+        float T = (float)DG_MAX(tk, 32u);
         out->radius[k] = r * T / (T - 2.0f * CSM_EDGE_TEXELS);
-        out->texel_m[k] = 2.0f * out->radius[k] / (float)DG_MAX(p->tile, 1u);
+        out->texel_m[k] = 2.0f * out->radius[k] / (float)DG_MAX(tk, 1u);
     }
 }
 

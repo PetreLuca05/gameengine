@@ -242,6 +242,7 @@ typedef struct FrameData {
     // x 1 = something reads the G-buffer velocity this frame (TAA / TAA-U, motion blur, temporal passes);
     // without, the classic vertex stage skips last frame's wind (docs/perf/FINDINGS.md PF-0048).
     vec4 frame_info;
+    vec4 shadow_tile;     // sun cascades 0..3: the share of their atlas tile drawn (PF-0049; 1 = the whole tile)
 } FrameData;
 
 typedef struct PushLit {
@@ -442,6 +443,7 @@ typedef struct Renderer {
     // Far cascade staggering (PF-0028, r_shadow_far_interval): a far cascade not due this frame keeps
     // its tile and the matrices / bias it was drawn with (shadow_hold); shadow_redraw: re-rendered now.
     bool shadow_redraw[4];
+    u32 shadow_tile_px[4];        // texels per side each sun cascade draws (the top-left part of its tile: PF-0049)
     struct ShadowHold { bool valid; mat4 vps, vp_ndc; vec3 center, L; float radius, texel_m, bias, span, nbias, mpt; } shadow_hold[4];
     u32 shadow_hold_key;                        // cascades / tile / fit / shadow image generation the holds belong to
     bool moon_active;
@@ -502,6 +504,7 @@ typedef struct Renderer {
     Cvar *r_shadow_split2, *r_shadow_split4[3], *r_shadow_border, *r_shadow_near_offset, *r_shadowmask_mode, *r_shadowmask_distance;
     Cvar *r_shadow_min_radius;
     Cvar *r_shadow_far_interval;  // sun cascades 2..3 re-rendered every N frames, alternating (PF-0028)
+    Cvar *r_shadow_far_res;       // sun cascades 1..3 at 1 / N of the tile's texels (PF-0049)
     Cvar *r_shadow_caster_limit;  // classic casters: grass / small plants in the near cascades only (shadow_casters.h, PF-0013)
     Cvar *r_shadow_debug;       // sky-driven shadow views (docs/SHADOWS.md)
     Cvar *r_vm_shadow;          // the viewmodel shadow tile

@@ -47,6 +47,7 @@ typedef struct CsmParams {
     float fov_y_deg;        // camera vertical field of view (the fit uses at least CSM_FIT_FOV_MIN)
     float aspect;           // width / height
     const float *splits;    // explicit selection distances (m, Unity's split percentages x distance); NULL: practical scheme
+    const u32 *tiles;       // texels per cascade (PF-0049: the far cascades on a part of their tile); NULL: tile for each
 } CsmParams;
 
 typedef struct CsmLayout {

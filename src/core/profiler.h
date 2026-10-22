@@ -94,6 +94,7 @@ typedef enum ProfFix {
     PFX_ANIM_FRUSTUM_LOD,     // PF-0033: characters outside the view pose at the cheap rate, without IK (presentation only)
     PFX_ANIM_SHARED_POSE,     // PF-0034: far characters share one sampled pose per clip / phase bucket (presentation only)
     PFX_SHADOW_ONE_LOD,       // PF-0036: sun cascades draw the finer LOD of a LOD band alone (no dithered pair; never coarser)
+    PFX_SHADOW_FAR_RES,       // PF-0049: sun cascades 1..3 at 1 / r_shadow_far_res of the tile's texels
     PFX_COUNT
 } ProfFix;
 #define PFX_TRADEOFF_FIRST PFX_SHADOW_CASTER_LIMIT

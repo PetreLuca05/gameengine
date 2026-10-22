@@ -2011,6 +2011,12 @@
    "reason": "The two far sun cascades are re-rendered in turn (each every N frames) and keep the tile they were drawn with in between; forced after a cut or once the fit moved. Far shadows of moving casters lag up to N - 1 frames; nothing is hidden or revealed that the near cascades show: cost only (PF-0028).",
    "category": "rendering"
   },
+  "r_shadow_far_res": {
+   "class": "TIER",
+   "ui": "Graphics (dev)",
+   "reason": "Sun cascades 1..3 drawn at 1 / N of the cascade tile's texels (never below 1024; cascade 0 full): far shadows a little softer, nothing hidden or revealed that full resolution shows at that distance: cost only (PF-0049).",
+   "category": "rendering"
+  },
   "r_shadow_max_distance": {
    "class": "LOCKED",
    "ui": "—",

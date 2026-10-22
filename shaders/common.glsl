@@ -149,6 +149,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 city;            // city windows: x lit fraction, y intensity (0 off), zw district centre (xz)
     vec4 city_power[2];   // 8 districts: 0..1 power level, 1..2 flicker (the off share)
     vec4 frame_info;      // x 1 = the G-buffer velocity is read this frame (else the classic vertex stage skips last frame's wind: PF-0048)
+    vec4 shadow_tile;     // sun cascades 0..3: the share of their atlas tile drawn, from its top-left corner (PF-0049; 1 = the whole tile)
 } frame;
 
 // Where a world point lies in the screen-space inputs (AO, contact, SSR, SSGI, froxels): this
