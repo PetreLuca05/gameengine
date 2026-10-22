@@ -526,8 +526,10 @@ void vkc_init(void) {
     C.pipe[CP_GB_DEF_CLIP_2S] = cl_pipeline("classic.vert", "classic_gbuffer_def_clip.frag", false, false, true, le, true, 5);
     C.pipe[CP_ZPRE_CLIP] = cl_pipeline("classic.vert", "classic_depth_clip.frag", false, false, false, le, true, -1);
     C.pipe[CP_ZPRE_CLIP_2S] = cl_pipeline("classic.vert", "classic_depth_clip.frag", false, false, true, le, true, -1);
-    C.pipe[CP_GB_DEF_EQ] = cl_pipeline("classic.vert", "classic_gbuffer_def_eq.frag", false, false, false, eq, false, 5);
-    C.pipe[CP_GB_DEF_EQ_2S] = cl_pipeline("classic.vert", "classic_gbuffer_def_eq.frag", false, false, true, eq, false, 5);
+    // The test again at EQUAL: distant cards of neighbouring trees can share a depth value (a transparent
+    // texel would take the pixel). Depth writes off: the EQUAL test still rejects early.
+    C.pipe[CP_GB_DEF_EQ] = cl_pipeline("classic.vert", "classic_gbuffer_def_clip.frag", false, false, false, eq, false, 5);
+    C.pipe[CP_GB_DEF_EQ_2S] = cl_pipeline("classic.vert", "classic_gbuffer_def_clip.frag", false, false, true, eq, false, 5);
     cl_deferred_init();
     for (int i = 0; i < CP_COUNT; i++)
         if (!C.pipe[i]) { log_error("classic: renderer unavailable (pipeline %d)", i); return; }

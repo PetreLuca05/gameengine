@@ -135,8 +135,10 @@ material and weather terms into five targets) runs for every leaf card that cove
 test: late depth testing, about 12 per pixel in the forests. `r_classic_zprepass 1` splits the deferred
 masked groups (one- and two-sided) in two: first a depth-only pass with only their alpha / dither test
 (`classic_depth_clip.frag`, the same texture and sampler as `classic_gbuffer_def_clip.frag`, no target
-written), then their G-buffer at EQUAL depth without the test (`classic_gbuffer_def_eq.frag`): early depth
-testing, one G-buffer shading per pixel. The geometry is drawn twice (the vertex stage, its wind, again).
+written), then their G-buffer (`classic_gbuffer_def_clip.frag`) at EQUAL depth with no depth writes: the
+depth test runs early, about one G-buffer shading per pixel. The alpha test runs again in that pass:
+distant cards of neighbouring trees can share a depth value, and a transparent texel of one would
+otherwise take the pixel (without it, 0.8 % of a pine forest frame's pixels changed). The geometry is drawn twice (the vertex stage, its wind, again).
 The opaque and lit-pass groups are unchanged, and so is the image (the same coverage; coplanar cards keep
 the draw order's winner as before). Which is faster depends on the GPU (vertex vs fragment / bandwidth
 bound): an A/B for the target machine, e.g. `perf_bench levels=current` with `set r_classic_zprepass 0` and

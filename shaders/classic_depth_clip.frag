@@ -1,8 +1,8 @@
 #version 450
 // Depth-only prepass of the deferred masked / distance-dithered classic draws (PF-0052, r_classic_zprepass):
 // classic_gbuffer_def_clip.frag's test on the same texture and nothing else. Their G-buffer pass then
-// runs at EQUAL depth without the test (classic_gbuffer_def_eq.frag): one G-buffer shading per pixel
-// instead of one per overlapping card.
+// runs classic_gbuffer_def_clip.frag at EQUAL depth without depth writes (early depth test): about one
+// G-buffer shading per pixel instead of one per overlapping card.
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
 #include "classic_common.glsl"
