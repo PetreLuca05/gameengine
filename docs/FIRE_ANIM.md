@@ -177,42 +177,78 @@ An MWII-style procedural motion of the first-person weapon (`src/player/weapon_s
 composed into one camera-space offset that the arms layer applies to the drawn arms + item about the
 pivot (the sight aimed). It is client-side and cosmetic: it is never networked, never changes the body
 pose, the aim or the camera, and third-person weapons never see it. It has no recoil part: the kick is
-the fire animation's.
+the fire animation's (no layer reads `fire_pulse`).
 
 | Layer | Input | Motion | ADS (rot / pos) |
 |---|---|---|---|
 | look | the view's rotation rate (deg/s), 20 Hz filter | yaw / pitch trail the turn, roll into it, drag against it; clamped (5 deg, 25 mm); spring k 160, damping ratio 0.68 (slight overshoot, then it settles) | 0.2 / 0.1 |
 | move | camera-relative velocity / walk speed | roll into the strafe (2.5 deg), shift against it (12 mm); moving forward: back 7 mm, muzzle down 0.8 deg; spring k 110, ratio 0.72; a sudden start / stop (> 6 m/s^2) kicks the spring with the velocity change | 0.2 / 0.2 |
-| bob | ground distance | figure-eight: side sway + two dips per cycle (the steps), roll / pitch / yaw; 0.3 cycles per metre; amplitude by speed / walk speed (crouch 0.5, sprint 1.8 with a longer stride and more roll / yaw); in the air or standing the phase freezes and the amplitude decays (0.25 s); the sprint pose blends in over 0.18 s and out over 0.08 s, eased | 0.12 / 0.12 |
+| bob | ground distance | figure-eight: side sway + two dips per cycle (the steps), roll / pitch / yaw; 0.3 cycles per metre; amplitude by speed / walk speed (crouch 0.5, sprint 1.8 with a longer stride and more roll / yaw); in the air or standing the phase freezes and the amplitude decays (0.25 s); the sprint pose blends in over 0.18 s and out over 0.08 s, eased; aimed a small residual at the same frequency | 0.12 / 0.12 |
+| air | jump / airborne vertical speed / landing impact / crouch edges | jump: 0.35 m/s down into the spring (~2 cm dip) and 50 deg/s nose up; airborne: floats up 2.5 mm and noses up 0.4 deg per m/s of falling (25 mm / 3 deg max); landing: (impact - 2.5 m/s) x 0.16 m/s into the spring, max 1.2 (a 3 m drop: ~4-5 cm dip, ~6-7 deg muzzle down; a normal jump ~1.5 cm), 140 deg/s of pitch per m/s, crouched x0.5; the heavy spring (k 150, ratio 0.5) bounces once; crouching dips 0.3 m/s, standing up lifts 0.15 m/s (`weapon_sway_stance_change`, the stance hook) | 0.35 / 0.3 |
+| idle | standing still | breathing: two sines at 0.35 / 0.9 Hz (pitch; yaw at half f1: a slow figure-eight) + slow value noise (0.15 deg at 0.25 Hz) so it never repeats visibly, 0.4 deg / 0.8 mm; fades out when moving or in the air (0.2 s) and back in when still (0.5 s); crouched x0.7; holding the breath x0.1 (eased over 0.2 s) | 0.25 / 0.25 |
 
+* **ADS transition**: the multipliers follow the ADS weight eased with a smoothstep (`ads_transition.ease`);
+  entering / leaving ADS kicks the look spring (20 deg/s of pitch and 4 cm/s back per unit of ADS
+  change) so the gun settles into the sight instead of sliding. The ADS / FOV model stays authoritative:
+  `ads_transition.fov_delta` (0) adds to the arms FOV x the ADS weight.
+* **Composition**: `weight` (0 light .. 0.5 as written .. 1 heavy) scales every spring's stiffness (x1.25 ..
+  x0.75) and every amplitude (x0.8 .. x1.2) from one value (pistol 0.25, SMG 0.35, rifle 0.5, shotgun
+  0.55, DMR 0.6, sniper 0.75, LMG 0.85). `pivot_offset` (camera space m) moves the rotation pivot at the
+  hip (towards the hands / shoulder; aimed the sight stays the pivot). The total is clamped per axis
+  (`max_rot` 40 / 40 / 30 deg, `max_pos` 8 cm): the gun never leaves the view. Rotations are summed in
+  degrees every frame (pitch, yaw, roll) and turned into one rotation: nothing accumulates.
+* **The camera's landing dip** (`weapon_sway_camera_offset`, 25 deg/s per m/s of the landing impulse,
+  k 120, ratio 0.6: ~1.3 deg on a 3 m drop) moves the picture, never the aim. It is applied only with
+  `cl_viewmodel_land_camera 1`, x the movement shake `cl_move_shake` (0 by default): by default the
+  camera is untouched.
+* **Footsteps**: `weapon_sway_bob_phase` (the dips at pi / 2 and 3 pi / 2) and `weapon_sway_footstep`
+  (the step the last update crossed: 1 left, 2 right) let the footstep audio follow the bob (not wired).
 * While a weapon's own run / sprint clip carries the gun (controller `"carry"`), the bob and the
   sprint pose step aside: the clip already moves and lowers it.
-* The arms layer takes the hold point's look lag + bob share out of the drawn weapon while it is on
-  (`ArmsLayerIn.lb_*`), so nothing is doubled.
-* `fire_pulse`, `just_jumped`, `just_landed` and the tactical sprint pose are in the input / config for
-  layers to come; no layer uses the shots.
+* The arms layer takes the hold point's look lag + bob + breathing + landing share out of the drawn
+  weapon while it is on (`ArmsLayerIn.lb_*`, src/player/sway.c), so nothing is doubled; the low-health /
+  after-sprint wobble and the reticle aim sway stay the global sway's.
 * Frame-rate independent: `exp(-k dt)` filters, springs sub-stepped at <= 1/240 s; the look input is a
-  rate, and the acceleration kick is the velocity change.
+  rate, the acceleration kick is the velocity change, the jump / landing / stance kicks are velocity
+  impulses.
 
 **Config** `assets/weapons/viewmodel_sway.json`, resolved per held item: built-in defaults <
 `"default"` < `"classes"` (the weapon's `fire_anim` class: pistols stiffer and snappier, LMGs and
 snipers softer and heavier, with a deeper sprint pose) < `"weapons"` (item id). Every block lists only
-the keys it changes.
+the keys it changes. Sections: `look`, `move`, `bob`, `sprint_pose`, `air`, `camera`, `idle`,
+`ads_transition`, `ads` ([rotation, position] per layer), `layers` (on / off), and `weight`,
+`pivot_offset`, `max_rot`, `max_pos`, `scale`. One field table (`weapon_sway_fields`) drives the
+parser, the save and the tuner.
+
+**Tuner** `viewmodel_sway_tuner`: the held weapon's resolved config, every value edited live, each
+layer on / off with this frame's output, the player's Weapon motion; **save default / class / weapon**
+writes the live values into that block (only what differs from the level above, the block replaced;
+the source tree + the runtime copy); **reload file** drops unsaved edits. Switching weapons re-resolves
+(unsaved edits are lost).
 
 | Command / cvar | |
 |---|---|
-| `cl_viewmodel_sway` | 1 (default): on; 0: the hold point's own look lag + bob, as before. |
-| `viewmodel_sway_info` | This frame's total and each layer. |
+| `cl_viewmodel_sway` | 1 (default): on; 0: the hold point's own look lag + bob + breathing + landing, as before. |
+| `cl_viewmodel_sway_scale` | Settings > Controls > Mouse, "Weapon motion" (0..1, archived): scales the whole output (accessibility; 0 = still). |
+| `cl_viewmodel_land_camera` | 0 (default): the camera never dips; 1: the landing camera dip x `cl_move_shake`. |
+| `viewmodel_sway_tuner` | The tuner panel. |
+| `viewmodel_sway_info` | This frame's total, each layer, the idle / ADS weights, the camera dip (raw / applied), the footstep, the crouch. |
 | `viewmodel_sway_debug 1` | Logs it every 30 frames. |
 | `viewmodel_sway_reload` | Re-reads the config. |
 
-Tests: `tests/test_weapon_sway.c` (ctest `weapon_sway`): the same run at 30 / 60 / 144 Hz (within
-0.18 deg / 0.7 mm), the look trail, overshoot and settle, the clamps, the ADS multipliers per layer,
-the strafe roll and the stop's settle swing, the bob phase following the distance and freezing, its
-decay without a snap, crouch, the sprint pose blend times and ease, config overrides, no NaN. In
-game, `tools/tests/viewmodel_sway.cfg` (generated by `gen_viewmodel_sway_cfg.py`) captures rest /
-turn / overshoot / strafe / walk / sprint / aimed with the system off and on, and
-`viewmodel_sway_check.py <log>` checks them.
+Tests: `tests/test_weapon_sway.c` (ctest `weapon_sway`): the same runs at 30 / 60 / 144 Hz (look / move
+/ bob within 0.18 deg / 0.7 mm; jump, fall, landing, crouch and breathing within 0.05 deg / 0.3 mm), the
+look trail, overshoot and settle, the clamps, the ADS multipliers per layer, the strafe roll and the
+stop's settle swing, the bob phase following the distance and freezing, its decay without a snap,
+crouch, the sprint pose blend times and ease; landing soft vs hard (3 mm vs 5 cm, 7 deg), crouched
+x0.5, one bounce, the camera dip (and none without it); jump dip / nose up, the falling float and its
+clamp; the stance dips; breathing amplitude hip / ADS / held breath / crouched, not periodic at f1,
+its fade out / in times; the ADS settle and easing, `fov_delta`; weight 0.5 = the config as written,
+heavy lags more and settles slower; the final clamp; footsteps alternating, two per cycle; the JSON
+diff round trip; config overrides; no NaN. In game, `tools/tests/viewmodel_sway.cfg` (generated by
+`gen_viewmodel_sway_cfg.py`) captures rest / turn / overshoot / strafe / walk / sprint / aimed and
+the sequences idle / a 3 m drop / a jump / crouch with the system off and on, and
+`viewmodel_sway_check.py <log>` checks them, including that the applied camera dip stays 0 by default.
 
 ## Global sway checks
 

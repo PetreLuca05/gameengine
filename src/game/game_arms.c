@@ -17,6 +17,7 @@
 #include "render/render.h"
 #include "player/spectator.h"
 #include "ui/arms_tuner.h"
+#include "ui/vm_sway_tuner.h"
 #include "cJSON.h"
 #include <math.h>
 #include <stdio.h>
@@ -49,7 +50,7 @@ static struct {
     float yaw, pitch;         // last frame's view angles (rad)
     bool have_view, was_grounded;
     u32 land_tick;
-    Cvar *on, *debug;
+    Cvar *on, *debug, *user_scale, *land_cam;
 } VS;
 
 ArmsLayerDef *game_arms_def(void) { return &AL.def; }
@@ -138,10 +139,12 @@ static void cmd_vms_reload(int argc, const char **argv) {
 
 static void vms_info(void) {
     const SwayOutput *o = &VS.out;
-    static const char *names[WSW_LAYERS] = { "look", "move", "bob" };
+    static const char *names[WSW_LAYERS] = { "look", "move", "bob", "air", "idle" };
     log_info("viewmodel_sway_info: %s, total rot %.2f %.2f %.2f deg pos %.1f %.1f %.1f mm, sprint %.2f, bob amp %.2f phase %.2f", VS.on && VS.on->i ? "on" : "off",
              o->rot_deg.x, o->rot_deg.y, o->rot_deg.z, o->pos_offset.x * 1000, o->pos_offset.y * 1000, o->pos_offset.z * 1000, o->sprint_w, VS.st.bob_amt,
              VS.st.bob_phase);
+    log_info("viewmodel_sway_info:   idle w %.2f, ads %.2f, camera dip %.2f deg (applied %.2f), footstep %d, crouch %d%s", o->idle_w, o->ads, weapon_sway_camera_offset(&VS.st).x,
+             game_arms_camera_dip(), weapon_sway_footstep(&VS.st), VS.st.crouch_prev ? 1 : 0, o->clamped ? ", clamped" : "");
     for (int i = 0; i < WSW_LAYERS; i++)
         log_info("viewmodel_sway_info:   %-4s rot %.2f %.2f %.2f deg pos %.1f %.1f %.1f mm", names[i], o->layer_rot[i].x, o->layer_rot[i].y, o->layer_rot[i].z,
                  o->layer_pos[i].x * 1000, o->layer_pos[i].y * 1000, o->layer_pos[i].z * 1000);
@@ -216,8 +219,14 @@ static bool vms_frame(const CharsFpArms *fa, Player *p, float dt) {
     in.sprinting = m->sprinting != 0;
     in.ads_blend = saturate(fa->ads_w);
     in.is_mantle = m->mode == MOVE_MANTLE || m->mode == MOVE_VAULT;
+    in.holding_breath = p->sim.wpn.breath_holding != 0;
     in.bob_scale = 1.0f - saturate(fa->clip_w);   // a weapon's own run clip carries the gun: no second bob
     weapon_sway_update(&VS.st, &VS.cfg, &in, dt, &VS.out);
+    // The player's Weapon motion setting (accessibility): the whole output, 0 = still.
+    float us = VS.user_scale ? saturate(VS.user_scale->f) : 1.0f;
+    VS.out.rot_deg = v3_scale(VS.out.rot_deg, us);
+    VS.out.pos_offset = v3_scale(VS.out.pos_offset, us);
+    VS.out.rot_offset = quat_euler(VS.out.rot_deg.y * DG_DEG2RAD, VS.out.rot_deg.x * DG_DEG2RAD, VS.out.rot_deg.z * DG_DEG2RAD);
     if (VS.debug && VS.debug->i && (g_engine.frame_index % 30) == 0) vms_info();
     return true;
 }
@@ -269,15 +278,90 @@ void game_arms_init(void) {
     VS.on = cvar_reg_bool("cl_viewmodel_sway", true, CVAR_LOCKED,
                           "viewmodel sway (cosmetic, first person only): look lag, movement sway, walk / sprint bob and the sprint pose of the drawn weapon (assets/weapons/viewmodel_sway.json); 0 = the hold point's look lag + bob");
     VS.debug = cvar_reg_int("viewmodel_sway_debug", 0, 0, 1, CVAR_LOCKED, "1: log the viewmodel sway layers every 30 frames");
+    VS.user_scale = cvar_reg_float("cl_viewmodel_sway_scale", 1.0f, 0.0f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE,
+                                   "Weapon motion: how much the first-person weapon sways, bobs and settles (0 = still; cosmetic, accessibility)");
+    VS.land_cam = cvar_reg_bool("cl_viewmodel_land_camera", false, CVAR_LOCKED,
+                                "the viewmodel sway's camera dip on hard landings (x cl_move_shake; the picture only, never the aim)");
     cmd_register("viewmodel_sway_reload", cmd_vms_reload, "re-read assets/weapons/viewmodel_sway.json (the viewmodel sway config)");
     cmd_register("viewmodel_sway_info", cmd_vms_info, "print this frame's viewmodel sway: the total and each layer");
     VS.slot = -1;
     vms_load();
     arms_tuner_init();
+    vm_sway_tuner_init();
     game_arms_load();
 }
 
 float game_arms_hip_fov(void) { return camera_hands_fov(AL.def.weapon_fov); }
+
+// The viewmodel sway's landing dip for the first-person camera (deg, pitch up): off unless
+// cl_viewmodel_land_camera is on, and x the movement shake (cl_move_shake, 0 by default) and the
+// player's Weapon motion. The picture only: the aim stays the view angles.
+float game_arms_camera_dip(void) {
+    Cvar *ms = cvar_find("cl_move_shake");
+    if (!VS.on || !VS.on->i || !VS.land_cam || !VS.land_cam->i || !ms || ms->f <= 0.0f) return 0.0f;
+    float us = VS.user_scale ? saturate(VS.user_scale->f) : 1.0f;
+    return weapon_sway_camera_offset(&VS.st).x * saturate(ms->f) * us;
+}
+
+WeaponSwayConfig *game_vms_config(void) { return &VS.cfg; }
+const SwayOutput *game_vms_output(void) { return &VS.out; }
+const WeaponSwayState *game_vms_state(void) { return &VS.st; }
+const char *game_vms_item(void) { return AL.fa.item_id; }
+
+const char *game_vms_class(void) {
+    const WeaponDef *wd = G && G->world ? weapon_equipped_def(G->world, game_view_slot()) : NULL;
+    if (!wd || !AL.fa.item_id || strcmp(wd->id, AL.fa.item_id) || wd->fire.cls < 0) return NULL;
+    return fire_class_name(wd->fire.cls);
+}
+
+// The config one level up from `level` (0 "default", 1 the class, 2 the weapon): what a save at that
+// level is a difference against.
+static void vms_parent(int level, WeaponSwayConfig *out) {
+    weapon_sway_defaults(out);
+    if (!VS.root || level <= 0) return;
+    weapon_sway_parse(out, cJSON_GetObjectItemCaseSensitive(VS.root, "default"));
+    const char *cls = game_vms_class();
+    if (level >= 2 && cls) weapon_sway_parse(out, cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(VS.root, "classes"), cls));
+}
+
+// Writes the live config into the file at one level: "default", the held weapon's class or its item id
+// (only the values that differ from the level above; the block is replaced). Source tree + runtime copy.
+bool game_vms_save(int level, char *msg, int msg_size) {
+    if (!VS.root) VS.root = cJSON_CreateObject();
+    const char *cls = game_vms_class(), *item = AL.fa.item_id;
+    if ((level == 1 && !cls) || (level == 2 && !item)) { snprintf(msg, (size_t)msg_size, "nothing held at that level"); return false; }
+    WeaponSwayConfig parent;
+    vms_parent(level, &parent);
+    cJSON *diff = weapon_sway_diff_json(&VS.cfg, &parent);
+    const char *sec = level == 0 ? NULL : level == 1 ? "classes" : "weapons";
+    const char *key = level == 0 ? "default" : level == 1 ? cls : item;
+    cJSON *parent_obj = VS.root;
+    if (sec) {
+        parent_obj = cJSON_GetObjectItemCaseSensitive(VS.root, sec);
+        if (!parent_obj) parent_obj = cJSON_AddObjectToObject(VS.root, sec);
+    }
+    if (cJSON_GetObjectItemCaseSensitive(parent_obj, key)) cJSON_ReplaceItemInObjectCaseSensitive(parent_obj, key, diff);
+    else cJSON_AddItemToObject(parent_obj, key, diff);
+    char *txt = cJSON_Print(VS.root);
+    char path[600], rt[600];
+#ifdef DG_SOURCE_DIR
+    snprintf(path, sizeof(path), "%s/%s", DG_SOURCE_DIR, VMS_JSON);
+#else
+    platform_data_path(VMS_JSON, path, sizeof(path));
+#endif
+    snprintf(rt, sizeof(rt), "%s%s", platform_base_dir(), VMS_JSON);
+    bool ok = false;
+    FILE *f = fopen(path, "wb");
+    if (f) { fputs(txt, f); fputc('\n', f); fclose(f); ok = true; }
+    if (ok && strcmp(rt, path)) {
+        FILE *g = fopen(rt, "wb");
+        if (g) { fputs(txt, g); fputc('\n', g); fclose(g); }
+    }
+    cJSON_free(txt);
+    snprintf(msg, (size_t)msg_size, "%s %s (%s%s%s)", ok ? "saved" : "cannot write", path, sec ? sec : "default", sec ? " / " : "", sec ? key : "");
+    log_info("viewmodel sway: %s", msg);
+    return ok;
+}
 
 // The sprint's widening of the world FOV (camera.c: the hip FOV's tangent x (1 + cl_sprint_fov),
 // smoothed; cam->vm_fov_deg is that hip FOV) as a tangent ratio against Field of View, 1 otherwise.
@@ -345,6 +429,7 @@ void game_arms_frame(const RenderCamera *cam, vec2 aim_deg, float aim_pitch, flo
     in->vm_on = vms_frame(&fa, p, (float)g_engine.frame_dt);
     in->vm_pos = VS.out.pos_offset;
     in->vm_rot = VS.out.rot_deg;
+    in->vm_pivot = in->vm_on ? VS.out.pivot_offset : v3(0, 0, 0);
     in->screen_kick = screen_kick;
     // Weapon Field of View: sideways with the preset so the sight keeps its place (against Default).
     in->lateral_scale = fov_lateral_scale(game_arms_hip_fov(), camera_fov_v(AL.def.weapon_fov[WEAPON_FOV_DEFAULT]));
@@ -354,7 +439,7 @@ void game_arms_frame(const RenderCamera *cam, vec2 aim_deg, float aim_pitch, flo
     memset(&rl, 0, sizeof(rl));
     rl.valid = true;
     rl.view = AL.out.view;
-    rl.fov_deg = hands_fov(cam, AL.out.fov_add);
+    rl.fov_deg = hands_fov(cam, AL.out.fov_add) + (in->vm_on ? VS.out.fov_delta : 0.0f);
     rl.znear = AL.def.znear;
     rl.arm_cut = AL.def.arm_cut * AL.out.cam_w;   // aimed the camera is on the eye: nothing to cut, the hands stay whole
     rl.shoulder[0] = fa.shoulder[0];

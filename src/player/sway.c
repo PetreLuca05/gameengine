@@ -155,6 +155,7 @@ void sway_eval(SwayState *st, const SwayProfile *p, const SwayInput *in, SwayOut
     float sw = p->sway_rot * S;
     vec3 breath_rot = v3(dm_sinf(st->t * p->sway_freq * 2.0f * DG_PI) * sw * 0.6f + dm_sinf(st->t * 0.37f * 2.0f * DG_PI + 1.7f) * sw * 0.25f,
                          dm_sinf(st->t * p->sway_freq * DG_PI) * sw + dm_sinf(st->t * 0.23f * 2.0f * DG_PI + 0.4f) * sw * 0.2f, 0);
+    vec3 breath_base = breath_rot;   // the viewmodel sway's idle replaces this part on the drawn weapon; the wobble stays
     float wob = (in->wobble + st->shake * 0.8f) * S;
     breath_rot.x += (dm_sinf(st->t * 2.3f * 2.0f * DG_PI) * 0.5f + dm_sinf(st->t * 3.7f * 2.0f * DG_PI + 1.0f) * 0.35f) * wob;
     breath_rot.y += (dm_sinf(st->t * 2.9f * 2.0f * DG_PI + 0.5f) * 0.45f + dm_sinf(st->t * 4.3f * 2.0f * DG_PI + 2.1f) * 0.3f) * wob;
@@ -198,8 +199,10 @@ void sway_eval(SwayState *st, const SwayProfile *p, const SwayInput *in, SwayOut
     vec3 as_land = v3_add(land_rot, v3(-land_pos.y / lever * DG_RAD2DEG * 0.5f, 0, 0));
     float ads_k = optic * st->breath_s * stance * (1.0f + st->shake * 1.5f);
     out->ads_rot = v3_scale(v3_add(v3_add(v3_scale(as_breath, ma[0]), v3_scale(lag_rot, ma[1])), v3_add(v3_scale(as_bob, ma[2]), v3_scale(as_land, ma[3]))), ads_k);
-    // The look lag + bob share (src/player/weapon_sway.c draws its own in the arms layer instead).
-    out->lb_hip_rot = v3_scale(v3_add(v3_scale(lag_rot, mh[1] * gl), v3_scale(bob_rot, mh[2])), stance);
-    out->lb_hip_pos = v3_scale(v3_add(v3_scale(lag_pos, mh[1] * gl), v3_scale(bob_pos, mh[2])), stance);
-    out->lb_ads_rot = v3_scale(v3_add(v3_scale(lag_rot, ma[1]), v3_scale(as_bob, ma[2])), ads_k);
+    // The share src/player/weapon_sway.c draws its own of in the arms layer instead: the look lag, the
+    // bob, the breathing (not the low-health / after-sprint wobble) and the landing dip.
+    vec3 as_breath_base = v3_add(breath_base, v3(-breath_pos.y / lever * DG_RAD2DEG, 0, 0));
+    out->lb_hip_rot = v3_scale(v3_add(v3_add(v3_scale(lag_rot, mh[1] * gl), v3_scale(bob_rot, mh[2])), v3_add(v3_scale(breath_base, mh[0]), v3_scale(land_rot, mh[3]))), stance);
+    out->lb_hip_pos = v3_scale(v3_add(v3_add(v3_scale(lag_pos, mh[1] * gl), v3_scale(bob_pos, mh[2])), v3_add(v3_scale(breath_pos, mh[0]), v3_scale(land_pos, mh[3]))), stance);
+    out->lb_ads_rot = v3_scale(v3_add(v3_add(v3_scale(lag_rot, ma[1]), v3_scale(as_bob, ma[2])), v3_add(v3_scale(as_breath_base, ma[0]), v3_scale(as_land, ma[3]))), ads_k);
 }

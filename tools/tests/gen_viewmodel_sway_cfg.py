@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Writes tools/tests/viewmodel_sway.cfg (docs/FIRE_ANIM.md "Viewmodel sway"): the rifle in the dev
 room hall, with cl_viewmodel_sway 0 and then 1: at rest, mid-turn (150 deg/s right, one setang per
-frame), just after the turn stops (the overshoot), strafing right, walking forward, sprinting, and
-turning while aimed. Each capture logs viewmodel_sway_info and takes vms_<on|off>_<name>.png.
+frame), just after the turn stops (the overshoot), strafing right, walking forward, sprinting,
+turning while aimed, standing still (breathing), a 3 m drop (fall + landing), a jump, a crouch.
+Each capture logs viewmodel_sway_info and takes vms_<on|off>_<name>.png; the sequences (idle,
+drop, jump, crouch) log it every frame or every few frames.
 Run from build/bin:
   ./deadground --test --nosound --log vms.log --script ../../tools/tests/viewmodel_sway.cfg
   python ../../tools/tests/viewmodel_sway_check.py vms.log"""
@@ -26,6 +28,16 @@ def turn(lines, yaw0, frames, rate, pitch=0.0, capture_at=None, tag=None, name=N
             capture(lines, tag, name)
         lines.append("wait 1")
     return yaw
+
+
+def sequence(lines, tag, name, frames, every=1, shots=()):
+    lines.append(f"echo vms_capture {tag} {name}")
+    for i in range(frames):
+        if i % every == 0:
+            lines.append("viewmodel_sway_info")
+        if i in shots:
+            lines.append(f"screenshot vms_{tag}_{name}_{i}.png")
+        lines.append("wait 1")
 
 
 def block(lines, on):
@@ -66,6 +78,26 @@ def block(lines, on):
     turn(lines, 0.0, 14, 150.0, capture_at=11, tag=tag, name="ads_turn")
     lines.append("-aim")
     lines.append("wait 60")
+    # Standing still: the breathing (4 s, every 5 frames).
+    lines.append("setpos 0 0.05 22 0 0")
+    lines.append("wait 60")
+    sequence(lines, tag, "idle", 240, every=5, shots=(120,))
+    # A 3 m drop: the float while falling, the landing dip + its bounce.
+    lines.append("setpos 0 3.05 22 0 0")
+    sequence(lines, tag, "drop", 90, shots=(20, 52, 58))
+    lines.append("wait 30")
+    # A jump in place.
+    lines.append("+jump")
+    lines.append("wait 2")
+    lines.append("-jump")
+    sequence(lines, tag, "jump", 70, shots=(6,))
+    lines.append("wait 30")
+    # Crouch, then stand: the stance dips.
+    lines.append("+crouch")
+    sequence(lines, tag, "crouch", 40, shots=(6,))
+    lines.append("-crouch")
+    sequence(lines, tag, "stand", 40)
+    lines.append("wait 30")
 
 
 def main():

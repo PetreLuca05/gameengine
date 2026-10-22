@@ -477,6 +477,7 @@ static void tab_controls(GuiCursor *c) {
         }
     }
     row_toggle_cvar(c, "Invert Y", "cl_invert_y", NULL);
+    row_slider_cvar(c, "Weapon motion", "cl_viewmodel_sway_scale", 0, 1, 0.05f, "%.2f", "How much your weapon sways, bobs and settles in first person (0 = still).");
     section(c, "Gamepad");
     row_slider_cvar(c, "Gamepad sensitivity", "pad_sensitivity", 0.5f, 8, 0.1f, "%.1f", NULL);
     row_slider_cvar(c, "Gamepad deadzone", "pad_deadzone", 0, 0.5f, 0.01f, "%.2f", NULL);

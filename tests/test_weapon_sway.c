@@ -12,6 +12,7 @@
 #include "cJSON.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int g_checks, g_fails;
@@ -136,7 +137,7 @@ static void test_ads(void) {
         in.ads_blend = 1.0f;
         weapon_sway_update(&s1, &c, &in, dt, &o1);
     }
-    for (int l = 0; l < WSW_LAYERS; l++) {
+    for (int l = 0; l <= WSW_BOB; l++) {   // (air / idle: their own tests)
         float rr = vmax(o1.layer_rot[l]) / fmaxf(vmax(o0.layer_rot[l]), 1e-9f);
         float rp = vmax(o1.layer_pos[l]) / fmaxf(vmax(o0.layer_pos[l]), 1e-9f);
         printf("ads layer %d: rotation x%.3f (want %.2f), position x%.3f (want %.2f)\n", l, rr, c.ads_rot[l], rp, c.ads_pos[l]);
@@ -304,6 +305,357 @@ static void test_config(void) {
     CHECK(ok, "NaN / inf at dt 0 / 5");
 }
 
+
+// ------------------------------------------------------------------ air, idle, stance, ADS, weight, clamp
+
+// Jump at 1/6 s, airborne (rising, then falling), land hard at 5/6 s, crouch at 4/3 s, stand at 2 s,
+// still afterwards (idle): the events on frames that exist at 30, 60 and 144 Hz.
+static void scripted_air(float t, WeaponSwayInput *in, float dt) {
+    memset(in, 0, sizeof(*in));
+    (void)dt;
+    in->bob_scale = 1.0f;
+    bool air = t >= 1.0f / 6.0f && t < 5.0f / 6.0f;
+    in->grounded = !air;
+    if (air) in->velocity = v3(0, 5.0f - 12.0f * (t - 1.0f / 6.0f), 0);
+    in->just_jumped = false;
+    in->crouching = t >= 4.0f / 3.0f && t < 2.0f;
+}
+
+static void run_air(float hz, Sample out[SAMPLES]) {
+    WeaponSwayConfig c;
+    weapon_sway_defaults(&c);
+    WeaponSwayState s;
+    weapon_sway_reset(&s);
+    int n = (int)lrintf(hz * 3.0f), per = (int)lrintf(hz / 6.0f), k = 0;
+    float dt = 1.0f / hz;
+    bool was_ground = true;
+    for (int i = 0; i < n; i++) {
+        WeaponSwayInput in;
+        scripted_air((float)i * dt, &in, dt);
+        in.just_jumped = was_ground && !in.grounded;
+        in.just_landed = !was_ground && in.grounded;
+        in.land_impact_speed = 7.0f;
+        was_ground = in.grounded;
+        SwayOutput o;
+        weapon_sway_update(&s, &c, &in, dt, &o);
+        if ((i + 1) % per == 0 && k < SAMPLES) out[k++] = (Sample){ o.rot_deg, o.pos_offset };
+    }
+}
+
+static void test_air_rate_independence(void) {
+    Sample a[SAMPLES], b[SAMPLES], d[SAMPLES];
+    run_air(60.0f, a);
+    run_air(30.0f, b);
+    run_air(144.0f, d);
+    float worst_r = 0, worst_p = 0;
+    for (int i = 0; i < SAMPLES; i++) {
+        worst_r = fmaxf(worst_r, fmaxf(vmax(v3_sub(a[i].rot, b[i].rot)), vmax(v3_sub(a[i].rot, d[i].rot))));
+        worst_p = fmaxf(worst_p, fmaxf(vmax(v3_sub(a[i].pos, b[i].pos)), vmax(v3_sub(a[i].pos, d[i].pos))));
+    }
+    printf("air / stance / idle at 30 / 60 / 144 Hz: worst %.3f deg, %.2f mm\n", worst_r, worst_p * 1000.0f);
+    CHECK(worst_r < 0.4f, "air rotation differs by %.3f deg", worst_r);
+    CHECK(worst_p < 0.0015f, "air position differs by %.2f mm", worst_p * 1000.0f);
+}
+
+typedef struct LandResult { float dip, pitch, bounce, bounce2, cam; } LandResult;
+
+// Stand still, land with this impact (crouched or not), record the dip / pitch / bounces / camera dip.
+static LandResult land(float impact, bool crouched, const WeaponSwayConfig *c) {
+    WeaponSwayState s;
+    weapon_sway_reset(&s);
+    float dt = 1.0f / 60.0f;
+    LandResult r = { 0 };
+    int phase = 0;   // 0 the dip, 1 the bounce (up), 2 the second swing (down)
+    for (int i = 0; i < 180; i++) {
+        WeaponSwayInput in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.crouching = crouched;
+        in.just_landed = i == 30;
+        in.land_impact_speed = -impact;
+        SwayOutput o;
+        weapon_sway_update(&s, c, &in, dt, &o);
+        float y = o.layer_pos[WSW_AIR].y;
+        r.dip = fminf(r.dip, y);
+        r.pitch = fminf(r.pitch, o.layer_rot[WSW_AIR].x);
+        r.cam = fminf(r.cam, weapon_sway_camera_offset(&s).x);
+        if (i > 30) {
+            if (phase == 0 && y > 0.0f) phase = 1;
+            if (phase == 1) r.bounce = fmaxf(r.bounce, y);
+            if (phase == 1 && y < 0.0f) phase = 2;
+            if (phase == 2) r.bounce2 = fmaxf(r.bounce2, -y);
+        }
+    }
+    return r;
+}
+
+static void test_land(void) {
+    WeaponSwayConfig c;
+    weapon_sway_defaults(&c);
+    c.layer_on[WSW_IDLE] = false;   // the dips alone
+    LandResult soft = land(3.0f, false, &c), hard = land(10.0f, false, &c), crouch = land(10.0f, true, &c);
+    printf("land: soft %.1f mm, hard %.1f mm %.1f deg (bounce %.1f, then %.1f mm), crouched %.1f mm, camera %.2f deg\n", soft.dip * 1000, hard.dip * 1000, hard.pitch,
+           hard.bounce * 1000, hard.bounce2 * 1000, crouch.dip * 1000, hard.cam);
+    CHECK(hard.dip < -0.03f && hard.dip > -0.06f, "hard landing dips 3..6 cm (%.1f mm)", hard.dip * 1000);
+    CHECK(hard.pitch < -5.0f && hard.pitch > -10.0f, "hard landing pitches 5..10 deg (%.2f)", hard.pitch);
+    CHECK(soft.dip > hard.dip * 0.15f, "a soft landing barely registers (%.1f of %.1f mm)", soft.dip * 1000, hard.dip * 1000);
+    CHECK(fabsf(crouch.dip / hard.dip - c.land_crouch) < 0.05f, "crouched x%.2f (want %.2f)", crouch.dip / hard.dip, c.land_crouch);
+    CHECK(hard.bounce > -hard.dip * 0.08f, "it bounces once (%.1f mm)", hard.bounce * 1000);
+    CHECK(hard.bounce2 < -hard.dip * 0.05f, "only once (second swing %.1f mm)", hard.bounce2 * 1000);
+    CHECK(hard.cam < -0.5f && hard.cam > -3.0f, "camera dip %.2f deg", hard.cam);
+    WeaponSwayConfig nc = c;
+    nc.cam_land_pitch = 0.0f;
+    CHECK(land(10.0f, false, &nc).cam == 0.0f, "no camera dip without cam_land_pitch");
+    CHECK(soft.cam == 0.0f || soft.cam > hard.cam * 0.2f, "soft landing: camera %.3f", soft.cam);
+}
+
+static void test_jump_air(void) {
+    WeaponSwayConfig c;
+    weapon_sway_defaults(&c);
+    WeaponSwayState s;
+    weapon_sway_reset(&s);
+    float dt = 1.0f / 60.0f, dip = 0, nose = 0, floatup = 0;
+    for (int i = 0; i < 90; i++) {
+        WeaponSwayInput in;
+        memset(&in, 0, sizeof(in));
+        in.just_jumped = i == 0;
+        in.grounded = false;
+        in.velocity = v3(0, i < 20 ? 4.0f : -9.0f, 0);   // up, then falling fast
+        SwayOutput o;
+        weapon_sway_update(&s, &c, &in, dt, &o);
+        if (i < 20) { dip = fminf(dip, o.layer_pos[WSW_AIR].y); nose = fmaxf(nose, o.layer_rot[WSW_AIR].x); }
+        else floatup = o.layer_pos[WSW_AIR].y;
+    }
+    printf("jump: dip %.1f mm, nose up %.2f deg; falling: %.1f mm up\n", dip * 1000, nose, floatup * 1000);
+    CHECK(dip < -0.005f, "the jump dips the gun (%.1f mm)", dip * 1000);
+    CHECK(nose > 1.0f, "nose up %.2f", nose);
+    CHECK(floatup > 0.01f && floatup <= c.air_max_pos + 1e-4f, "falling: floats up %.1f mm (clamp %.1f)", floatup * 1000, c.air_max_pos * 1000);
+}
+
+static void test_stance(void) {
+    WeaponSwayConfig c;
+    weapon_sway_defaults(&c);
+    WeaponSwayState s;
+    weapon_sway_reset(&s);
+    float dt = 1.0f / 60.0f, down = 0, up = 0;
+    for (int i = 0; i < 120; i++) {
+        WeaponSwayInput in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.crouching = i >= 10 && i < 60;
+        SwayOutput o;
+        weapon_sway_update(&s, &c, &in, dt, &o);
+        if (i < 60) down = fminf(down, o.layer_pos[WSW_AIR].y);
+        else up = fmaxf(up, o.layer_pos[WSW_AIR].y);
+    }
+    printf("stance: crouch dip %.1f mm, stand lift %.1f mm\n", down * 1000, up * 1000);
+    CHECK(down < -0.005f, "crouching dips the gun (%.1f mm)", down * 1000);
+    CHECK(up > 0.002f && up < -down, "standing lifts it less (%.1f mm)", up * 1000);
+    CHECK(fabsf(s.air_pos.x.y) < 1e-4f, "settled (%.3f mm)", s.air_pos.x.y * 1000);
+}
+
+static float idle_peak(const WeaponSwayConfig *c, float ads, bool breath, bool crouch) {
+    WeaponSwayState s;
+    weapon_sway_reset(&s);
+    float dt = 1.0f / 60.0f, peak = 0;
+    for (int i = 0; i < 600; i++) {
+        WeaponSwayInput in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.ads_blend = ads;
+        in.holding_breath = breath;
+        in.crouching = crouch;
+        SwayOutput o;
+        weapon_sway_update(&s, c, &in, dt, &o);
+        if (i > 120) peak = fmaxf(peak, vmax(o.layer_rot[WSW_IDLE]));
+    }
+    return peak;
+}
+
+static void test_idle(void) {
+    WeaponSwayConfig c;
+    weapon_sway_defaults(&c);
+    float hip = idle_peak(&c, 0.0f, false, false), ads = idle_peak(&c, 1.0f, false, false), held = idle_peak(&c, 1.0f, true, false), cr = idle_peak(&c, 0.0f, false, true);
+    printf("idle: hip %.2f deg, ADS %.2f, holding the breath %.3f, crouched %.2f\n", hip, ads, held, cr);
+    CHECK(hip > 0.25f && hip < 0.7f, "hip breathing %.2f deg", hip);
+    CHECK(ads > 0.05f && ads < 0.2f, "ADS breathing %.2f deg", ads);
+    CHECK(held < ads * 0.2f, "holding the breath %.3f", held);
+    CHECK(fabsf(cr / hip - c.idle_crouch) < 0.15f, "crouched x%.2f", cr / hip);
+    // Not periodic at f1: the same phase one period later differs (the second sine + the noise).
+    WeaponSwayState s;
+    weapon_sway_reset(&s);
+    float dt = 1.0f / 60.0f, rec[600];
+    for (int i = 0; i < 600; i++) {
+        WeaponSwayInput in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        SwayOutput o;
+        weapon_sway_update(&s, &c, &in, dt, &o);
+        rec[i] = o.layer_rot[WSW_IDLE].x;
+    }
+    int per = (int)lrintf(60.0f / c.idle_f1);
+    float diff = 0;
+    for (int i = 60; i + per < 600; i++) diff = fmaxf(diff, fabsf(rec[i] - rec[i + per]));
+    CHECK(diff > 0.05f, "breathing repeats at f1 (%.3f)", diff);
+    // Fades: moving -> out over fade_out, still -> in over fade_in.
+    weapon_sway_reset(&s);
+    float t_out = -1, t_in = -1;
+    for (int i = 0; i < 240; i++) {
+        WeaponSwayInput in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        bool moving = i >= 60 && i < 120;
+        in.speed = moving ? 2.0f : 0.0f;
+        in.velocity_local = v3(0, 0, in.speed);
+        SwayOutput o;
+        weapon_sway_update(&s, &c, &in, dt, &o);
+        if (moving && t_out < 0 && o.idle_w <= 0.0f) t_out = (float)(i - 59) * dt;
+        if (i >= 120 && t_in < 0 && o.idle_w >= 1.0f) t_in = (float)(i - 119) * dt;
+    }
+    printf("idle fades: out %.3f s, in %.3f s\n", t_out, t_in);
+    CHECK(fabsf(t_out - c.idle_fade_out) <= 1.5f * dt, "fade out %.3f s", t_out);
+    CHECK(fabsf(t_in - c.idle_fade_in) <= 1.5f * dt, "fade in %.3f s", t_in);
+}
+
+static void test_ads_transition(void) {
+    WeaponSwayConfig c;
+    weapon_sway_defaults(&c);
+    c.layer_on[WSW_IDLE] = false;
+    WeaponSwayState s;
+    weapon_sway_reset(&s);
+    float dt = 1.0f / 60.0f, peak = 0, end = 0;
+    for (int i = 0; i < 120; i++) {
+        WeaponSwayInput in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.ads_blend = clampf((float)(i - 10) / 15.0f, 0.0f, 1.0f);   // in over 0.25 s
+        SwayOutput o;
+        weapon_sway_update(&s, &c, &in, dt, &o);
+        peak = fmaxf(peak, fabsf(o.layer_rot[WSW_LOOK].x));
+        end = fabsf(o.layer_rot[WSW_LOOK].x);
+        if (i == 17) CHECK(o.ads < in.ads_blend && o.ads > 0.0f, "the ADS weight is eased (%.3f of %.3f)", o.ads, in.ads_blend);
+    }
+    printf("ADS settle: peak %.3f deg, settled %.4f\n", peak, end);
+    CHECK(peak > 0.05f && peak < 1.5f, "the transition settles into the sight (%.3f deg)", peak);
+    CHECK(end < 0.005f, "settled %.4f", end);
+    // fov_delta: 0 by default, x ads when set.
+    WeaponSwayInput in;
+    memset(&in, 0, sizeof(in));
+    in.ads_blend = 1.0f;
+    SwayOutput o;
+    weapon_sway_update(&s, &c, &in, dt, &o);
+    CHECK(o.fov_delta == 0.0f, "no FOV change by default");
+    c.ads_fov_delta = -3.0f;
+    weapon_sway_update(&s, &c, &in, dt, &o);
+    CHECK(fabsf(o.fov_delta + 3.0f) < 1e-5f, "fov_delta %.2f", o.fov_delta);
+}
+
+static float look_peak(float weight, int *settle) {
+    WeaponSwayConfig c;
+    weapon_sway_defaults(&c);
+    c.weight = weight;
+    c.layer_on[WSW_IDLE] = false;
+    WeaponSwayState s;
+    weapon_sway_reset(&s);
+    float dt = 1.0f / 60.0f, peak = 0;
+    *settle = -1;
+    for (int i = 0; i < 120; i++) {
+        WeaponSwayInput in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.mouse_dx = i < 20 ? 90.0f * dt : 0.0f;
+        SwayOutput o;
+        weapon_sway_update(&s, &c, &in, dt, &o);
+        peak = fmaxf(peak, fabsf(o.layer_rot[WSW_LOOK].y));
+        if (i > 20 && *settle < 0 && vmax(o.layer_rot[WSW_LOOK]) < 0.02f) *settle = i - 20;
+    }
+    return peak;
+}
+
+static void test_weight(void) {
+    WeaponSwayConfig c, e;
+    weapon_sway_defaults(&c);
+    weapon_sway_weighted(&c, &e);
+    CHECK(e.look_k == c.look_k && e.look_yaw == c.look_yaw && e.idle_rot == c.idle_rot, "weight 0.5 is the config as written");
+    int s_light, s_heavy;
+    float light = look_peak(0.0f, &s_light), heavy = look_peak(1.0f, &s_heavy);
+    printf("weight: light %.2f deg (settles %d frames), heavy %.2f deg (%d frames)\n", light, s_light, heavy, s_heavy);
+    CHECK(heavy > light * 1.3f, "heavy lags more (%.2f vs %.2f)", heavy, light);
+    CHECK(s_heavy > s_light, "heavy settles slower (%d vs %d)", s_heavy, s_light);
+}
+
+static void test_clamp_and_steps(void) {
+    WeaponSwayConfig c;
+    weapon_sway_defaults(&c);
+    c.max_rot = v3(1.0f, 1.0f, 1.0f);
+    c.max_pos = v3(0.005f, 0.005f, 0.005f);
+    WeaponSwayState s;
+    weapon_sway_reset(&s);
+    float dt = 1.0f / 60.0f;
+    bool clamped = false, inside = true;
+    for (int i = 0; i < 60; i++) {
+        WeaponSwayInput in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.sprinting = true;
+        in.bob_scale = 1.0f;
+        in.mouse_dx = 400.0f * dt;
+        in.speed = 7.0f;
+        in.velocity_local = v3(3.0f, 0, 6.0f);
+        SwayOutput o;
+        weapon_sway_update(&s, &c, &in, dt, &o);
+        clamped |= o.clamped;
+        inside &= vmax(o.rot_deg) <= 1.0f + 1e-5f && vmax(o.pos_offset) <= 0.005f + 1e-6f;
+    }
+    CHECK(clamped && inside, "the final clamp holds (clamped %d)", clamped);
+    // Footsteps: alternate, two per bob cycle.
+    weapon_sway_defaults(&c);
+    weapon_sway_reset(&s);
+    int steps = 0, last = 0;
+    bool alt = true;
+    float dist = 0;
+    for (int i = 0; i < 300; i++) {
+        WeaponSwayInput in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.bob_scale = 1.0f;
+        in.speed = 4.2f;
+        SwayOutput o;
+        weapon_sway_update(&s, &c, &in, dt, &o);
+        dist += in.speed * dt;
+        int st = weapon_sway_footstep(&s);
+        if (st) {
+            if (last && st == last) alt = false;
+            last = st;
+            steps++;
+        }
+    }
+    int want = (int)floorf(dist * c.bob_freq * 2.0f + 0.25f);
+    printf("footsteps: %d over %.1f m (want ~%d), alternating %d\n", steps, dist, want, alt);
+    CHECK(abs(steps - want) <= 1 && alt, "footsteps %d (want %d), alternating %d", steps, want, alt);
+}
+
+static void test_diff_json(void) {
+    WeaponSwayConfig base, c, back;
+    weapon_sway_defaults(&base);
+    c = base;
+    c.look_k = 222.0f;
+    c.sprint_rot.y = 31.0f;
+    c.ads_rot[WSW_IDLE] = 0.5f;
+    c.layer_on[WSW_BOB] = false;
+    c.weight = 0.8f;
+    cJSON *j = weapon_sway_diff_json(&c, &base);
+    char *txt = cJSON_PrintUnformatted(j);
+    printf("diff: %s\n", txt);
+    int n = cJSON_GetArraySize(j);
+    CHECK(n == 5, "only the changed sections (%d)", n);
+    back = base;
+    weapon_sway_parse(&back, j);
+    CHECK(memcmp(&back, &c, sizeof(c)) == 0, "the diff parses back to the same config");
+    cJSON_free(txt);
+    cJSON_Delete(j);
+}
+
 int main(void) {
     test_rate_independence();
     test_look();
@@ -312,6 +664,15 @@ int main(void) {
     test_bob();
     test_sprint_pose();
     test_config();
+    test_air_rate_independence();
+    test_land();
+    test_jump_air();
+    test_stance();
+    test_idle();
+    test_ads_transition();
+    test_weight();
+    test_clamp_and_steps();
+    test_diff_json();
     printf("weapon_sway: %d checks, %d failures\n", g_checks, g_fails);
     return g_fails ? 1 : 0;
 }
