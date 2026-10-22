@@ -8,6 +8,7 @@
 #include "vk_mem_alloc.h"
 #include "render.h"
 #include "render/shadow_csm.h"
+#include "render/dynres.h"
 #include "core/engine.h"
 #include "core/log.h"
 #include "core/cvar.h"
@@ -520,6 +521,11 @@ typedef struct Renderer {
     float exposure_boost;
     u32 aniso_mod, texq_mod;
     float mip_bias;                     // the material samplers' mipLodBias (vkr_material_mip_bias, PF-0029)
+    // Dynamic resolution (dynres.h, docs/RENDERING_POST.md "Dynamic resolution")
+    Cvar *r_dynres, *r_dynres_fps, *r_dynres_min;
+    DynresState dynres;
+    float dynres_nominal;               // the render scale without dynamic resolution, at the last target change
+    int dynres_trim;                    // frames until the old render-size frame graph images are dropped
     bool texq_retry;            // world textures still uploading when the quality went down: trim next frame
     bool tex_reload;            // the quality went up: world textures want their source again (assets_reload_textures)
 } Renderer;

@@ -132,10 +132,19 @@ vec2 post_jitter_pixels(u32 frame) {
     return v2(post_halton(i, 2) - 0.5f, post_halton(i, 3) - 0.5f);
 }
 
-float post_render_scale(void) {
+float post_nominal_render_scale(void) {
     if (!P.ok) return 1.0f;
     float s = P.set.upscaler == POST_UP_OFF ? 1.0f : clampf(P.set.render_scale, 0.5f, 1.0f);
     return s;
+}
+// Dynamic resolution (render.c dynres_frame): the controller's share, below the player's own.
+static float g_dynamic_scale;
+void post_set_dynamic_scale(float s) { g_dynamic_scale = s; }
+float post_dynamic_scale(void) { return g_dynamic_scale; }
+bool post_temporal_upscaler(void) { return P.ok && !P.set.direct_output && (P.set.upscaler == POST_UP_TAAU || fsr2_on(&P.set)); }
+float post_render_scale(void) {
+    float s = post_nominal_render_scale();
+    return g_dynamic_scale > 0.0f && post_temporal_upscaler() ? fminf(s, g_dynamic_scale) : s;
 }
 
 VkSampler post_linear_sampler(void) { return P.linear; }

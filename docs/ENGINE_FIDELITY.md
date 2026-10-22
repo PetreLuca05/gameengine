@@ -55,6 +55,7 @@ era preset (`r_era`): `era x3` = three times the era's own error threshold, also
 | `aa` | - | 1, max 1 | 3, max 3 | 3, max 3 | 3, max 3 |
 | `upscaler` | - | off, {0,2} | 1, {0,1,2,3} | 1, {0,1,2,3,4} | off, {0,1,2,3,4} |
 | `upscale_ratio` | 0.67 | 0.67 | 0.75 | 0.75 | 0.67 |
+| `dynres` | - | - | off | off | off |
 | `render_scale` | 0.6, max 0.66, min 0.5 | 0.66, max 1, min 0.5 | 1, max 1, min 0.5 | 1, max 1.5, min 0.5 | 1, max 2 |
 | `sharpen` | - | off, max 1 | 0.35 | 0.35 | 0.35 |
 | `ao` | - | - | 1, max 1 | 2, max 2 | 2, max 2 |
@@ -143,7 +144,7 @@ Budgets (1080p, mid-range GPU): Off 3 ms, Low 5 ms, Medium 8 ms, High 12 ms, Mod
 |---|---|---|---|---|
 | aa | `r_aa` (0 off, 1 FXAA, 2 SMAA, 3 TAA) | | shadows / shadow_resolution | `r_shadows` / `r_shadow_resolution` (512 .. 4096 per cascade; docs/SHADOWS_UNITY_MODEL.md) |
 | upscaler | `r_upscaler` (0 off, 1 TAA-U, 2 FSR 1, 3 FSR 2, 4 DLSS slot: FSR 2) | | shadow_cascades / shadow_projection | `r_shadow_cascades` (1 / 2 / 4) / `r_shadow_projection` |
-| upscale_ratio | `r_upscale_ratio` | | shadow_distance | `r_shadow_max_distance` (m) |
+| upscale_ratio / dynres | `r_upscale_ratio` / `r_dynres` (docs/RENDERING_POST.md "Dynamic resolution") | | shadow_distance | `r_shadow_max_distance` (m) |
 | render_scale | `r_render_scale` | | soft_shadow_quality | `r_soft_shadow_quality` (tent 3 / 5 / 7, 3 Ultra = PCSS) |
 | sharpen | `r_sharpen` | | shadow_min_radius / shadow_caster_limit / shadow_far_interval | `r_shadow_min_radius` (m) / `r_shadow_caster_limit` (grass / small plant shadow cascades) / `r_shadow_far_interval` |
 | ao / contact_shadows | `r_ao` / `r_contact_shadows` | | light_shadows / _quality | `r_light_shadows` / `r_light_shadow_quality` |

@@ -82,7 +82,7 @@ static struct {
     char out[192], fix[16];
     vec3 center;
     // restored after the run
-    char saved_fix[128], saved_fps[32], saved_maxfps[32], saved_vsync[32], saved_level[32];
+    char saved_fix[128], saved_fps[32], saved_maxfps[32], saved_vsync[32], saved_level[32], saved_dynres[32];
     // gameplay state hash per captured frame (verify)
     SnapFrame snap;
     u32 *hash;
@@ -357,6 +357,7 @@ static void run_finish(void) {
     restore_cvar("r_maxfps", PF.saved_maxfps);
     restore_cvar("r_vsync", PF.saved_vsync);
     restore_cvar("r_fidelity", PF.saved_level);
+    restore_cvar("r_dynres", PF.saved_dynres);
     render_set_ui_hidden(false);
     if (PF.bench_ft) {
         bench_report();
@@ -393,7 +394,9 @@ static bool run_begin(bool verify, const char *out) {
     save_cvar("r_maxfps", PF.saved_maxfps, sizeof(PF.saved_maxfps));
     save_cvar("r_vsync", PF.saved_vsync, sizeof(PF.saved_vsync));
     save_cvar("r_fidelity", PF.saved_level, sizeof(PF.saved_level));
+    save_cvar("r_dynres", PF.saved_dynres, sizeof(PF.saved_dynres));
     if (!PF.realtime) dev_set("dev_fixed_fps", "60");
+    if (cvar_find("r_dynres")) cvar_set("r_dynres", "0");   // the resolution stays the level's (comparable runs)
     PF.loaded_map[0] = 0;
     char cap[16];
     snprintf(cap, sizeof(cap), "%d", PF.cap);

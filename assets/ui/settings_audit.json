@@ -1555,6 +1555,12 @@
    "reason": "Visibility: changes what you can see relative to other players. Impostor switch size decides when trees / small cover turn into cards: classic trees 64 px vs small cover 16 px, tiers 96 .. 16 px (V2); one value for every level.",
    "category": "rendering"
   },
+  "r_classic_zprepass": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "An A/B of the classic prepass order for the target GPU (PF-0052): the same image either way, cost only; dev builds.",
+   "category": "rendering"
+  },
   "r_cloud_shadows": {
    "class": "LOCKED",
    "ui": "—",
@@ -1607,6 +1613,24 @@
    "class": "LOCKED",
    "ui": "—",
    "reason": "Visibility: changes what you can see relative to other players. Wireframe / hitboxes / collision / CPU skinning / third person: wallhack-class views, dev only.",
+   "category": "rendering"
+  },
+  "r_dynres": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Display",
+   "reason": "Dynamic resolution: the upscaler's share of the display follows the GPU time (TAA-U / FSR 2), within the level's bounds. Fewer pixels look softer but never remove objects.",
+   "category": "rendering"
+  },
+  "r_dynres_fps": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Display",
+   "reason": "Dynamic resolution's frame-rate target: personal; no effect on what is drawn.",
+   "category": "rendering"
+  },
+  "r_dynres_min": {
+   "class": "EDITABLE",
+   "ui": "console",
+   "reason": "The lowest share dynamic resolution renders: softer at worst, nothing hidden.",
    "category": "rendering"
   },
   "r_era": {

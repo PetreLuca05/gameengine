@@ -37,7 +37,8 @@ static void exec_taa(VkCommandBuffer cmd, void *u) {
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
     struct { float p[16]; u32 u[16]; } pc;
     memset(&pc, 0, sizeof(pc));
-    pc.u[0] = (fg_history_valid(A.hist_in) && fg_history_valid(P.depth_prev)) ? 1u : 0u;
+    pc.u[0] = fg_history_valid(A.hist_in) ? 1u : 0u;
+    pc.u[1] = fg_history_valid(P.depth_prev) ? 1u : 0u;   // render-size: new after a dynamic resolution step
     post_push_constants(cmd, &pc, 128);
     u32 w, h;
     fg_extent(A.hist_out, &w, &h);

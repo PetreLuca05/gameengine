@@ -162,6 +162,29 @@ container (dev room, High, 0.67 of 1600×900): a still image scores like TAA-U a
 34.9 vs 35.0 dB, gradient energy 4.35 vs 4.34); in a camera pan the zombies stay visibly crisper than with
 TAA-U. Its GPU cost on the target GPU is not measured yet (on an RTX 3060 Ti AMD quotes ~1 ms at 1440p).
 
+## Dynamic resolution
+
+`r_dynres 1` (Settings → Graphics → Display, under the upscaler; the `dynres` Engine Fidelity feature,
+available from Medium) lowers the share of the display a temporal upscaler (TAA-U, FSR 2) renders
+while the GPU frame runs over the target, and raises it back to the player's `r_upscale_ratio` when
+there is room. The target is `r_dynres_fps`, or the frame rate limit (`r_maxfps`), or the display's
+refresh rate. The share never goes below `r_dynres_min` (0.5).
+
+The controller (`src/render/dynres.c`, pure; tests/test_dynres.c) smooths the last completed GPU frame
+time (`render_gpu_frame_ms`, ~0.25 s), lowers the share when it stays above 95 % of the budget for
+0.4 s and raises it when it stays below 75 % for 2 s. It aims the load at 85 % of the budget (the pixel
+count goes with the square of the share), moves in 0.05 steps (at most two up at a time) and holds
+for 1.5 s after each change.
+
+A change re-creates the scene targets (HDR, depth, viewmodel depth) after a device wait: a short stall,
+which is why the controller changes rarely. Nothing else starts over: the pipelines stay, the frame
+graph keeps its display-size histories and drops the old render-size images two frames later
+(`fg_trim`), TAA-U keeps its history (the disocclusion test skips the one frame without a depth
+history), FSR 2 keeps its accumulation and clears only its two render-size images, and the material
+mip bias follows the player's share, not the dynamic one (no sampler rebuild). The proper alternative,
+render targets at the maximum size with the frame drawn into a sub-rectangle, needs every post shader
+to scale its UVs and screen positions by the used share; not done.
+
 ## HDR10
 
 `r_hdr_output 1` picks an `HDR10_ST2084` swapchain (A2B10G10R10) when the display offers one

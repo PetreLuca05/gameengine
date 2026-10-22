@@ -3,6 +3,7 @@
 #include "core/profiler.h"
 #include "vgeo/vgeo_tex.h"
 #include "tex_compress.h"
+#include "post/post.h"
 #include <stdlib.h>
 #include <math.h>
 
@@ -188,7 +189,8 @@ float vkr_material_mip_bias(void) {
     if (!up) up = cvar_find("r_upscaler");
     // temporal resolves only: TAA, TAA-U, FSR 2 (r_upscaler 4, DLSS, runs FSR 2)
     bool temporal = (aa && aa->i == 3) || (up && (up->i == 1 || up->i == 3 || up->i == 4));
-    float ratio = (float)R->hdr.w / (float)R->swap_extent.width;
+    float ratio = post_dynamic_scale() > 0.0f ? clampf(R->r_render_scale->f * post_nominal_render_scale(), 0.25f, 2.0f)   // dynamic resolution: the player's share
+                                              : (float)R->hdr.w / (float)R->swap_extent.width;
     if (!temporal || ratio >= 0.999f) return 0.0f;
     return fmaxf(log2f(ratio), -1.0f);
 }

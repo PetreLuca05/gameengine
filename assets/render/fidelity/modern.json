@@ -8,6 +8,7 @@
     "aa": {"avail": "on", "default": 3, "max": 3},
     "upscaler": {"avail": "off", "allowed": [0, 1, 2, 3, 4]},
     "upscale_ratio": {"avail": "on", "default": 0.67},
+    "dynres": {"avail": "off"},
     "render_scale": {"avail": "on", "default": 1.0, "max": 2.0},
     "sharpen": {"avail": "on", "default": 0.35},
     "ao": {"avail": "on", "default": 2, "max": 2},

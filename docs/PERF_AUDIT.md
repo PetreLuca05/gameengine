@@ -358,6 +358,9 @@ numbers are what an optimization is judged by. Other machines compare only again
   - The scenes share one map load.
   - Each settle lasts at least 3 s, so streaming catches up after a move across the map.
   - The camera path is indexed by frame, so every run renders the same views whatever its fps.
+  - Dynamic resolution (`r_dynres`) is held off while it runs (as by `perf_audit`): the render size is the
+    settings' own, so runs compare. A setting to A/B (an upscaler, `r_classic_zprepass`, ...) is set
+    before `perf_bench levels=current`.
 - **Output:**
   - Per scene and over the whole tour: average fps, 1 % low (the fps of the 99th percentile frame
     time), frame / CPU work / GPU p50 and p99, GPU or CPU bound, and the 300 fps verdict
@@ -420,6 +423,39 @@ numbers that decided it, so they are not re-investigated from scratch:
   during the physics step; capping it buys little in the foliage scenes.
 - **Post merges** (sky + fog_apply, a single-pass downsampler for bloom / exposure): ~0.05 - 0.1 ms each
   at 1600 x 900 for shader surgery; motion blur already copies still pixels.
+
+The second round (the suggestions of 2026-10-22: far cascade resolution / caching PF-0049 / PF-0050, FSR 2,
+dynamic resolution, PF-0051, PF-0052) left these out:
+
+- **DLSS.** NVIDIA's DLSS SDK (github.com/NVIDIA/DLSS, NGX) may not be redistributed as source or as a
+  stand-alone part (its licence, sections 1c / 4b): its headers and libraries cannot live in this
+  repository, only in a local copy each developer downloads, and it runs only on an NVIDIA GPU (none in the
+  Linux container, so an integration could not be run there). Its inputs are the ones `fsr2_prep`
+  already makes (colour, depth with the viewmodel, motion vectors, exposure, reactive mask): the work is
+  an NGX init with the extensions it asks for, a feature per render size and an evaluate in place of
+  `post_fsr2_build` behind `r_upscaler 4`. Until then the slot runs FSR 2.
+- **FSR 3 frame generation.** It presents an interpolated frame between two rendered ones (optical flow,
+  its own swapchain and pacing thread, the UI composited apart): the displayed rate roughly doubles, the
+  rendered rate and the input latency do not improve (about one frame more). The FidelityFX SDK that has
+  it builds with Visual Studio and its own shader compiler. Not real 300 fps.
+- **Mesh shaders** (VK_EXT_mesh_shader: RTX 3060 Ti and lavapipe have it). A second classic path: the
+  vgeo builder's clusters as meshlets, a task shader culling them per view and per cascade, the wind in
+  the mesh shader. The win is in the cascades (half a crown outside a tile still costs the whole crown
+  today), which PF-0049 / PF-0050 already cut to the near ones and the cache refreshes. Weeks, a whole
+  renderer path.
+- **Visibility buffer for foliage.** The large version of PF-0052: if the depth prepass wins on the target
+  GPU, a visibility buffer (depth + instance / triangle id, one compute shading per pixel) wins more; if it
+  does not, the G-buffer pass is not fragment bound there. Measure PF-0052 first.
+- **Render thread / parallel command recording.** In the foliage scenes at Modern on the RTX 3060 Ti the
+  main thread records for `render:frame_graph` 0.4 - 0.6 ms + `render:record_pre` 0.3 ms +
+  `render_end` 0.2 ms (audit 2026-10-18). A render thread would take that off the main thread but needs
+  the renderer's per-frame lists (draw items, skinned draws, lights, UI) double-buffered and every
+  renderer state the console / settings change made thread-safe; secondary command buffers per cascade
+  need every draw of a dynamic rendering in secondaries (skinned and raster casters too) and the GPU
+  scope counters per thread. ~0.5 - 1 ms at best, high risk: after the measured GPU-side items.
+- **Shadow-only tree crowns.** Content work (a coarse card set per species for cascades 1+, a visible
+  change of the far dapple); with the far cascades cached (PF-0050) only cascade 1 and the cache
+  refreshes would gain.
 
 ## CI
 

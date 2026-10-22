@@ -425,6 +425,17 @@ static void graphics_display(GuiCursor *c) {
         static const char *const up[] = { "Off (native)", "TAA-U", "FSR 1", "FSR 2" };
         row_fid_combo(c, "Upscaling", FF_UPSCALER, up, NULL, 4, "Renders fewer pixels and upscales them to the display: faster, a little softer. FSR 2 keeps the most detail in motion.");
         if (cv("r_upscaler") && cv("r_upscaler")->i) row_fid_slider(c, "Upscaling resolution", FF_UPSCALE_RATIO, 0.5f, 1.0f, 0.01f, "%.2fx", "Share of the display resolution rendered before upscaling.");
+        // Dynamic resolution: with the temporal upscalers (TAA-U, FSR 2).
+        Cvar *upc = cv("r_upscaler");
+        if (upc && (upc->i == 1 || upc->i >= 3)) {
+            row_fid_toggle(c, "Dynamic resolution", FF_DYNRES, "Lowers the upscaling resolution while the frame rate is under the target, and back up to the setting above when there is room.");
+            Cvar *dyn = cv("r_dynres"), *tfps = cv("r_dynres_fps");
+            if (dyn && dyn->i && tfps) {
+                float f = (float)tfps->i;
+                GuiRect sr = gw_setting_row(c, "Target frame rate", "Auto: the frame rate limit, else the display's refresh rate.", rid("r_dynres_fps"));
+                if (gw_slider(rid("r_dynres_fps"), sr, &f, 0, 360, 10, f < 1 ? "Auto" : "%.0f")) cvar_set_int(tfps, (int)f);
+            }
+        }
     }
     if (render_hdr_supported()) {
         row_fid_toggle(c, "HDR10 output", FF_HDR_OUTPUT, NULL);

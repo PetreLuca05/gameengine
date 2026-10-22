@@ -18,6 +18,7 @@ static const FidFeatureDef k_features[FF_COUNT] = {
     [FF_AA] = { "aa", "r_aa", I, true, 0, 0, 3, false, false, "Anti-aliasing" },
     [FF_UPSCALER] = { "upscaler", "r_upscaler", I, true, 0, 0, 4, false, false, "Upscaler" },
     [FF_UPSCALE_RATIO] = { "upscale_ratio", "r_upscale_ratio", F, false, 0, 0.5f, 1.0f, false, false, "Upscaler resolution" },
+    [FF_DYNRES] = { "dynres", "r_dynres", B, true, 0, 0, 1, false, false, "Dynamic resolution" },
     [FF_RENDER_SCALE] = { "render_scale", "r_render_scale", F, false, 0, 0.25f, 2.0f, false, false, "Render scale" },
     [FF_SHARPEN] = { "sharpen", "r_sharpen", F, true, 0, 0, 1, false, false, "Sharpening" },
     [FF_AO] = { "ao", "r_ao", I, true, 0, 0, 2, false, false, "Ambient occlusion" },

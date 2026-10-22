@@ -608,6 +608,16 @@ if(MSVC)
   target_compile_options(test_spv_reflect PRIVATE /W3 /wd4201 /utf-8)
 endif()
 add_test(NAME spv_reflect COMMAND test_spv_reflect WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# Dynamic resolution controller (docs/RENDERING_POST.md "Dynamic resolution"): a simulated GPU load.
+add_executable(test_dynres tests/test_dynres.c src/render/dynres.c)
+set_target_properties(test_dynres PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_dynres PRIVATE src)
+if(MSVC)
+  target_compile_options(test_dynres PRIVATE /W3 /wd4201 /utf-8)
+else()
+  target_link_libraries(test_dynres PRIVATE m)
+endif()
+add_test(NAME dynres COMMAND test_dynres)
 
 # Foliage wind (docs/FOLIAGE_WIND.md): the wind field (gust fronts, tile, springs, sources), the Crysis
 # vegetation WPO CPU mirror (trunk length, layer linearity, phase decorrelation, bounds), the Tree It

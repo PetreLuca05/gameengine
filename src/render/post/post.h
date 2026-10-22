@@ -71,7 +71,11 @@ VkImageView post_black_view(void);
 // Projection jitter of this frame (render pixels, Halton 2,3) when a temporal pass is active.
 vec2 post_jitter_pixels(u32 frame);
 bool post_wants_jitter(void);
-float post_render_scale(void);
+float post_render_scale(void);              // this frame's upscaler share (dynamic resolution included)
+float post_nominal_render_scale(void);      // the player's upscaler share (r_upscale_ratio; 1 without an upscaler)
+void post_set_dynamic_scale(float s);       // dynamic resolution (0 = off)
+float post_dynamic_scale(void);
+bool post_temporal_upscaler(void);          // TAA-U or FSR 2: dynamic resolution applies
 // Engine Fidelity (docs/ENGINE_FIDELITY.md): Off = direct output (no post passes at all), and what
 // this frame's settings need from the scene passes (nothing scheduled that nobody reads).
 bool post_direct(void);

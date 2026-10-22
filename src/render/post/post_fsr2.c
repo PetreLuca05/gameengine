@@ -92,7 +92,7 @@ static struct {
     // per frame
     FgRes r[FR_COUNT];
     u32 frame_index;
-    bool reset, vm;
+    bool reset, render_reset, vm;
     u32 groups_spd[2], render_w, render_h, out_w, out_h;
 } F;
 
@@ -320,11 +320,12 @@ static void exec_prep(VkCommandBuffer cmd, void *u) {
 static void exec_reset(VkCommandBuffer cmd, void *u) {
     (void)u;
     VkImageSubresourceRange rr = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    static const struct { int res; float v[2]; bool uint_bits; } k[] = {
-        { FR_LOCK_PREV, { 0, 0 } }, { FR_UPS_PREV, { 0, 0 } }, { FR_LUMA_PREV, { 0, 0 } }, { FR_PREV_DIL_MV, { 0, 0 } },
-        { FR_AUTO_EXP, { -1.0f, 1e8f } }, { FR_NEW_LOCKS, { 0, 0 } }, { FR_SPD_ATOMIC, { 0, 0 }, true }, { FR_RECON_DEPTH, { 1.0f, 0 }, true },
+    static const struct { int res; float v[2]; bool uint_bits; } k[] = {   // the render-size ones last
+        { FR_LOCK_PREV, { 0, 0 } }, { FR_UPS_PREV, { 0, 0 } }, { FR_LUMA_PREV, { 0, 0 } }, { FR_AUTO_EXP, { -1.0f, 1e8f } },
+        { FR_NEW_LOCKS, { 0, 0 } }, { FR_SPD_ATOMIC, { 0, 0 }, true }, { FR_PREV_DIL_MV, { 0, 0 } }, { FR_RECON_DEPTH, { 1.0f, 0 }, true },
     };
-    for (int i = 0; i < (int)(sizeof(k) / sizeof(k[0])); i++) {
+    int n = (int)(sizeof(k) / sizeof(k[0]));
+    for (int i = F.reset ? 0 : n - 2; i < n; i++) {
         VkClearColorValue cv;
         memset(&cv, 0, sizeof(cv));
         if (k[i].uint_bits) memcpy(&cv.uint32[0], &k[i].v[0], 4);   // the far depth's bits (atomic min); 0 for the counter
@@ -444,15 +445,18 @@ FgRes post_fsr2_build(FgRes color) {
     F.r[FR_LUM] = tex("fsr2_luminance", VK_FORMAT_R16_SFLOAT, FG_SIZE_HALF, FG_MAX_MIPS);
     F.r[FR_OUTPUT] = tex("fsr2_output", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_OUTPUT, 1);
     if (F.render_w < 64 || F.render_h < 64) return FG_NONE;   // no luminance mip 5 to write (TAA-U then)
-    F.reset = P.in.camera_cut || !fg_history_valid(F.r[FR_UPS_PREV]) || !fg_history_valid(F.r[FR_LOCK_PREV]) || !fg_history_valid(F.r[FR_RECON_DEPTH]) ||
-              !fg_history_valid(F.r[FR_AUTO_EXP]) || !fg_history_valid(F.r[FR_NEW_LOCKS]) || !fg_history_valid(F.r[FR_SPD_ATOMIC]) ||
-              !fg_history_valid(F.r[FR_PREV_DIL_MV]) || !fg_history_valid(F.r[FR_LUMA_PREV]);
+    // A reset starts the accumulation over; a render-size change alone (dynamic resolution) keeps it and
+    // clears the two render-size persistent images (the SDK's dynamic resolution).
+    F.reset = P.in.camera_cut || !fg_history_valid(F.r[FR_UPS_PREV]) || !fg_history_valid(F.r[FR_LOCK_PREV]) || !fg_history_valid(F.r[FR_AUTO_EXP]) ||
+              !fg_history_valid(F.r[FR_NEW_LOCKS]) || !fg_history_valid(F.r[FR_SPD_ATOMIC]) || !fg_history_valid(F.r[FR_LUMA_PREV]);
+    F.render_reset = !fg_history_valid(F.r[FR_RECON_DEPTH]) || !fg_history_valid(F.r[FR_PREV_DIL_MV]);
     F.frame_index = F.reset ? 0 : F.frame_index + 1;
     write_constants();
-    if (F.reset) {
+    if (F.reset || F.render_reset) {
         int p = fg_pass("fsr2_reset", exec_reset, NULL);
-        static const int cleared[] = { FR_LOCK_PREV, FR_UPS_PREV, FR_LUMA_PREV, FR_PREV_DIL_MV, FR_AUTO_EXP, FR_NEW_LOCKS, FR_SPD_ATOMIC, FR_RECON_DEPTH };
-        for (int i = 0; i < (int)(sizeof(cleared) / sizeof(cleared[0])); i++) fg_write(p, F.r[cleared[i]], FG_TRANSFER_DST);
+        static const int cleared[] = { FR_LOCK_PREV, FR_UPS_PREV, FR_LUMA_PREV, FR_AUTO_EXP, FR_NEW_LOCKS, FR_SPD_ATOMIC, FR_PREV_DIL_MV, FR_RECON_DEPTH };
+        int n = (int)(sizeof(cleared) / sizeof(cleared[0]));
+        for (int i = F.reset ? 0 : n - 2; i < n; i++) fg_write(p, F.r[cleared[i]], FG_TRANSFER_DST);
     }
     int prep = fg_pass("fsr2_prep", exec_prep, NULL);
     fg_read(prep, P.in.depth, FG_SAMPLED);

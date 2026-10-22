@@ -55,6 +55,10 @@ void render_register_cvars(void) {
     r->r_vsync = cvar_reg_bool("r_vsync", true, CVAR_ARCHIVE | CVAR_EDITABLE, "vertical sync");
     r->r_wireframe = cvar_reg_bool("r_wireframe", false, CVAR_LOCKED, "wireframe rendering");
     r->r_render_scale = cvar_reg_float("r_render_scale", 1.0f, 0.25f, 2.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "3D resolution scale");
+    r->r_dynres = cvar_reg_bool("r_dynres", false, CVAR_ARCHIVE | CVAR_EDITABLE,
+                                "dynamic resolution: with a temporal upscaler (TAA-U, FSR 2), lower the upscaler resolution while the GPU frame runs over the frame-rate target, back up to r_upscale_ratio when there is room");
+    r->r_dynres_fps = cvar_reg_int("r_dynres_fps", 0, 0, 1000, CVAR_ARCHIVE | CVAR_EDITABLE, "dynamic resolution target frame rate (0 = r_maxfps, else the display's refresh rate)");
+    r->r_dynres_min = cvar_reg_float("r_dynres_min", 0.5f, 0.5f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "dynamic resolution: the lowest share of the display resolution it renders");
     r->r_aniso = cvar_reg_int("r_aniso", 8, 1, 16, CVAR_TIER, "anisotropic filtering level");
     r->r_texture_quality = cvar_reg_int("r_texture_quality", 2, 0, 2, CVAR_TIER, "0 low, 1 medium, 2 high");
     r->r_aa = cvar_reg_int("r_aa", 3, 0, 3, CVAR_TIER, "anti-aliasing: 0 none, 1 FXAA, 2 SMAA 1x, 3 TAA");
@@ -437,6 +441,31 @@ static float desired_target_scale(void) {
     return clampf(R->r_render_scale->f * post_render_scale(), 0.25f, 2.0f);
 }
 
+// Dynamic resolution: this frame's upscaler share from the last GPU frame time (dynres.c). Only with a
+// temporal upscaler: it reconstructs the display resolution from whatever share it gets.
+static void dynres_frame(void) {
+    if (!R->r_dynres->i || !post_temporal_upscaler()) {
+        memset(&R->dynres, 0, sizeof(R->dynres));
+        post_set_dynamic_scale(0.0f);
+        return;
+    }
+    float fps = (float)R->r_dynres_fps->i;
+    if (fps <= 0.0f) {
+        Cvar *cap = cvar_find("r_maxfps");
+        fps = cap && cap->i > 0 ? (float)cap->i : 0.0f;
+    }
+    if (fps <= 0.0f) {
+        const SDL_DisplayMode *m = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(g_engine.window));
+        fps = m && m->refresh_rate > 1.0f ? m->refresh_rate : 60.0f;
+    }
+    DynresParams p;
+    dynres_defaults(&p, fps, R->r_dynres_min->f, post_nominal_render_scale());
+    float before = R->dynres.ratio;
+    float r = dynres_update(&R->dynres, &p, render_gpu_frame_ms(), (float)g_engine.frame_dt);
+    if (before > 0.0f && fabsf(r - before) > 1e-4f) log_debug("dynres: %.2f -> %.2f (GPU %.2f ms, target %.0f fps)", before, r, render_gpu_frame_ms(), fps);
+    post_set_dynamic_scale(r);
+}
+
 static void apply_setting_changes(void) {
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(g_engine.window, &w, &h);
@@ -446,12 +475,20 @@ static void apply_setting_changes(void) {
     if (R->r_hdr_output->i != R->hdr_output_applied) R->swap_dirty = true;
     if (R->swap_dirty) recreate_swapchain();
     if (fabsf(desired_target_scale() - R->render_scale_applied) > 1e-4f) {
+        // Only the dynamic resolution moved (same swapchain, the same nominal scale): the scene targets
+        // alone. The frame graph keeps its display-size histories (TAA-U, FSR 2) and drops the old
+        // render-size images two frames later; the pipelines and the temporal state stay.
+        float nominal = clampf(R->r_render_scale->f * post_nominal_render_scale(), 0.25f, 2.0f);
+        bool dyn = post_dynamic_scale() > 0.0f && fabsf(nominal - R->dynres_nominal) < 1e-4f;
         vkDeviceWaitIdle(R->device);
         vkd_destroy_targets();
         R->target_scale = desired_target_scale();
         vkd_create_targets();
-        targets_changed();
+        if (dyn) R->dynres_trim = 2;
+        else targets_changed();
+        R->dynres_nominal = nominal;
     }
+    if (R->dynres_trim > 0 && --R->dynres_trim == 0) fg_trim();
     // Shadow resolution (Engine Fidelity): on the frame boundary, before compute_matrices; the new
     // maps are rendered this frame before any pass samples them (no stale texel grid, no unwritten map).
     shadow_quality_read(&R->shq);
@@ -496,6 +533,7 @@ bool render_begin_frame(void) {
     R->last_stats = R->stats;
     R->stats.draw_calls = R->stats.triangles = R->stats.culled = 0;
 
+    dynres_frame();
     apply_setting_changes();
     if (R->swap_dirty || !R->swapchain) return false;
 

@@ -89,7 +89,7 @@ void main() {
     float w = pc.u0.x != 0u && U.misc.y < 0.5 ? (scale < 0.99 ? 0.95 : 0.92) : 0.0;
     if (any(lessThan(puv, vec2(0.0))) || any(greaterThan(puv, vec2(1.0)))) w = 0.0;
     // Disocclusion: last frame's depth at the reprojected position vs where this surface was.
-    if (w > 0.0 && !vm) {
+    if (w > 0.0 && !vm && pc.u0.y != 0u) {
         float d = texelFetch(depth_tex, rc, 0).r;
         vec3 wp = world_pos((vec2(rc) + 0.5) / rsz, d);
         vec4 pc4 = U.prev_view_proj_nj * vec4(wp, 1.0);
