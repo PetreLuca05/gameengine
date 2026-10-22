@@ -80,6 +80,44 @@ static bool lock_button(GuiRect r, bool locked, bool enabled) {
     return enabled && in.clicked;
 }
 
+// Invite friends: the Steam friends list in the menu (a direct Steam lobby invite: no overlay needed),
+// over the party panel, next to its button. Shift+click opens the Steam overlay's dialog instead.
+static bool g_invite_open;
+
+static void draw_invites(GuiRect anchor, GuiRect panel) {
+    if (!g_invite_open) return;
+    FriendEntry fr[64];
+    int n = lobby_friends(fr, 64);
+    float rh = TOK("lb_player_h");
+    float h = fminf((float)(n + 2) * rh, anchor.y - panel.y - TOK("mm_gap"));
+    GuiRect r = { panel.x, anchor.y - h - TOK("mm_gap"), panel.w, h };
+    int layer = gd_layer();
+    gd_set_layer(GL_OVERLAY);
+    mm_panel(r);
+    gui_block_rect(r);
+    GuiRect in = gui_rect_inset(r, TOK("mm_gap"));
+    GuiCursor c = gc_make(in, TOK("mm_gap_sm"));
+    gw_section(gc_row(&c, TOK("mm_row_h")), "Invite friends");
+    if (!n) gw_label(gc_row(&c, rh), "No Steam friends to show", gui_s(TH->t_body - 1), GW_REGULAR, TH->text_faint, GUI_LEFT);
+    static double sent_at[64];
+    for (int i = 0; i < n && c.y + rh <= in.y + in.h; i++) {
+        GuiRect row = gc_row(&c, rh - TOK("mm_gap_sm"));
+        u32 dot = fr[i].in_game ? TH->accent : (fr[i].state ? TH->ok : TH->text_faint);
+        gd_circle(row.x + TOK("mm_gap"), row.y + row.h * 0.5f, gui_s(TH->radius), dot);
+        gw_label(gui_rect(row.x + TOK("mm_gap") * 2.5f, row.y, row.w * 0.6f, row.h), fr[i].name, gui_s(TH->t_body - 1), GW_MEDIUM, fr[i].state ? TH->text : TH->text_faint, GUI_LEFT);
+        GuiRect b = { row.x + row.w - TOK("mm_button_w"), row.y, TOK("mm_button_w"), row.h };
+        bool sent = sent_at[i] > 0.0 && gui_time() - sent_at[i] < 4.0;
+        if (gw_button(gui_idi("pt_inv", (int)(fr[i].id & 0x7FFFFFFF)), b, sent ? "Sent" : "Invite", GB_SECONDARY, fr[i].state != 0 && !sent)) {
+            lobby_invite_friend(fr[i].id);
+            sent_at[i] = gui_time();
+        }
+    }
+    gui_focus_scope(r);
+    if (gui_nav(NAV_BACK)) { gui_nav_consume(NAV_BACK); g_invite_open = false; }
+    if (gui_mouse_pressed(0) && !gui_rect_contains(r, gui_mouse().x, gui_mouse().y) && !gui_rect_contains(anchor, gui_mouse().x, gui_mouse().y)) g_invite_open = false;
+    gd_set_layer(layer);
+}
+
 // The party panel (right): the lock + privacy, the players, the map, the host's game settings.
 static void draw_party(GuiRect r) {
     const Lobby *L = lobby_get();
@@ -147,8 +185,13 @@ static void draw_party(GuiRect r) {
     bool steam_lobby = lobby_transport() == TRANSPORT_STEAM && lobby_steam_running();
     if (c.y + TOK("mm_gap") < inv.y) {
         GuiId iid = gui_id("pt_invite");
-        if (gw_button(iid, inv, "Invite friends", GB_SECONDARY, steam_lobby && in_lobby_phase())) lobby_invite_overlay();
+        if (gw_button(iid, inv, "Invite friends", GB_SECONDARY, steam_lobby && in_lobby_phase())) {
+            if (gui_shift()) lobby_invite_overlay();
+            else g_invite_open = !g_invite_open;
+        }
         if (!steam_lobby && gui_rect_contains(inv, gui_mouse().x, gui_mouse().y)) gui_tooltip(iid, "LAN party: friends join from Play > Join > LAN or by your IP address.");
+        if (!steam_lobby) g_invite_open = false;
+        draw_invites(inv, r);
     }
     if (L->state == LS_COUNTDOWN && L->countdown >= 0) {
         char cd[48];

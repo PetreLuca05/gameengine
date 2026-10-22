@@ -94,6 +94,7 @@ int net_lan_servers(const LanServer **out);
 void net_steam_invite(void);
 bool net_steam_in_lobby(void);
 void net_steam_register_commands(void);
+void net_steam_early_init(void);   // main: Steam + its overlay's Vulkan layer, before render_init
 void net_steam_poll_idle(void);
 void net_steam_shutdown(void);
 

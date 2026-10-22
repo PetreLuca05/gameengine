@@ -68,7 +68,10 @@ PARTY (no lobby screen: the Play tab is the lobby; mm_play.c draw_party, mainmen
   map: thumbnail, name, season · time (the Maps tab picks them: mm_party_sync; a guest can't
        open Maps)
   game settings (difficulty, max players, join a running game)   host edits, others read
-  [Invite friends] (Steam party); "Starting in n" during the countdown
+  [Invite friends] (Steam party): the Steam friends list over the panel, Invite = a direct Steam lobby
+  invite (no overlay needed; Shift+click: the overlay's dialog); "Starting in n" during the countdown
+  Steam overlay (Shift+Tab) outside Steam: Steam starts before the renderer (net_steam_early_init)
+  and switches its Vulkan overlay layer on (ENABLE_VK_LAYER_VALVE_steam_overlay_1)
        ── start ──▶ LOADING (thumbnail, season / time / weather, progress, tip) ──▶ IN GAME
   chat: the pause menu's Lobby page and the in-game chat line (Enter)
   closed (kicked, rejected, host left): "Session ended" + reason + OK, then a party of your own

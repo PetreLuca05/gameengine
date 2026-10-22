@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#include <SDL3/SDL.h>
 #ifdef DG_HAVE_STEAM
 #include "steam_shim.h"
 
@@ -173,6 +174,14 @@ static void cmd_connect_steam(int argc, const char **argv) {
     if (argc > 1) lobby_join(TRANSPORT_STEAM, argv[1]);
 }
 
+// Before the renderer: Steam first, then the Steam overlay's Vulkan layer switched on (it is an
+// implicit layer Steam enables only for games it launches: ENABLE_VK_LAYER_VALVE_steam_overlay_1).
+// Without it Shift+Tab and the overlay's invite dialog do nothing in a game started outside Steam.
+void net_steam_early_init(void) {
+    if (!dgs_init()) return;
+    SDL_setenv_unsafe("ENABLE_VK_LAYER_VALVE_steam_overlay_1", "1", 1);
+}
+
 void net_steam_register_commands(void) {
     cmd_register("connect_lobby", cmd_connect_lobby, "join a Steam lobby by id (used by invites / rich presence)");
     cmd_register("connect_steam", cmd_connect_steam, "connect to a host by SteamID64");
@@ -205,6 +214,7 @@ NetTransport *transport_steam_create(void) {
 bool net_steam_available(void) { return false; }
 void net_steam_invite(void) { log_info("steam: not available in this build"); }
 bool net_steam_in_lobby(void) { return false; }
+void net_steam_early_init(void) {}
 void net_steam_register_commands(void) {
     log_warn("steam: LAN-only build, compiled without the Steamworks SDK (docs/MENU_LOBBY.md \"Steam setup\")");
 }

@@ -187,6 +187,7 @@ int main(int argc, char **argv) {
     Cvar *cw = cvar_find("r_width"), *ch = cvar_find("r_height");
     g_engine.window = SDL_CreateWindow("Deadground - DevRoom", cw->i, ch->i, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!g_engine.window) log_fatal("SDL_CreateWindow failed: %s", SDL_GetError());
+    net_steam_early_init();   // before the Vulkan instance: the Steam overlay layer (Shift+Tab)
     PROF_BEGIN("render_init");
     if (!render_init(g_engine.window)) log_fatal("Vulkan renderer failed to initialize (Vulkan 1.3 GPU + driver required)");
     PROF_END();
