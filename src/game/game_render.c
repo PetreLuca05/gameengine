@@ -430,6 +430,7 @@ static vec4 unpack(u32 c) {
 static u32 g_obj_base, g_obj_part;
 static u32 next_object_id(void) { return g_obj_base ? g_obj_base + (g_obj_part++ & 63u) : 0u; }
 
+static void fire_render(World *w, int i, vec3 pos);
 static void draw_shape(VisShape shape, vec3 half, vec3 pos, quat rot, Material mat) {
     DrawItem d;
     memset(&d, 0, sizeof(d));
@@ -610,6 +611,17 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
     }
     case ET_LIGHT: {
         bool on = (w->flags[i] & EF_ON) != 0;
+        if (w->light[i].group & LIGHT_GROUP_FIRE) {   // a fire: embers + flames / smoke puffs, a flickering light
+            if (!on) break;
+            fire_render(w, i, pos);
+            float t = (float)g_engine.render_time * 11.0f + (float)i * 1.7f;
+            float k = 1.0f - w->light[i].flicker * (0.5f + 0.5f * sinf(t) * sinf(t * 1.73f + 0.4f));
+            PointLight l = { v3_add(pos, v3(0, 0.6f, 0)), w->light[i].radius, w->light[i].color, w->light[i].intensity * k };
+            l.flags = LIGHT_NO_SHADOW;
+            l.ir = 3.0f;   // a fire is very bright in near-IR
+            render_add_light(&l);
+            break;
+        }
         Material lm = mat_from(v->color, 0.5f, MAT_NO_SHADOW | (on ? MAT_UNLIT : 0));
         if (on) lm.color = v4(lm.color.x * 4, lm.color.y * 4, lm.color.z * 4, 1);
         else lm.color = v4(0.15f, 0.15f, 0.15f, 1);
@@ -809,6 +821,23 @@ static void laser_render(World *w, vec3 from, vec3 dir) {
 // Flashlights (F): a cookie-projected spot light. The local one
 // sits just ahead of the eye (in front of the held gun) along the view; other players' come from
 // their eye along the replicated aim (EF_FLASHLIGHT).
+// A fire entity (LIGHT_GROUP_FIRE, docs/NIGHT_OPTICS.md): puffs of flames and smoke a few times a
+// second (render time, every machine) and the ember bed.
+static void fire_render(World *w, int i, vec3 pos) {
+    static double next[MAX_ENTITIES];
+    double now = g_engine.render_time;
+    if (now >= next[i]) {
+        next[i] = now + 0.12 + 0.06 * (double)((dg_hash_u32((u32)i * 977u + (u32)(now * 10.0)) & 255u) / 255.0f);
+        VfxSpawnParams sp = vfx_spawn_params(v3_add(pos, v3(0, 0.05f, 0)));
+        sp.normal = v3(0, 1, 0);
+        vfx_game_spawn("fire", &sp);
+    }
+    Material m = mat_from(rgba8(1.0f, 0.35f, 0.08f, 1), 0.9f, MAT_UNLIT | MAT_NO_SHADOW);
+    m.color = v4(2.5f, 0.8f, 0.15f, 1);
+    draw_shape(VIS_BOX, v3(0.35f, 0.04f, 0.35f), pos, quat_identity(), m);
+    DG_UNUSED(w);
+}
+
 static void flashlights_render(World *w, const RenderCamera *cam, const Player *lp, bool dead, int view_slot) {
     static TextureId cookie;
     static bool tried;
@@ -1200,6 +1229,7 @@ void game_render(void) {
     }
     // Sights: lens / reticle / scope picture-in-picture from the item as it is drawn this frame.
     sights_frame(&cam, p && !dead && !cvar_find("cl_thirdperson")->i && GR->cam_mode != 3);
+    thermal_frame((float)g_engine.frame_dt);   // the thermal scope's temperature state + sensor (game_thermal.c)
     sights_test_frame(&cam);
     // Phone: lens view from the phone as drawn this frame, companion server, capture.
     phone_frame(w, &cam, p);

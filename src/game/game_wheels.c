@@ -560,4 +560,5 @@ void wheels_register(void) {
     peek_register();
     lean_register();
     nvg_register();
+    thermal_register();
 }

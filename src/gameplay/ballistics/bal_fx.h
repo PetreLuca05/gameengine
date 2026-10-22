@@ -17,5 +17,6 @@ void bal_fx_clear(void);
 
 // Tracers that end in dry grass start a fire (stub until foliage burns: log + debug marker).
 void fire_try_ignite(World *w, vec3 pos, float energy);
+float bal_fx_heat(int slot);   // a shooter's barrel heat now (g of powder; the thermal scope)
 
 #endif

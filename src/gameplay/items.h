@@ -139,7 +139,7 @@ typedef struct WeaponModelPart { vec3 offset; vec3 half; vec4 color; u8 mech; } 
 #define ATT_MAX_PARTS 10
 typedef enum AttachSlot { ATT_OPTIC, ATT_MUZZLE, ATT_UNDERBARREL, ATT_MAGAZINE, ATT_STOCK } AttachSlot;
 typedef enum SightKind { SIGHT_IRON, SIGHT_REDDOT, SIGHT_SCOPE } SightKind;
-typedef enum ReticleShape { RET_DOT, RET_CIRCLE_DOT, RET_DUPLEX, RET_MILDOT } ReticleShape;
+typedef enum ReticleShape { RET_DOT, RET_CIRCLE_DOT, RET_DUPLEX, RET_MILDOT, RET_NONE } ReticleShape;   // RET_NONE: a digital sight draws its own (thermal OSD)
 typedef enum SightSensor { SENSOR_OPTICAL, SENSOR_THERMAL } SightSensor;
 
 typedef struct Reticle {

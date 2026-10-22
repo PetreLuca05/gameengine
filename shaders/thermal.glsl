@@ -62,7 +62,7 @@ float th_volumes(vec3 wp, vec3 n, float t, bool body) {
         int kind = int(b.y + 0.5);
         if (kind == 1) {
             if (body) { bw += w * w; bt += w * w * b.x; }
-            else t = mix(t, b.x, w * 0.5);
+            else t = mix(t, b.x, w * 0.85);   // worn gear / a placeholder body: warmed through
         } else if (kind == 2) {
             if (!body && n.y > 0.6) t = mix(t, b.x, w);
         } else {
@@ -77,7 +77,8 @@ float th_volumes(vec3 wp, vec3 n, float t, bool body) {
 vec4 thermal_shade(uint flags, uint ao_b, vec3 wp, vec3 n, vec3 albedo, float metal, float rough, float emissive, bool body, float sunlit) {
     int c = th_class(flags, ao_b, albedo, metal, rough, emissive, body);
     vec4 k = frame.thermal_cls[c];
-    vec3 l = normalize(frame.sun_dir.xyz);
+    vec3 sd = frame.sun_dir.xyz;
+    vec3 l = dot(sd, sd) > 1e-8 ? normalize(sd) : vec3(0.0, 1.0, 0.0);   // no sun at night: zero vector
     float t = c == THC_HOT ? frame.thermal.w : k.x + k.z * sunlit * max(dot(n, l), 0.0) - k.w * max(n.y, 0.0);
     t = th_volumes(wp, n, t, body);
     float e = k.y;

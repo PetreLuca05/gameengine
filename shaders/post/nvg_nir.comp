@@ -65,7 +65,7 @@ void main() {
         vec4 m = textureLod(material_tex, uv, 0.0);
         uint fl = gb_flags(m);
         float refl = (fl & GB_THIN) != 0u ? D.haze.w : mix(D.refl.x, D.refl.y, step(0.5, m.g));
-        vec3 L = normalize(U.sun_dir.xyz);
+        vec3 L = dot(U.sun_dir.xyz, U.sun_dir.xyz) > 1e-8 ? normalize(U.sun_dir.xyz) : vec3(0.0, 1.0, 0.0);
         float e = D.head.z * U.sun_dir.w * luma(U.sun_color.rgb) * max(dot(n, L), 0.0) * sun_visibility(wp + n * 0.05);
         e += D.head.w * U.sky.w * luma(U.sky.rgb) * (0.6 + 0.4 * n.y);
         int nl = int(D.head.y);

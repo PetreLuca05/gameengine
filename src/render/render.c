@@ -2815,6 +2815,7 @@ static void build_frame_graph(FrameData *fd) {
     fg_write(p, F.vm_depth, FG_DEPTH);
 
     F.pip_color = F.pip_depth = FG_NONE;
+    FgRes pip_shown = FG_NONE;   // what the sight composites: the PiP, or the thermal sensor's display
     if (setup_scope_pip(fd)) {
         FgTexDesc pd = { "scope_pip", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_ABS, F.pip_size, F.pip_size, 1, 1, 0 };
         F.pip_color = fg_texture(&pd);
@@ -2838,7 +2839,8 @@ static void build_frame_graph(FrameData *fd) {
             fg_read(p, F.pip_depth, FG_DEPTH_READ);
             fg_read(p, F.depth, FG_SAMPLED);
             fg_read(p, post_froxels(), FG_SAMPLED);
-            F.pip_color = post_thermal_build(F.pip_color, F.pip_depth, mat4_inverse(F.pip_vp), R->sight.objective_pos);
+            // (F.pip_color stays the PiP target: the passes read it when they run)
+            pip_shown = post_thermal_build(F.pip_color, F.pip_depth, mat4_inverse(F.pip_vp), R->sight.objective_pos);
         } else {
             p = fg_pass("scope_pip_decals", exec_scope_pip_decals, NULL);
             fg_write(p, F.pip_color, FG_COLOR);
@@ -2852,7 +2854,7 @@ static void build_frame_graph(FrameData *fd) {
             fg_read(p, post_froxels(), FG_SAMPLED);        // blended surfaces / particles: its froxels
         }
     }
-    post_set_sight(&R->sight, F.pip_color, F.pip_from_view, R->vm_proj, R->pip_fov);
+    post_set_sight(&R->sight, pip_shown >= 0 ? pip_shown : F.pip_color, F.pip_from_view, R->vm_proj, R->pip_fov);
     phone_view_build(fd);   // phone camera views (sampled from the next frame on)
     char_preview_view_build(fd);   // the inventory character preview (sampled by this frame's UI)
 

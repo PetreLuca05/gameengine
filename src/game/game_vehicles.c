@@ -2831,3 +2831,38 @@ void vehicles_register(void) {
     repl_set_owned_hook(owned_hook);
     ensure_lib();
 }
+
+// Thermal scope (game_thermal.c, docs/NIGHT_OPTICS.md): each vehicle's heat sources in world space and
+// what drives them (replicated: engine, rpm, brake flag, velocity). The engine sits at the end opposite
+// the exhaust.
+int vehicles_thermal(World *w, VehThermal *out, int max) {
+    VehicleSys *s = w ? (VehicleSys *)w->vehicles : NULL;
+    if (!s || !VG.lib_ok) return 0;
+    int n = 0;
+    for (int i = 0; i < MAX_VEH && n < max; i++) {
+        const Vehicle *v = &s->v[i];
+        if (!v->used || !ent_valid(w, v->ent)) continue;
+        const VehicleDef *d = vdef(v);
+        const Transform *x = &w->xf[ENT_INDEX(v->ent)];
+        VehThermal *o = &out[n++];
+        memset(o, 0, sizeof(*o));
+        o->ent = v->ent;
+        o->engine = v->engine && !v->wrecked && !v->drowned;
+        o->load = d->max_rpm > 0.0f ? clampf(v->rpm / d->max_rpm, 0.0f, 1.0f) : 0.0f;
+        o->braking = v->braking || v->handbrake;
+        o->speed = v3_len(v->vel);
+        vec3 c = d->box_count ? d->box_center[0] : v3(0, 0.5f, 0);
+        vec3 h = d->box_count ? d->box_half[0] : v3(0.8f, 0.5f, 2.0f);
+        float back = d->exhaust.z >= 0.0f ? 1.0f : -1.0f;
+        o->engine_pos = v3_add(x->pos, quat_rotate(x->rot, v3(c.x, c.y + h.y * 0.2f, c.z - back * h.z * 0.6f)));
+        o->engine_r = fmaxf(h.x, 0.4f);
+        o->exhaust_pos = v3_add(x->pos, quat_rotate(x->rot, d->exhaust));
+        o->wheel_count = DG_MIN(d->wheel_count, 4);
+        for (int k = 0; k < o->wheel_count; k++) {
+            o->wheel_pos[k] = v3_add(x->pos, quat_rotate(x->rot, d->wheels[k].pos));
+            o->wheel_r[k] = d->wheels[k].radius;
+        }
+        o->ground = x->pos;
+    }
+    return n;
+}

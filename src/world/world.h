@@ -152,6 +152,7 @@ typedef struct Lever {
 
 // LightComp.group bit: the lamp casts no local shadow (open-world street lamps; replicated with the group).
 #define LIGHT_GROUP_NO_SHADOW (1u << 31)
+#define LIGHT_GROUP_FIRE (1u << 30)   // a fire (level "fire"): flames + smoke, a heat source for the thermal scope (docs/NIGHT_OPTICS.md)
 typedef struct LightComp {
     vec3 color;
     float radius, intensity;

@@ -707,3 +707,7 @@ void sights_register(void) {
     cmd_register("sight_pip_res", cmd_sight_pip_res, "sight_pip_res [optic multiplier]: scope PiP resolution per sight (pip_resolution x r_scope_pip_scale, bounded by the fidelity level) and the PiP size now; a value sets it live (not saved)");
     cmd_register("fov_report", cmd_fov_report, "fov_report: cl_fov / sv_fov / base / current world and hands FOV (tests)");
 }
+
+// The viewed weapon's optic this frame and the ADS progress (the thermal scope, game_thermal.c).
+const AttachmentDef *sights_optic(void) { return S.optic; }
+float sights_ads(void) { return S.ads_t; }

@@ -64,7 +64,7 @@
   "part_mult": { "head": 0.9, "limbs": 0.9 },
   "falloff": { "start": 15, "end": 50, "min": 0.55 },
   "attachment_slots": {
-    "optic": {"pos": [0, 0.082, -0.02], "rail": [-0.06, 0.04], "allow": ["red_dot", "scope_4x"]},
+    "optic": {"pos": [0, 0.082, -0.02], "rail": [-0.06, 0.04], "allow": ["red_dot", "scope_4x", "scope_thermal"]},
     "muzzle": {"allow": ["suppressor", "compensator", "flash_hider", "muzzle_brake"]},
     "underbarrel": {"pos": [0, 0.018, -0.22], "allow": ["vertical_grip", "weapon_light", "laser"]},
     "magazine": {"pos": [0, 0.018, -0.1], "allow": ["extended_mag"], "hide_parts": [2]},

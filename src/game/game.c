@@ -302,6 +302,7 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     if (p->sim.move.mode == MOVE_SWIM) c.buttons &= (u16)~BTN_AIM;
     // Night vision goggles: the host's state / battery; no ADS while they are down or flipping.
     if (w->authority && first) nvg_host_tick(w, slot, &c, dt);
+    if (w->authority && first) thermal_host_tick(w, slot, &c, dt);   // a thermal scope's battery (game_thermal.c)
     if (nvg_blocks_ads(w, slot)) c.buttons &= (u16)~BTN_AIM;
     // Hanging: a sidearm is fired one-handed from the hip (the other hand holds the ledge); long guns stay slung.
     if (p->sim.move.mode == MOVE_HANG) {
@@ -807,8 +808,9 @@ static void handle_selection(void) {
     for (int i = 0; i < INV_SEL_WEAPONS; i++)
         if (input_consume_press((Action)(ACT_SLOT1 + i))) game_select(i);
     // Phone camera mode: the wheel zooms instead of switching weapons.
-    if (input_consume_press(ACT_NEXT_ITEM) && !phone_wheel(-1)) cycle_weapon(p, 1);
-    if (input_consume_press(ACT_PREV_ITEM) && !phone_wheel(1)) cycle_weapon(p, -1);
+    // Aiming through a thermal scope: the wheel is its digital zoom.
+    if (input_consume_press(ACT_NEXT_ITEM) && !phone_wheel(-1) && !thermal_wheel(-1)) cycle_weapon(p, 1);
+    if (input_consume_press(ACT_PREV_ITEM) && !phone_wheel(1) && !thermal_wheel(1)) cycle_weapon(p, -1);
     // Drop (G) is a tap of the throwables wheel key (game_wheels.c).
     if (input_consume_press(ACT_FLASHLIGHT) && (G->flashlight || game_player_has_light(G->world, G->local_slot))) {
         G->flashlight = !G->flashlight;

@@ -75,6 +75,7 @@ static int reticle_from(const char *s) {
     if (!strcmp(s, "circle_dot")) return RET_CIRCLE_DOT;
     if (!strcmp(s, "duplex")) return RET_DUPLEX;
     if (!strcmp(s, "mildot")) return RET_MILDOT;
+    if (!strcmp(s, "none")) return RET_NONE;
     return RET_DOT;
 }
 

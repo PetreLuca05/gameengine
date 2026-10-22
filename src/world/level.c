@@ -481,6 +481,12 @@ static void spawn_entity(World *w, const cJSON *e) {
         // "preset": a shadow reference condition (shadow_preset) instead of a light group
         const char *preset = js(e, "preset", "");
         if (id && preset[0]) dg_strcpy(w->lever[ENT_INDEX(id)].target_name, sizeof(w->lever[ENT_INDEX(id)].target_name), preset);
+    } else if (!strcmp(type, "fire")) {
+        // A fire (docs/NIGHT_OPTICS.md): a flickering warm light that draws flames and smoke (game_render.c)
+        // and is a 700 C heat source on the thermal scope (game_thermal.c); "radius" = the light's.
+        id = spawn_light(w, pos, jv3(e, "color", v3(1.0f, 0.5f, 0.16f)), jf(e, "radius", 9), jf(e, "intensity", 18),
+                         LIGHT_GROUP_FIRE | LIGHT_GROUP_NO_SHADOW, jb(e, "on", true));
+        if (id) w->light[ENT_INDEX(id)].flicker = jf(e, "flicker", 0.35f);
     } else if (!strcmp(type, "light")) {
         id = spawn_light(w, pos, jv3(e, "color", v3(1, 0.95f, 0.85f)), jf(e, "radius", 12), jf(e, "intensity", 20), (u32)jf(e, "group", 0), jb(e, "on", true));
         // "shadow": {"type": "hard", "resolution": "high", "strength": 0.8, "bias": 1, "normal_bias": 1,

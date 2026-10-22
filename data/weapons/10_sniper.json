@@ -63,7 +63,7 @@
   },
   "part_mult": { "head": 1.6, "neck": 1.3 },
   "attachment_slots": {
-    "optic": {"pos": [0, 0.072, -0.04], "rail": [-0.06, 0.06], "allow": ["red_dot", "scope_4x", "scope_8x"], "default": "scope_8x"},
+    "optic": {"pos": [0, 0.072, -0.04], "rail": [-0.06, 0.06], "allow": ["red_dot", "scope_4x", "scope_thermal", "scope_8x"], "default": "scope_8x"},
     "muzzle": {"allow": ["suppressor"]},
     "stock": {"pos": [0, 0.02, 0.08], "allow": ["heavy_stock"], "hide_parts": [2]}
   },

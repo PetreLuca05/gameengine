@@ -131,6 +131,10 @@ static void exec_display(VkCommandBuffer cmd, void *u) {
     pb_buf(&b, 13, P.exposure_buf.buffer, 64, false);
     pb_buf(&b, 14, TH.buf[R->frame_slot].buffer, TB_SIZE, false);
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
+    struct { float p[16]; u32 u[16]; } pc;
+    memset(&pc, 0, sizeof(pc));
+    pc.u[0] = (u32)render_thermal()->debug_view;
+    post_push_constants(cmd, &pc, 128);
     u32 w, h;
     fg_extent(TH.disp, &w, &h);
     post_dispatch(cmd, "thermal_display", w, h, 1, 8);

@@ -647,6 +647,7 @@ typedef struct RenderThermal {
     u32 seed;                           // fixed pattern / per-scope
     char osd[RT_OSD_CHARS];             // OSD lines separated by '\n' (top-left, top-right, bottom ...)
     float spot_e;                       // spot meter emissivity
+    int debug_view;                     // thermal_debug view: 1 = raw temperature grey ramp
 } RenderThermal;
 void render_set_thermal(const RenderThermal *t);
 const RenderThermal *render_thermal(void);

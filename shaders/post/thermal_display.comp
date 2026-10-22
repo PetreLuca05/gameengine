@@ -61,6 +61,13 @@ void main() {
     vec2 cp = vec2(cs) * 0.5 + (uv - 0.5) * vec2(cs) / zoom;
     float l = texelFetch(core_tex, clamp(ivec2(floor(cp)), ivec2(0), cs - 1), 0).r;
     float x = clamp((l - T.agc.x) / max(T.agc.y - T.agc.x, 1e-6), 0.0, 1.0);
+    // thermal_debug view 1: the raw temperature (grey over -20 .. 60 C; red = no value)
+    if (pc.u0.x == 1u) {
+        float tc = tc_temp(l);
+        vec3 g = isnan(l) || isinf(l) ? vec3(1.0, 0.0, 0.0) : vec3(clamp((tc + 20.0) / 80.0, 0.0, 1.0));
+        imageStore(dst, p, vec4(g * T.head.w / max(X.e[0], 1e-6), 1.0));
+        return;
+    }
     uint pi = uint(T.agc.w) * 256u + uint(x * 255.0 + 0.5);
     uint c = T.pal[pi];
     vec3 rgb = srgb_to_linear(vec3(c & 255u, (c >> 8u) & 255u, (c >> 16u) & 255u) / 255.0);

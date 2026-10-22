@@ -1,0 +1,56 @@
+{
+  "_comment": "Thermal scope (docs/NIGHT_OPTICS.md): a microbolometer core behind a germanium objective, shown on a microdisplay in the eyepiece. The PiP renders 8..14 um radiance (temperature x emissivity, no light); the sensor model adds AGC, NUC, noise, smear, palettes and a digital OSD with its own crosshair (the optical reticle is none). 2x optical, 1..4x digital zoom (the wheel while aiming), palettes on the optic mode key (N). battery_h: hours of real time on one AA; the charge rides on the weapon (Replace battery).",
+  "id": "scope_thermal",
+  "name": "Thermal Scope",
+  "slot": "optic",
+  "sensor": "thermal",
+  "zoom_max": 4,
+  "battery_h": 3.0,
+  "fire": { "mass": 0.55, "yaw_lag": 1.2 },
+  "sight": "scope",
+  "mount": {
+    "pos": [0, 0, 0]
+  },
+  "sight_socket": [0, 0.05, 0.16],
+  "eye_relief": 0.07,
+  "zoom": 2.0,
+  "main_zoom": 1.1,
+  "pip_resolution": 1.0,
+  "rail_offset": "auto",
+  "reticle": {
+    "shape": "none",
+    "moa": 0.5,
+    "outer_moa": 0,
+    "color": [0.0, 0.0, 0.0],
+    "brightness": 1.0,
+    "ffp": false,
+    "illuminated": false
+  },
+  "lens": {
+    "pos": [0, 0.05, 0.1605],
+    "radius": 0.016,
+    "objective": [0, 0.05, -0.17],
+    "objective_radius": 0.025,
+    "eye_box": 0.008,
+    "eye_box_depth": 0.03,
+    "tint": [1.0, 1.0, 1.0],
+    "dust": 0.03,
+    "fresnel": 0.02,
+    "chromatic": 0.3
+  },
+  "ads_dof_near_blur": 4.0,
+  "modifiers": {
+    "ads_time": 1.3,
+    "sway_scale": 0.75
+  },
+  "model": [
+      {"offset": [0, 0.004, 0], "half": [0.013, 0.004, 0.07], "color": [0.07, 0.07, 0.075]},
+      {"offset": [0, 0.019, -0.05], "half": [0.012, 0.011, 0.01], "color": [0.08, 0.08, 0.085]},
+      {"offset": [0, 0.019, 0.05], "half": [0.012, 0.011, 0.01], "color": [0.08, 0.08, 0.085]},
+      {"offset": [0, 0.05, 0.005], "half": [0.026, 0.03, 0.11], "color": [0.09, 0.095, 0.085]},
+      {"offset": [0, 0.05, -0.145], "half": [0.027, 0.027, 0.03], "color": [0.05, 0.05, 0.05]},
+      {"offset": [0, 0.05, 0.14], "half": [0.018, 0.018, 0.022], "color": [0.05, 0.05, 0.05]},
+      {"offset": [0.03, 0.05, 0.03], "half": [0.006, 0.012, 0.02], "color": [0.12, 0.12, 0.12]},
+      {"offset": [0, 0.084, 0.02], "half": [0.012, 0.005, 0.03], "color": [0.12, 0.12, 0.12]}
+    ]
+}

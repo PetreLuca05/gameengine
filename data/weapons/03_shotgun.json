@@ -65,7 +65,7 @@
   "part_mult": { "head": 0.75 },
   "falloff": { "start": 8, "end": 30, "min": 0.2 },
   "attachment_slots": {
-    "optic": {"pos": [0, 0.077, 0.02], "rail": [-0.1, 0.05], "allow": ["red_dot", "scope_4x"]},
+    "optic": {"pos": [0, 0.077, 0.02], "rail": [-0.1, 0.05], "allow": ["red_dot", "scope_4x", "scope_thermal"]},
     "muzzle": {"allow": ["compensator"]},
     "stock": {"pos": [0, 0.01, 0.03], "allow": ["heavy_stock"], "hide_parts": [2]}
   },

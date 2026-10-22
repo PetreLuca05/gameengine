@@ -12,6 +12,26 @@ void game_respawn_player(World *w, int slot);
 void game_respawn_player_at(World *w, int slot, vec3 pos, float yaw, float hp);
 void game_create_player_character(World *w, int slot, vec3 feet);
 
+// game_vehicles.c: each vehicle's heat sources for the thermal scope (game_thermal.c)
+typedef struct VehThermal {
+    EntityId ent;
+    bool engine, braking;
+    float load, speed;
+    vec3 engine_pos, exhaust_pos, ground;
+    float engine_r;
+    vec3 wheel_pos[4];
+    float wheel_r[4];
+    int wheel_count;
+} VehThermal;
+int vehicles_thermal(World *w, VehThermal *out, int max);
+
+// game_thermal.c: the thermal scope, game side (docs/NIGHT_OPTICS.md)
+void thermal_register(void);
+void thermal_frame(float dt);                   // the temperature state + the sight's RenderThermal
+void thermal_host_tick(World *w, int slot, const UserCmd *c, float dt);   // host: the scope's battery
+bool thermal_wheel(int dir);                    // ADS through a thermal scope: the wheel zooms (true = used)
+bool thermal_sight_active(void);                // the viewed sight is a thermal scope (powered)
+
 // game_nvg.c: night vision goggles, game side (docs/NIGHT_OPTICS.md)
 struct NvgConfig;
 struct NvgVariant;
@@ -105,6 +125,9 @@ bool holdpoint_save_all(const char *path_override);
 void sights_register(void);
 void sights_camera(const Player *p, const WeaponDef *wd, CameraAds *out);
 void sights_frame(const RenderCamera *cam, bool first_person);
+struct AttachmentDef;
+const struct AttachmentDef *sights_optic(void);   // the viewed weapon's optic this frame (NULL: none)
+float sights_ads(void);                           // its ADS progress 0..1
 void sights_test_frame(const RenderCamera *cam);
 bool sights_test_running(void);
 bool sights_dof_managed(void);

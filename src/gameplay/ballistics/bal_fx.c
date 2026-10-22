@@ -367,3 +367,6 @@ void bal_fx_frame(World *w, vec3 cam, float dt) {
     const BalLive *ended = bal_world_ended_tracers(&count);
     for (int i = 0; i < count; i++) draw_tracer(&ended[i], cam, shutter, arcade);
 }
+
+// Barrel heat of a shooter's weapon (g of powder, decaying; thermal scope: game_thermal.c).
+float bal_fx_heat(int slot) { return bal_muzzle_heat_at(&F.heat[DG_CLAMP(slot, 0, MAX_PLAYERS)], platform_time()); }

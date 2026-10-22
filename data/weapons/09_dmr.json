@@ -62,7 +62,7 @@
   },
   "part_mult": { "head": 1.2 },
   "attachment_slots": {
-    "optic": {"pos": [0, 0.082, -0.02], "rail": [-0.06, 0.06], "allow": ["red_dot", "scope_4x", "scope_8x"], "default": "scope_4x"},
+    "optic": {"pos": [0, 0.082, -0.02], "rail": [-0.06, 0.06], "allow": ["red_dot", "scope_4x", "scope_thermal", "scope_8x"], "default": "scope_4x"},
     "muzzle": {"allow": ["suppressor", "compensator", "flash_hider", "muzzle_brake"]},
     "underbarrel": {"pos": [0, 0.018, -0.32], "allow": ["vertical_grip", "weapon_light", "laser"]},
     "magazine": {"pos": [0, 0.015, -0.08], "allow": ["extended_mag"], "hide_parts": [3]},
