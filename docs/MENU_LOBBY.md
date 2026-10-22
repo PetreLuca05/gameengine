@@ -60,7 +60,9 @@ launch ── splash (1.6 s, any key / click skips) ──▶ MAIN MENU
   footer: key hints
 
 PARTY (no lobby screen: the Play tab is the lobby; mm_play.c draw_party, mainmenu.c party_keep)
-  the menu opens your own lobby on start (Steam when it runs, else LAN); a failure (no Steam lobby,
+  the menu opens your own lobby on start (Steam when it runs, else LAN). A Steam host listens on the
+  LAN as well (src/net/transport_dual.c: Steam peers 2k, LAN peers 2k + 1; LAN discovery answers), so
+  Steam friends and players on the local network join the same party; a failure (no Steam lobby,
   the port taken) is quiet and retried every 15 s ("No party: <reason>")
   header: "Party  n / max" · privacy in words · the lock (closed: Friends / Invite only, open:
           Public; the host clicks it: Public <-> Invite only, saved in the profile); a LAN party

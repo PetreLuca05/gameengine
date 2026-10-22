@@ -41,6 +41,8 @@ struct NetTransport {
 
 NetTransport *transport_lan_create(void);
 NetTransport *transport_steam_create(void);    // NULL when built without Steam / Steam not running
+// A host on both: Steam (P2P relay) and the LAN at once (transport_dual.c); either may be NULL.
+NetTransport *transport_dual_create(NetTransport *steam, NetTransport *lan);
 // Wraps a transport with simulated latency/loss (net_fakelag, net_fakeloss cvars).
 NetTransport *transport_conditioner_wrap(NetTransport *inner);
 

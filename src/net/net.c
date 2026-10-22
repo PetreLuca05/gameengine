@@ -1005,8 +1005,12 @@ int net_lan_servers(const LanServer **out) {
 
 // ------------------------------------------------------------------ public API
 
-static NetTransport *make_transport(TransportKind kind) {
-    NetTransport *raw = kind == TRANSPORT_STEAM ? transport_steam_create() : transport_lan_create();
+// host: a Steam host also listens on the LAN (transport_dual.c), so both Steam friends and players
+// on the local network join the same game.
+static NetTransport *make_transport(TransportKind kind, bool host) {
+    NetTransport *raw;
+    if (kind == TRANSPORT_STEAM) raw = host ? transport_dual_create(transport_steam_create(), transport_lan_create()) : transport_steam_create();
+    else raw = transport_lan_create();
     return transport_conditioner_wrap(raw);
 }
 
@@ -1014,7 +1018,7 @@ bool net_host(TransportKind kind, u16 port) {
     if (N->role == NET_HOST && N->kind == kind) return true;
     if (!game_is_host()) { log_warn("net: start a local game before hosting"); return false; }
     net_stop();
-    N->t = make_transport(kind);
+    N->t = make_transport(kind, true);
     if (!N->t) { log_warn("net: %s transport unavailable", kind == TRANSPORT_STEAM ? "Steam" : "LAN"); return false; }
     if (!N->t->listen(N->t, port ? port : (u16)N->port->i, N->maxplayers->i)) {
         close_transport();
@@ -1023,14 +1027,14 @@ bool net_host(TransportKind kind, u16 port) {
     N->role = NET_HOST;
     N->kind = kind;
     // Existing local players keep their slots; remote slots are filled as clients join.
-    if (kind == TRANSPORT_LAN) discovery_host_open();
+    discovery_host_open();   // LAN discovery: a Steam host is on the LAN too
     log_info("net: hosting via %s", N->t->name);
     return true;
 }
 
 bool net_connect(TransportKind kind, const char *address) {
     net_stop();
-    N->t = make_transport(kind);
+    N->t = make_transport(kind, false);
     if (!N->t) { log_warn("net: transport unavailable"); return false; }
     if (!N->t->connect(N->t, address)) {
         close_transport();
