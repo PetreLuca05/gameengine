@@ -27,6 +27,7 @@
 #include "core/platform.h"
 #include "core/profiler.h"
 #include "net/replication.h"
+#include "physics/physics.h"
 #include "render/render.h"
 #include "world/openworld.h"
 #include "cJSON.h"
@@ -643,12 +644,35 @@ static void cmd_perf_scenes(int argc, const char **argv) {
     for (int i = 0; i < PF.scene_count; i++) log_info("  %-14s %-10s %s", PF.scenes[i].id, PF.scenes[i].map, PF.scenes[i].desc);
 }
 
+// Which physics bodies stay awake (Jolt steps every active body each tick): per layer and motion type,
+// with the entities behind the first few.
+static void cmd_perf_phys_active(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    World *w = game_world();
+    if (!w || !w->phys) { log_info("perf_phys_active: no world"); return; }
+    static const char *k_layers[PL_COUNT] = { "static", "moving", "character", "debris", "trigger", "ragdoll", "ragdoll_solid", "clip" };
+    int layer[PL_COUNT], motion[3];
+    BodyId sample[12];
+    int n = phys_active_census(w->phys, layer, motion, sample, 12);
+    log_info("perf_phys_active: %d of %d bodies awake (static %d, kinematic %d, dynamic %d)", n, phys_body_count(w->phys), motion[PM_STATIC], motion[PM_KINEMATIC], motion[PM_DYNAMIC]);
+    for (int l = 0; l < PL_COUNT; l++) if (layer[l]) log_info("  %-13s %d", k_layers[l], layer[l]);
+    for (int i = 0; i < n && i < 12; i++) {
+        vec3 p;
+        quat q;
+        phys_get_transform(w->phys, sample[i], &p, &q);
+        u64 user = phys_body_user(w->phys, sample[i]);
+        log_info("  body %08x user %016llx at %.1f %.1f %.1f", (unsigned)sample[i], (unsigned long long)user, p.x, p.y, p.z);
+    }
+}
+
 void game_perf_init(void) {
     cmd_register("perf_audit", cmd_perf_audit,
                  "perf_audit [all|scene,..] [frames=300] [out=perf_out] [levels=modern,low] [settle=120] [cap=fps] [refs] [quit]: profile the benchmark scenes (docs/PERF_AUDIT.md)");
     cmd_register("perf_verify", cmd_perf_verify,
                  "perf_verify <PF-xxxx|all> [all|scene,..] [frames=240] [out=perf_out/verify] [reps=2] [levels=modern] [settle=120] [cap=fps] [quit]: A/B timings, image and state diffs of a fix");
     cmd_register("perf_scenes", cmd_perf_scenes, "list the perf_audit benchmark scenes (assets/perf/scenes.json)");
+    cmd_register("perf_phys_active", cmd_perf_phys_active, "perf_phys_active: the physics bodies awake now (per layer / motion type, the first few with their entity)");
     cmd_register("perf_bench", cmd_perf_bench,
                  "perf_bench [frames=600] [out=perf_out/bench] [levels=current|modern,low] [settle=180] [refs] [quit]: the FPS benchmark, map devroom_vegetation (docs/PERF_AUDIT.md)");
     render_set_camera_override(perf_camera);

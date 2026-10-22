@@ -96,6 +96,7 @@ typedef enum ProfFix {
     PFX_SHADOW_ONE_LOD,       // PF-0036: sun cascades draw the finer LOD of a LOD band alone (no dithered pair; never coarser)
     PFX_SHADOW_FAR_RES,       // PF-0049: sun cascades 1..3 at 1 / r_shadow_far_res of the tile's texels
     PFX_SHADOW_FAR_CACHE,     // PF-0050: sun cascades 2..3 cached without wind, moving casters over them every frame
+    PFX_LEVEL_ZOMBIE_TIERS,   // PF-0051: level-placed zombies on the horde's distance tiers (rays, animation, capsule)
     PFX_COUNT
 } ProfFix;
 #define PFX_TRADEOFF_FIRST PFX_SHADOW_CASTER_LIMIT

@@ -101,6 +101,12 @@ The tier is chosen by distance to the nearest player. Every value is in `assets/
 Bands have 3 m of hysteresis (`tiers.hysteresis`), so a zombie on an edge doesn't flap between
 tiers.
 
+Zombies a level places outside the horde (the dev room hall, story chapters before they wake) use the
+same bands (PF-0051, `chars_host_tick`): their wall / ground rays every `sim_interval` ticks (they walk
+straight in between), animation + hitboxes every `anim_interval` ticks (hitboxes shifted with the body
+in between) and no Jolt capsule beyond `physics_dist`. Their drawn pose follows the character LOD as
+before. `perf_phys_active` lists the physics bodies awake (Jolt sleeps idle props on its own).
+
 ## Budgets (measured)
 
 Measured on this machine (RTX 3060 Ti, 12 logical cores) with `horde_test`, while the horde closes

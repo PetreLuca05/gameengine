@@ -24,6 +24,7 @@
 #include "gameplay/revive/revive.h"
 #include "game/game_water.h"
 #include "core/profiler.h"
+#include "gameplay/zombies/horde.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -867,7 +868,7 @@ static void update_limbs(CharacterInst *c, float dt) {
     c->limb = (u8)((c->leg_t > 0 ? LIMB_LEGS : 0) | (c->arm_t > 0 ? LIMB_ARMS : 0));
 }
 
-static void zombie_ai(World *w, CharacterInst *c, int i, float dt);
+static void zombie_ai(World *w, CharacterInst *c, int i, float dt, bool probe);
 
 static CharacterInst *corpse_for_slot(World *w, int slot);
 static void corpse_adopt(World *w, CharacterInst *corpse, CharacterInst *c);
@@ -987,11 +988,53 @@ static void sync_anim_cvars(void) {
     if (CG->ik_shoulders) g_anim_ik_shoulders = CG->ik_shoulders->i != 0;
 }
 
+// docs/perf/FINDINGS.md PF-0051: a level-placed zombie (outside the horde) on the horde's distance tiers
+// (assets/ai/zombie.json "tiers", by the nearest live player): its wall / ground rays every
+// tier_interval ticks (it walks on in between), animation + hitboxes every anim_interval ticks (the
+// hitboxes shifted with the body in between, as the horde's), no Jolt capsule beyond physics_dist.
+// Returns the animation interval (1 with the fix off: every tick, as before).
+static int level_zombie_lod(World *w, CharacterInst *c, int i, const vec3 *players, int np, bool *probe) {
+    *probe = true;
+    const HordeConfig *cfg = horde_config();
+    BodyId b = w->body[i].body;
+    bool on = phys_body_enabled(w->phys, b);
+    if (!cfg || !prof_fix_enabled(PFX_LEVEL_ZOMBIE_TIERS)) {
+        if (b != PHYS_INVALID_BODY && !on) {
+            phys_set_transform(w->phys, b, v3_add(w->xf[i].pos, v3(0, 0.9f, 0)), quat_identity(), false);
+            phys_set_body_enabled(w->phys, b, true);
+        }
+        c->capsule_off = false;
+        return 1;
+    }
+    float best = 1e18f;
+    for (int k = 0; k < np; k++) {
+        float dx = players[k].x - w->xf[i].pos.x, dz = players[k].z - w->xf[i].pos.z;
+        best = fminf(best, dx * dx + dz * dz);
+    }
+    float d = np ? sqrtf(best) : 1e9f;
+    c->sim_tier = (u8)horde_tier_for(cfg, c->sim_tier, d);
+    u32 phase = (u32)i * 7u;
+    int ai_iv = DG_MAX(1, cfg->tier_interval[c->sim_tier]);
+    *probe = ((w->tick + phase) % (u32)ai_iv) == 0;
+    bool want = on ? d < cfg->physics_dist + cfg->physics_hyst : d < cfg->physics_dist;
+    if (b != PHYS_INVALID_BODY && want != on) {
+        // Back on: placed first (a kinematic move from where it was switched off would sweep props).
+        if (want) phys_set_transform(w->phys, b, v3_add(w->xf[i].pos, v3(0, 0.9f, 0)), quat_identity(), false);
+        phys_set_body_enabled(w->phys, b, want);
+    }
+    c->capsule_off = b != PHYS_INVALID_BODY && !want;
+    return DG_MAX(1, cfg->anim_interval[c->sim_tier]);
+}
+
 void chars_host_tick(World *w, float dt) {
     if (!w->chars || !LIB) return;
     sync_anim_cvars();
     double t0 = platform_time();
     w->chars->tick = w->tick;
+    vec3 players[MAX_PLAYERS];
+    int np = 0;
+    for (int s = 0; s < MAX_PLAYERS; s++)
+        if (w->players[s].active && ent_valid(w, w->players[s].ent) && w->players[s].sim.move.mode != MOVE_DEAD) players[np++] = w->players[s].sim.move.pos;
     // Horde zombies due this tick are evaluated in parallel jobs (chunks), everything else here.
     static CharacterInst *due[MAX_CHARACTERS];
     int due_n = 0, evals = 0;
@@ -1008,8 +1051,20 @@ void chars_host_tick(World *w, float dt) {
             continue;
         }
         if (c->corpse) continue;   // bodies never animate
-        if (w->type[i] == ET_ZOMBIE) zombie_ai(w, c, i, dt);
-        if (w->type[i] == ET_ZOMBIE && !c->history) chars_ensure_history(c);
+        if (w->type[i] == ET_ZOMBIE) {
+            bool probe;
+            int iv = level_zombie_lod(w, c, i, players, np, &probe);
+            zombie_ai(w, c, i, dt, probe);
+            if (!c->history) chars_ensure_history(c);
+            bool dead_now = (w->flags[i] & EF_DEAD) != 0;
+            if (iv > 1 && !dead_now && !c->dead && c->hit.count > 0 && ((w->tick + (u32)i * 7u) % (u32)iv) != 0) {
+                shift_hitboxes(w, c, i);
+                continue;
+            }
+            sim_one(w, c, i, dt * (float)iv);
+            evals++;
+            continue;
+        }
         sim_one(w, c, i, dt);
         evals++;
     }
@@ -3382,7 +3437,9 @@ float chars_npc_melee(World *w, CharacterInst *c) {
     return k_attack_hit[v];
 }
 
-static void zombie_ai(World *w, CharacterInst *c, int i, float dt) {
+// probe: the wall and ground rays this tick (a far level zombie casts them every tier_interval ticks
+// and walks straight, at its last ground height, in between: PF-0051).
+static void zombie_ai(World *w, CharacterInst *c, int i, float dt, bool probe) {
     ZombieAI *ai = &c->ai;
     if ((w->flags[i] & EF_DEAD) || c->dead) { ai->speed = 0; return; }
     float speed_mult = (CG->zombie_speed ? CG->zombie_speed->f : 1.0f) * ((c->limb & LIMB_LEGS) ? 0.45f : 1.0f);
@@ -3423,7 +3480,7 @@ static void zombie_ai(World *w, CharacterInst *c, int i, float dt) {
     vec3 step = v3_scale(forward_from_yaw(ai->yaw), ai->speed * dt);
     RayHit rh;
     vec3 chest = v3_add(pos, v3(0, 1.0f, 0));
-    if (ai->speed > 0 && phys_raycast(w->phys, chest, v3_scale(v3_norm(step), 0.5f), PL_MASK_WORLD, PHYS_INVALID_BODY, &rh)) {
+    if (probe && ai->speed > 0 && phys_raycast(w->phys, chest, v3_scale(v3_norm(step), 0.5f), PL_MASK_WORLD, PHYS_INVALID_BODY, &rh)) {
         ai->yaw = wrap_angle(ai->yaw + 2.0f);
         ai->speed = 0;
         step = v3(0, 0, 0);
@@ -3431,11 +3488,11 @@ static void zombie_ai(World *w, CharacterInst *c, int i, float dt) {
         ai->timer = 0.5f;
     }
     vec3 np = v3_add(pos, step);
-    if (phys_raycast(w->phys, v3_add(np, v3(0, 0.6f, 0)), v3(0, -1.6f, 0), PL_MASK(PL_STATIC), PHYS_INVALID_BODY, &rh)) np.y = rh.point.y;
+    if (probe && phys_raycast(w->phys, v3_add(np, v3(0, 0.6f, 0)), v3(0, -1.6f, 0), PL_MASK(PL_STATIC), PHYS_INVALID_BODY, &rh)) np.y = rh.point.y;
     w->xf[i].pos = np;
     w->xf[i].rot = quat_yaw(ai->yaw);
     c->body_yaw = ai->yaw;
-    if (w->body[i].body != PHYS_INVALID_BODY) phys_move_kinematic(w->phys, w->body[i].body, v3_add(np, v3(0, 0.9f, 0)), quat_identity(), dt);
+    if (w->body[i].body != PHYS_INVALID_BODY && !c->capsule_off) phys_move_kinematic(w->phys, w->body[i].body, v3_add(np, v3(0, 0.9f, 0)), quat_identity(), dt);
 }
 
 // ------------------------------------------------------------------ debug

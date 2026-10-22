@@ -137,6 +137,10 @@ typedef struct CharacterInst {
     // hitboxes with the body in between.
     int horde;                        // horde slot + 1 (0 = not in a horde)
     int sim_interval, sim_phase;
+    // Level-placed zombies (outside the horde) on the horde's distance tiers (PF-0051): the tier
+    // (hysteresis), and whether their Jolt capsule is off this tick (no player within physics_dist).
+    u8 sim_tier;
+    bool capsule_off;
     vec3 hit_feet;                    // feet when the hitboxes were last built
     vec3 cl_prev_feet;                // client: zombie locomotion derived from the replicated motion
     float cl_speed;

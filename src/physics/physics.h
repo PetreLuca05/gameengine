@@ -125,6 +125,7 @@ void phys_set_velocity(PhysicsWorld *w, BodyId id, vec3 lin, vec3 ang);
 void phys_add_impulse(PhysicsWorld *w, BodyId id, vec3 impulse, vec3 point);
 void phys_set_motion(PhysicsWorld *w, BodyId id, PhysMotion m);
 bool phys_is_active(PhysicsWorld *w, BodyId id);
+bool phys_body_enabled(PhysicsWorld *w, BodyId id);   // in the physics system (phys_set_body_enabled)
 u64 phys_body_user(PhysicsWorld *w, BodyId id);
 void phys_set_body_enabled(PhysicsWorld *w, BodyId id, bool enabled); // add/remove from broadphase
 
@@ -246,5 +247,8 @@ void phys_vehicle_moto_lean(PhysicsWorld *w, PhysVehicle *v, float speed, float 
 // Debug: draw collision shapes via debug lines.
 void phys_debug_draw(PhysicsWorld *w, vec3 around, float radius);
 int phys_body_count(PhysicsWorld *w);
+// The awake bodies (diagnostics, perf_phys_active): count per layer and motion type, the first
+// max_sample of them. Returns how many are awake.
+int phys_active_census(PhysicsWorld *w, int per_layer[PL_COUNT], int per_motion[3], BodyId *sample, int max_sample);
 
 #endif

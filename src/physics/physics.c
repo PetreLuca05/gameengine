@@ -298,6 +298,8 @@ void phys_set_body_enabled(PhysicsWorld *w, BodyId id, bool enabled) {
     if (!enabled && added) JPH_BodyInterface_RemoveBody(w->bi, id);
 }
 
+bool phys_body_enabled(PhysicsWorld *w, BodyId id) { return id != PHYS_INVALID_BODY && JPH_BodyInterface_IsAdded(w->bi, id); }
+
 void phys_get_transform(PhysicsWorld *w, BodyId id, vec3 *pos, quat *rot) {
     JPH_RVec3 p;
     JPH_Quat q;
@@ -353,6 +355,21 @@ u64 phys_body_user(PhysicsWorld *w, BodyId id) {
 }
 
 int phys_body_count(PhysicsWorld *w) { return w->body_count; }
+
+int phys_active_census(PhysicsWorld *w, int per_layer[PL_COUNT], int per_motion[3], BodyId *sample, int max_sample) {
+    int n = 0;
+    for (int l = 0; l < PL_COUNT; l++) per_layer[l] = 0;
+    for (int m = 0; m < 3; m++) per_motion[m] = 0;
+    for (int i = 0; i < MAX_BODIES; i++) {
+        const BodyRecord *r = &w->records[i];
+        if (!r->used || !JPH_BodyInterface_IsActive(w->bi, r->id)) continue;
+        if (r->layer < PL_COUNT) per_layer[r->layer]++;
+        if ((int)r->motion < 3) per_motion[r->motion]++;
+        if (n < max_sample) sample[n] = r->id;
+        n++;
+    }
+    return n;
+}
 
 // ------------------------------------------------------------------ constraints
 

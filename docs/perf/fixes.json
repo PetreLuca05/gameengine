@@ -3186,5 +3186,28 @@
    "dveg_horde",
    "dveg_overlook"
   ]
+ },
+ "PF-0051": {
+  "title": "Level-placed zombies on the horde's distance tiers: rays, animation and the Jolt capsule by distance to the nearest player",
+  "rule": "R12",
+  "finding": "2026-10-22 (the suggestions the developer asked for: sim LOD for far zombies, physics sleeping): the horde already ran its zombies on distance tiers (assets/ai/zombie.json) and Jolt sleeps idle bodies (perf_phys_active on devroom_vegetation: 20 - 22 of 2943 bodies awake), but the zombies a level places outside the horde (the dev room hall, story chapters) cast their wall and ground rays, moved their kinematic capsule (awake every tick) and evaluated their animation + hitboxes every tick at any distance: the 13 - 15 awake capsules of that census were dev room zombies ~250 m from the player",
+  "effort": "S",
+  "status": "implemented; verified for correctness on the Linux container (lavapipe: images / streams), timing to be verified on the target machine (perf_verify)",
+  "tradeoff": "A level zombie beyond the horde's near band (20 m) casts its wall / ground rays every tier_interval ticks (2 within 50 m, 4 within 140 m, 60 beyond) and walks straight at its last ground height in between (a step or slope under a far zombie lands up to that many ticks late); its hitboxes are re-posed every anim_interval ticks and shifted with the body in between (as the horde's); beyond physics_dist (20 m, +4 m to switch back off) it has no capsule (it blocks no player and no prop there). Its drawn pose is unchanged (chars_present_tick, LOD-driven as before).",
+  "code": [
+   "src/gameplay/characters.c level_zombie_lod, chars_host_tick (level zombies), zombie_ai (probe)",
+   "src/physics/physics.c phys_body_enabled, phys_active_census; src/game/game_perf.c perf_phys_active"
+  ],
+  "description": "chars_host_tick gives each level zombie the horde's tier for its distance to the nearest live player (horde_tier_for, with the hysteresis band), casts zombie_ai's rays on the ticks due for that tier (phase-spread by entity), evaluates its animation every anim_interval ticks with that many ticks' time (the horde's sim_core path) and shifts its hitboxes in between (shift_hitboxes), and switches its capsule off beyond physics_dist (placed first when it comes back on, as the horde does). Measured on the Linux container (dev room, perf_phys_active): 14 kinematic capsules awake next to the hall, 0 from 300 m away, 13 back at the hall.",
+  "metrics": [
+   "zone:sim:anim_hitboxes",
+   "zone:sim:physics",
+   "zone:sim:host_tick",
+   "cpu_work"
+  ],
+  "scenes": [
+   "dveg_hall",
+   "dveg_meadow"
+  ]
  }
 }
