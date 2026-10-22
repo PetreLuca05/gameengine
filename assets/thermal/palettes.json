@@ -1,0 +1,10 @@
+{
+  "_doc": "Thermal scope palettes (src/render/thermal_sensor.h): stops [pos 0..1 cold -> hot, r, g, b 0..255]. A name matching a built-in palette replaces it; up to 8. The scope cycles them in this order.",
+  "palettes": [
+    { "name": "White Hot", "stops": [[0, 0, 0, 0], [1, 255, 255, 255]] },
+    { "name": "Black Hot", "stops": [[0, 255, 255, 255], [1, 0, 0, 0]] },
+    { "name": "Red Hot", "stops": [[0, 0, 0, 0], [0.92, 225, 225, 225], [0.921, 200, 20, 10], [0.97, 255, 70, 0], [1, 255, 230, 40]] },
+    { "name": "Ironbow", "stops": [[0, 0, 0, 10], [0.15, 32, 0, 90], [0.35, 140, 0, 150], [0.55, 220, 40, 60], [0.75, 250, 140, 0], [0.9, 255, 215, 40], [1, 255, 255, 230]] },
+    { "name": "Rainbow", "stops": [[0, 0, 0, 0], [0.12, 30, 0, 120], [0.28, 0, 60, 255], [0.45, 0, 220, 220], [0.6, 40, 220, 0], [0.75, 255, 240, 0], [0.88, 255, 80, 0], [1, 255, 255, 255]] }
+  ]
+}

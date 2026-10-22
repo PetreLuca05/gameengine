@@ -1,0 +1,19 @@
+{
+  "_doc": "Entity temperatures (docs/NIGHT_OPTICS.md 'Entities', src/world/thermal.h), degrees C. human / zombie: core, skin (exposed, 20 C still air), face / hands offsets, cold_k (skin drop per C of air below 20), wind_k (per m/s). Zombies run cold (gameplay rule: dimmer on thermal; core 20..28). clothing: insulation per part role, T = air + (skin - air) / (1 + clo * k). corpse.tau: Newtonian cooling after death (s, gameplay-scaled). vehicle parts: rise_idle / rise_load (C above air running / at full rpm), heat_tau / cool_tau (s); brake_heat (C/s per m/s while braking), tire_speed_k (C per m/s). barrel: C per gram of muzzle heat (bal_muzzle, tau 8 s), max. sources: fixed emitters. sky: the apparent sky temperature (clear_depression below air at the zenith, cloud_keep under full cloud, exponent of the zenith -> horizon blend).",
+  "human":  { "core": 37.0, "skin": 34.0, "face": 1.5, "hands": -1.0, "cold_k": 0.12, "wind_k": 0.15 },
+  "zombie": { "core": 24.0, "skin": 22.0, "face": 0.5, "hands": -0.5, "cold_k": 0.10, "wind_k": 0.12 },
+  "clothing": { "torso": 1.0, "legs": 0.8, "feet": 1.5, "headwear": 2.0, "armor": 3.0, "backpack": 4.0, "hair": 0.6, "k": 0.9 },
+  "corpse": { "tau": 600 },
+  "blood": { "t0": 34, "tau": 90 },
+  "vehicle": {
+    "engine":  { "rise_idle": 55,  "rise_load": 30,  "heat_tau": 120, "cool_tau": 900 },
+    "exhaust": { "rise_idle": 120, "rise_load": 200, "heat_tau": 40,  "cool_tau": 300 },
+    "brake":   { "cool_tau": 60 },
+    "tire":    { "heat_tau": 300, "cool_tau": 400 },
+    "brake_heat": 0.6,
+    "tire_speed_k": 0.6
+  },
+  "barrel": { "k": 2.5, "max": 450 },
+  "sources": { "bulb": 120, "led": 45, "fire": 700, "muzzle": 900, "explosion": 1200, "breath": 30, "exhaust_plume": 120, "footprint": 2, "footprint_tau": 60, "heat_decal_tau": 1200 },
+  "sky": { "clear_depression": 45, "cloud_keep": 0.15, "exponent": 0.35 }
+}

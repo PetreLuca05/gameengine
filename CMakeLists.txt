@@ -524,6 +524,15 @@ add_test(NAME weather COMMAND test_weather WORKING_DIRECTORY $<TARGET_FILE_DIR:d
 # Sky-driven shadows (docs/SHADOWS.md): shadows_sky.json, source radius curves, the PCSS kernel's
 # penumbra width vs d x tan(r), lit / shade contrast, cutoff hysteresis over a 2 min transition, moon
 # handover, cloud drift, tiers, TAA on a softening edge.
+# Night optics (docs/NIGHT_OPTICS.md): the temperature layer (classes, inertia, entities, sky, Planck
+# band radiance), the thermal sensor (AGC, NUC, palettes, zoom), the image intensifier (ABC, whiteout,
+# scintillation, halo, masks, battery) and the NVG rules (toggle, ADS, battery swap).
+add_executable(test_night_optics tests/test_night_optics.c src/world/thermal.c src/render/thermal_sensor.c src/render/post/nvg_model.c src/gameplay/nvg_rules.c)
+set_target_properties(test_night_optics PROPERTIES C_STANDARD 11)
+target_link_libraries(test_night_optics PRIVATE dg_animcore)
+add_dependencies(test_night_optics dg_copy_data)
+add_test(NAME night_optics COMMAND test_night_optics WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
 add_executable(test_shadow_sky tests/test_shadow_sky.c src/render/shadow_sky.c)
 set_target_properties(test_shadow_sky PROPERTIES C_STANDARD 11)
 target_link_libraries(test_shadow_sky PRIVATE dg_animcore)

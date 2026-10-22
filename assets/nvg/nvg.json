@@ -1,0 +1,16 @@
+{
+  "_doc": "Night vision goggles (docs/NIGHT_OPTICS.md 'Image intensifier', src/render/post/nvg_model.h). Global: ir_moon / ir_sky (near-IR share of moonlight / starlight + airglow), k_vis / k_nir (photocathode weights of the visible / near-IR images), photocathode (GaAs weights on linear RGB: red-heavy), y_sat (screen saturation), overload (G * peak flux / y_sat where the whiteout starts), flip_time (s, the nvg_flip hand case). Variants (items.json 'nvg' names one): phosphor (linear RGB), tubes (1 circle, 2 = figure 8), circle_deg, tube_sep_deg, halo_deg (radius, constant angle), whiteout_recover (s), persistence (s), gain_min / gain_max, target (ABC mean output), settle_down / settle_up (s), damping, tube_px (resolution across a circle, Modern), photons (photoelectrons per tube pixel per frame at flux 1), noise_factor (MCP F), ebi (dark flux), protect_s (bright-source shutoff), runtime_h (hours on one AA), illum_drain, illum_range (m), illum_angle (deg), illum_intensity.",
+  "ir_moon": 1.0,
+  "ir_sky": 3.0,
+  "k_vis": 1.0,
+  "k_nir": 1.0,
+  "photocathode": [0.55, 0.35, 0.10],
+  "y_sat": 1.0,
+  "overload": 4.0,
+  "flip_time": 0.6,
+  "variants": [
+    { "id": "p43", "label": "Green phosphor (P43)", "phosphor": [0.40, 1.00, 0.32], "tubes": 1, "circle_deg": 40, "halo_deg": 0.9, "whiteout_recover": 0.7, "persistence": 0.06, "runtime_h": 1.0 },
+    { "id": "p45", "label": "White phosphor (P45)", "phosphor": [0.86, 0.90, 1.00], "tubes": 1, "circle_deg": 40, "halo_deg": 0.9, "whiteout_recover": 0.6, "persistence": 0.04, "runtime_h": 1.0 },
+    { "id": "dual", "label": "Dual tube, white phosphor", "phosphor": [0.86, 0.90, 1.00], "tubes": 2, "circle_deg": 40, "tube_sep_deg": 8, "halo_deg": 0.8, "whiteout_recover": 0.6, "persistence": 0.04, "runtime_h": 0.75 }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "_doc": "Thermal classes (docs/NIGHT_OPTICS.md 'Temperature state layer', src/world/thermal.h). Per class: emissivity (8..14 um; 1 - reflectance, LWIR opaque), tau_h (thermal inertia, world hours), solar_gain (C above air at full sun, level), direct_gain (C extra facing the sun), night_loss (C below air under a clear night sky), sky_facing_loss (C extra for upward faces at night), wet_cool (C below air when fully wet), ir_reflectance (near-IR reflectance for the NVG; -1 = from the albedo). The class order is fixed (shaders index it). 'surfaces' maps a material / surface name (level 'material', SurfaceMaterial, item material) to a class.",
+  "classes": {
+    "concrete":      { "emissivity": 0.92, "tau_h": 5.0,  "solar_gain": 9,  "direct_gain": 6,  "night_loss": 2, "sky_facing_loss": 2,   "wet_cool": 3,   "ir_reflectance": 0.40 },
+    "brick":         { "emissivity": 0.93, "tau_h": 4.0,  "solar_gain": 9,  "direct_gain": 6,  "night_loss": 2, "sky_facing_loss": 2,   "wet_cool": 3,   "ir_reflectance": 0.35 },
+    "soil":          { "emissivity": 0.93, "tau_h": 2.5,  "solar_gain": 8,  "direct_gain": 5,  "night_loss": 4, "sky_facing_loss": 2,   "wet_cool": 4,   "ir_reflectance": 0.30 },
+    "grass":         { "emissivity": 0.98, "tau_h": 0.5,  "solar_gain": 3,  "direct_gain": 2,  "night_loss": 5, "sky_facing_loss": 1.5, "wet_cool": 2,   "ir_reflectance": 0.50 },
+    "foliage":       { "emissivity": 0.97, "tau_h": 0.2,  "solar_gain": 1.5,"direct_gain": 1.5,"night_loss": 3, "sky_facing_loss": 1,   "wet_cool": 1.5, "ir_reflectance": 0.55 },
+    "asphalt":       { "emissivity": 0.95, "tau_h": 3.0,  "solar_gain": 14, "direct_gain": 8,  "night_loss": 3, "sky_facing_loss": 2,   "wet_cool": 3,   "ir_reflectance": 0.10 },
+    "wood":          { "emissivity": 0.90, "tau_h": 1.5,  "solar_gain": 6,  "direct_gain": 5,  "night_loss": 3, "sky_facing_loss": 2,   "wet_cool": 3,   "ir_reflectance": 0.45 },
+    "metal_painted": { "emissivity": 0.90, "tau_h": 0.4,  "solar_gain": 12, "direct_gain": 10, "night_loss": 5, "sky_facing_loss": 3,   "wet_cool": 2,   "ir_reflectance": -1 },
+    "metal_bare":    { "emissivity": 0.12, "tau_h": 0.3,  "solar_gain": 10, "direct_gain": 8,  "night_loss": 5, "sky_facing_loss": 3,   "wet_cool": 1,   "ir_reflectance": -1 },
+    "glass":         { "emissivity": 0.88, "tau_h": 1.0,  "solar_gain": 4,  "direct_gain": 3,  "night_loss": 4, "sky_facing_loss": 2,   "wet_cool": 2,   "ir_reflectance": 0.08 },
+    "water":         { "emissivity": 0.96, "tau_h": 24.0, "solar_gain": 1,  "direct_gain": 0.5,"night_loss": 1, "sky_facing_loss": 0.5, "wet_cool": 0,   "ir_reflectance": 0.02 },
+    "cloth":         { "emissivity": 0.90, "tau_h": 0.3,  "solar_gain": 5,  "direct_gain": 4,  "night_loss": 3, "sky_facing_loss": 1,   "wet_cool": 3,   "ir_reflectance": 0.60 },
+    "skin":          { "emissivity": 0.98, "tau_h": 0.1,  "solar_gain": 0,  "direct_gain": 0,  "night_loss": 0, "sky_facing_loss": 0,   "wet_cool": 0,   "ir_reflectance": 0.50 },
+    "snow":          { "emissivity": 0.98, "tau_h": 2.0,  "solar_gain": 0,  "direct_gain": 0,  "night_loss": 6, "sky_facing_loss": 2,   "wet_cool": 0,   "ir_reflectance": 0.70 },
+    "plastic":       { "emissivity": 0.92, "tau_h": 0.5,  "solar_gain": 8,  "direct_gain": 6,  "night_loss": 4, "sky_facing_loss": 2,   "wet_cool": 2,   "ir_reflectance": 0.40 },
+    "hot":           { "emissivity": 0.95, "tau_h": 0.01, "solar_gain": 0,  "direct_gain": 0,  "night_loss": 0, "sky_facing_loss": 0,   "wet_cool": 0,   "ir_reflectance": 0.60 }
+  },
+  "surfaces": {
+    "default": "concrete", "concrete": "concrete", "plaster": "concrete", "tile": "concrete", "brick": "brick",
+    "metal_thin": "metal_painted", "metal_thick": "metal_painted", "roof_metal": "metal_painted", "metal": "metal_painted",
+    "metal_bare": "metal_bare", "steel": "metal_bare", "aluminium": "metal_bare", "chrome": "metal_bare",
+    "wood": "wood", "dirt": "soil", "mud": "soil", "sand": "soil", "gravel": "soil", "grass": "grass",
+    "foliage": "foliage", "leaves": "foliage", "asphalt": "asphalt", "glass": "glass", "water": "water",
+    "flesh": "skin", "skin": "skin", "cloth": "cloth", "fabric": "cloth", "snow": "snow",
+    "plastic": "plastic", "polymer": "plastic", "rubber": "plastic"
+  }
+}
