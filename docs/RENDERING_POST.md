@@ -117,7 +117,8 @@ the transition now sit in different command buffers), none on the compute queue.
 | volumetrics | `vol_inject`, `vol_integrate`, `fog_apply` | froxels (80×45×48 … 240×135×96, 80 m log depth), height fog, sun with shadow-map visibility (light shafts), point lights, HG phase, temporal reprojection; blended surfaces and particles apply the integrated volume themselves (lit set 2 binding 4, `vfx_particle.frag` set 2 binding 0). `fog_apply` also fogs the sky: sky pixels take the full froxel range (as the geometry beyond 80 m, no horizon seam); without froxels it puts the lit shaders' analytic fog over the sky through the height-fog layer up to the far plane (full at the horizon, only the layer towards the zenith). The scope PiP gets the same fog: each PiP pixel's world point is looked up in these froxels / the aerial perspective through the main projection (`scope_pip_fog`, docs/ATTACHMENTS.md "The PiP pass") |
 | TAA / TAA-U | `taa.comp` | Blackman-Harris reconstruction of the jittered samples, YCoCg variance clip, velocity dilation, disocclusion via depth history, viewmodel / transparency aware (`hdr_opaque`); TAA-U reconstructs at output resolution |
 | FXAA / SMAA | `fxaa.comp`, `smaa_*` | SMAA 1x (third_party/smaa, edges → weights → blend) |
-| FSR 1 | `fsr_easu.comp` | AMD FidelityFX EASU (third_party/fsr, MIT); FSR 2/3 and DLSS are enum slots that fall back to FSR 1 (SDKs not bundled) |
+| FSR 1 | `fsr_easu.comp` | AMD FidelityFX EASU (third_party/fsr, MIT) |
+| FSR 2 | `fsr2_prep.comp` + `fsr2/*.comp` | AMD FidelityFX FSR 2.2 temporal upscaling (third_party/fsr2, MIT), see "FSR 2"; DLSS is an enum slot that runs FSR 2 (SDK not bundled) |
 | motion blur | `mb_tiles`, `mb_neighbor`, `mb_blur` | McGuire reconstruction; mode 1 camera only (depth reprojection), 2 camera + objects; shutter fraction, 40 px clamp, viewmodel sharp |
 | depth of field | `dof_focus`, `dof_coc`, `dof_down`, `dof_gather`, `dof_composite` | thin-lens CoC (focal length, f-stop, 24 mm sensor), GPU autofocus on the crosshair (eased in log space), half-res near / far gather, circle or hexagonal bokeh; mode 1 = only while aiming |
 | auto exposure | `histogram`, `exposure` | 256-bin log histogram, centre weighted, percentile window, EV100 clamp, separate up / down adaptation; result stays on the GPU (`exposure_buf`), read back for the UI / tests |
@@ -129,6 +130,37 @@ the transition now sit in different command buffers), none on the compute queue.
 Shaders use one push-descriptor layout (`post_internal.h`): bindings 0–7 samplers, 8–11
 storage images, 12 `PostUBO`, 13/14 storage buffers, 128 B push constants. Pipelines are
 created lazily from `shaders/post/<name>` and rebuilt on shader hot reload.
+
+## FSR 2
+
+`r_upscaler 3` (Settings → Graphics → Upscaling: FSR 2; Medium, High and Modern allow it) resolves the
+jittered HDR frame with AMD FidelityFX Super Resolution 2.2 (`src/render/post/post_fsr2.c`). The SDK's
+own compute shaders are vendored in `third_party/fsr2` (MIT; `third_party/VERSIONS.txt`) and built by
+CMakeLists.txt as one permutation per pass (HDR input, render-resolution unjittered motion vectors,
+standard depth, FP32, Lanczos reprojection as the SDK picks on wave32 GPUs, no RCAS: `r_sharpen` in the
+final pass sharpens as for every upscaler). `post_fsr2.c` is the host side of the SDK's `ffx_fsr2.cpp` in
+C over the frame graph: the constants, the jitter phases (8 × (display / render)², `post_jitter_pixels`),
+the resources and the dispatch order. Each pass's descriptor set layout is built from its SPIR-V
+(`src/render/spv_reflect.c`, tests/test_spv_reflect.c): set 0 the two samplers, set 1 the resources
+(push descriptors). With `r_upscale_ratio` 1 it runs as native-resolution AA.
+
+| pass | what |
+|---|---|
+| `fsr2_reset` | a reset (first frame, resize, camera cut): the persistent images cleared |
+| `fsr2_prep` | ours: the depth with the viewmodel moved into the world projection (FSR 2 dilates motion vectors to the nearest depth), the reactive mask of the transparent pass (FidelityFX's generation: tonemapped colour vs `hdr_opaque`, 0.2 → 0.9), the exposure (`exposure_buf[0]`) as a 1×1 texture |
+| `fsr2_luminance` | SPD: the luminance mips (shading change) and FSR 2's own exposure for its lock logic |
+| `fsr2_reconstruct` | dilated motion vectors and depth, the reconstructed previous depth, luma history |
+| `fsr2_depth_clip` | disocclusion, dilated reactive masks, the prepared colour |
+| `fsr2_lock` | new locks on thin features; clears the reconstructed depth for the next frame |
+| `fsr2_accumulate` | the upscaled history and the output (display resolution) |
+
+Two storage formats in `ffx_fsr2_callbacks_glsl.h` are changed from the SDK's GLSL to what its own C++
+allocates (each line marked "Deadground"): the dilated depth is `r32f` (fp16 cannot tell far depths apart
+in a standard-depth buffer) and the prepared colour `rgba16f` (it holds signed YCoCg). When a pass is
+missing (shaders not built, render size below 64 px) the frame falls back to TAA-U. Measured on the Linux
+container (dev room, High, 0.67 of 1600×900): a still image scores like TAA-U against native TAA (PSNR
+34.9 vs 35.0 dB, gradient energy 4.35 vs 4.34); in a camera pan the zombies stay visibly crisper than with
+TAA-U. Its GPU cost on the target GPU is not measured yet (on an RTX 3060 Ti AMD quotes ~1 ms at 1440p).
 
 ## HDR10
 
@@ -162,7 +194,7 @@ is validated (`fidelity_check`).
 | Ultra | TAA | high | high | full | on | ultra | camera + objects | ADS | high | on |
 
 Changing any of them shows *Custom* (`r_post_preset 4`). Main cvars: `r_aa` (0 off, 1 FXAA, 2
-SMAA, 3 TAA), `r_upscaler` (0 off, 1 TAA-U, 2 FSR 1, 3 FSR 2 slot, 4 DLSS slot),
+SMAA, 3 TAA), `r_upscaler` (0 off, 1 TAA-U, 2 FSR 1, 3 FSR 2, 4 DLSS slot: FSR 2),
 `r_upscale_ratio`, `r_sharpen`, `r_ao`, `r_contact_shadows`, `r_ssr`, `r_ssgi`,
 `r_volumetrics`, `r_fog_scale`, `r_motion_blur`, `r_motion_blur_strength`, `r_dof`, `r_bloom`,
 `r_bloom_quality`, `r_bloom_intensity`, `r_lens_flare`, `r_lens_dirt`, `r_chromatic`,
@@ -325,7 +357,7 @@ full res): 0 messages; static frames change < 1 % of pixels, and motion changes 
 
 ## Known limitations
 
-* FSR 2/3 and DLSS are selectable slots without their SDKs (they use FSR 1).
+* DLSS is a selectable slot without its SDK (it runs FSR 2); FSR 3 frame generation is not integrated.
 * Post volumes are evaluated at the camera position (the whole frame takes the blend), not per
   pixel.
 * GPU particles don't receive the volumetric fog yet (blended lit surfaces do).

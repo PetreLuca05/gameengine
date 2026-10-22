@@ -399,7 +399,7 @@ void game_post_init(void) {
     GP.preset = cvar_reg_int("r_post_preset", 2, 0, 4, CVAR_TIER, "post quality preset: 0 low, 1 medium, 2 high, 3 ultra, 4 custom");
     GP.preset->on_change = on_preset;
     GP.aa = cvar_find("r_aa");
-    GP.upscaler = cvar_reg_int("r_upscaler", 0, 0, 4, A | CVAR_EDITABLE, "upscaler: 0 off, 1 TAA-U, 2 FSR 1, 3 FSR 2 (slot), 4 DLSS (slot)");
+    GP.upscaler = cvar_reg_int("r_upscaler", 0, 0, 4, A | CVAR_EDITABLE, "upscaler: 0 off, 1 TAA-U, 2 FSR 1, 3 FSR 2, 4 DLSS (slot: runs FSR 2)");
     GP.upscale = cvar_reg_float("r_upscale_ratio", 0.67f, 0.5f, 1.0f, A | CVAR_EDITABLE, "render resolution / output with an upscaler");
     GP.sharpen = cvar_reg_float("r_sharpen", 0.35f, 0.0f, 1.0f, A | CVAR_EDITABLE, "contrast adaptive sharpening");
     GP.ao = cvar_reg_int("r_ao", 2, 0, 2, CVAR_TIER, "ambient occlusion (GTAO): 0 off, 1 low, 2 high");

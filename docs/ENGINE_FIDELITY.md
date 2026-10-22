@@ -53,7 +53,7 @@ era preset (`r_era`): `era x3` = three times the era's own error threshold, also
 | feature | Off | Low | Medium | High | Modern |
 |---|---|---|---|---|---|
 | `aa` | - | 1, max 1 | 3, max 3 | 3, max 3 | 3, max 3 |
-| `upscaler` | - | off, {0,2} | 1, {0,1,2} | 1, {0,1,2,3,4} | off, {0,1,2,3,4} |
+| `upscaler` | - | off, {0,2} | 1, {0,1,2,3} | 1, {0,1,2,3,4} | off, {0,1,2,3,4} |
 | `upscale_ratio` | 0.67 | 0.67 | 0.75 | 0.75 | 0.67 |
 | `render_scale` | 0.6, max 0.66, min 0.5 | 0.66, max 1, min 0.5 | 1, max 1, min 0.5 | 1, max 1.5, min 0.5 | 1, max 2 |
 | `sharpen` | - | off, max 1 | 0.35 | 0.35 | 0.35 |
@@ -142,7 +142,7 @@ Budgets (1080p, mid-range GPU): Off 3 ms, Low 5 ms, Medium 8 ms, High 12 ms, Mod
 | feature | cvar | | feature | cvar |
 |---|---|---|---|---|
 | aa | `r_aa` (0 off, 1 FXAA, 2 SMAA, 3 TAA) | | shadows / shadow_resolution | `r_shadows` / `r_shadow_resolution` (512 .. 4096 per cascade; docs/SHADOWS_UNITY_MODEL.md) |
-| upscaler | `r_upscaler` (0 off, 1 TAA-U, 2 FSR 1, 3 / 4 slots) | | shadow_cascades / shadow_projection | `r_shadow_cascades` (1 / 2 / 4) / `r_shadow_projection` |
+| upscaler | `r_upscaler` (0 off, 1 TAA-U, 2 FSR 1, 3 FSR 2, 4 DLSS slot: FSR 2) | | shadow_cascades / shadow_projection | `r_shadow_cascades` (1 / 2 / 4) / `r_shadow_projection` |
 | upscale_ratio | `r_upscale_ratio` | | shadow_distance | `r_shadow_max_distance` (m) |
 | render_scale | `r_render_scale` | | soft_shadow_quality | `r_soft_shadow_quality` (tent 3 / 5 / 7, 3 Ultra = PCSS) |
 | sharpen | `r_sharpen` | | shadow_min_radius / shadow_caster_limit / shadow_far_interval | `r_shadow_min_radius` (m) / `r_shadow_caster_limit` (grass / small plant shadow cascades) / `r_shadow_far_interval` |
@@ -290,8 +290,7 @@ FSR 2) works from below display resolution, the material samplers (renderer and 
 take a mip bias of log2(render / display width), at most -1, so textures keep the display's texel density
 (`vkr_material_mip_bias`; `sampler_material` for the terrain / surface arrays, `sampler_world`, the vgeo
 module samplers; the UI and impostor atlases keep the unbiased `sampler_linear`, the shadow views cancel
-the bias in their alpha test, r_upscaler 3 / 4 (FSR 1 slots) and MoltenVK without samplerMipLodBias get
-none). Pine forest at High (one process, 2 x A/B, 1600 x 900): GPU frame 10.15 ->
+the bias in their alpha test, MoltenVK without samplerMipLodBias gets none). Pine forest at High (one process, 2 x A/B, 1600 x 900): GPU frame 10.15 ->
 8.67 ms (-14.6 %), opaque -29 %, prepass -14 %; the image is slightly softer in the canopy
 (docs/perf_screenshots/upscale_high_native.jpg, upscale_high_taau075.jpg). Modern stays native.
 

@@ -4,7 +4,8 @@
 //   FXAA    fxaa.comp, SMAA 1x (third_party/smaa: edges -> weights -> blend)
 //   FSR1    AMD FidelityFX Super Resolution 1 EASU spatial upscale (third_party/fsr), after
 //           TAA / FXAA / SMAA at render resolution. CAS sharpening runs in the final pass.
-//   FSR 2/3, DLSS: slots in PostUpscaler; the SDKs are not integrated (fall back to FSR1, logged).
+//   FSR 2   AMD FidelityFX FSR 2.2 temporal upscaling (post_fsr2.c), also at render scale 1 (native AA)
+//   DLSS    a slot in PostUpscaler; the SDK is not integrated (FSR 2 runs, logged).
 #include "post_internal.h"
 #include <math.h>
 #include <stdlib.h>   // abs / labs in ffx_a.h (clang: no implicit declarations)
@@ -164,7 +165,8 @@ static FgRes tex(const char *name, VkFormat f, FgSize s) {
 // when neither runs and no particle samples it.
 bool post_aa_reads_opaque(void) {
     bool scaled = P.in.render_w != P.in.output_w || P.in.render_h != P.in.output_h;
-    return P.set.aa == POST_AA_TAA || (scaled && P.set.upscaler == POST_UP_TAAU);
+    bool fsr2 = (P.set.upscaler == POST_UP_FSR2 || P.set.upscaler == POST_UP_DLSS) && post_fsr2_available();   // its reactive mask
+    return P.set.aa == POST_AA_TAA || (scaled && P.set.upscaler == POST_UP_TAAU) || fsr2;
 }
 
 FgRes post_aa_build(FgRes color) {
@@ -174,10 +176,15 @@ FgRes post_aa_build(FgRes color) {
     FgRes c = color;
     bool scaled = P.in.render_w != P.in.output_w || P.in.render_h != P.in.output_h;
     int up = s->upscaler;
-    if (up == POST_UP_FSR2 || up == POST_UP_DLSS) {
+    if (up == POST_UP_DLSS) {
         static int warned;
-        if (!warned++) log_warn("post: %s SDK not integrated - using FSR 1 (EASU) for upscaling", up == POST_UP_DLSS ? "DLSS" : "FSR 2/3");
-        up = POST_UP_FSR1;
+        if (!warned++) log_warn("post: DLSS SDK not integrated - using FSR 2");
+        up = POST_UP_FSR2;
+    }
+    if (up == POST_UP_FSR2) {
+        FgRes f = post_fsr2_build(color);
+        if (fg_valid(f)) return f;
+        up = POST_UP_TAAU;   // passes unavailable (logged once)
     }
     bool taau = scaled && up == POST_UP_TAAU;
     if (s->aa == POST_AA_TAA || taau) {

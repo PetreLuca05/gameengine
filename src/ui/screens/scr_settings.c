@@ -422,8 +422,8 @@ static void graphics_display(GuiCursor *c) {
     }
     row_fid_slider(c, "Render scale", FF_RENDER_SCALE, 0.25f, 2.0f, 0.05f, "%.2fx", "3D resolution. Below 1 is upscaled to the display (faster), above 1 supersamples (sharper, slower).");
     {
-        static const char *const up[] = { "Off (native)", "TAA-U", "FSR 1" };
-        row_fid_combo(c, "Upscaling", FF_UPSCALER, up, NULL, 3, "Renders fewer pixels and upscales them to the display: faster, a little softer.");
+        static const char *const up[] = { "Off (native)", "TAA-U", "FSR 1", "FSR 2" };
+        row_fid_combo(c, "Upscaling", FF_UPSCALER, up, NULL, 4, "Renders fewer pixels and upscales them to the display: faster, a little softer. FSR 2 keeps the most detail in motion.");
         if (cv("r_upscaler") && cv("r_upscaler")->i) row_fid_slider(c, "Upscaling resolution", FF_UPSCALE_RATIO, 0.5f, 1.0f, 0.01f, "%.2fx", "Share of the display resolution rendered before upscaling.");
     }
     if (render_hdr_supported()) {
@@ -495,7 +495,7 @@ static void tab_graphics_debug(GuiCursor *c) {
     row_toggle_cvar(c, "Performance overlay", "r_perf_overlay", "FPS, CPU / GPU frame time and the Engine Fidelity budget.");
 
     section(c, "Resolution & upscaling");
-    static const char *const up[] = { "Off (native)", "TAA-U", "FSR 1", "FSR 2 (uses FSR 1)", "DLSS (uses FSR 1)" };
+    static const char *const up[] = { "Off (native)", "TAA-U", "FSR 1", "FSR 2", "DLSS (uses FSR 2)" };
     row_fid_combo(c, "Upscaler", FF_UPSCALER, up, NULL, 5, NULL);
     if (cv("r_upscaler") && cv("r_upscaler")->i) row_fid_slider(c, "Upscaler resolution", FF_UPSCALE_RATIO, 0.5f, 1.0f, 0.01f, "%.2fx", NULL);
 

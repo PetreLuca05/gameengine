@@ -1,0 +1,54 @@
+#version 450
+// FSR 2 inputs (src/render/post/post_fsr2.c, render resolution):
+//   depth     the world depth with the viewmodel in it: its own depth (viewmodel projection) moved into
+//             the world projection. FSR 2 dilates the motion vectors to the nearest depth of a 3x3 and
+//             reprojects the depth for disocclusion, so the gun must be in front of what is behind it.
+//   reactive  the transparent pass's share of the pixel (FidelityFX's reactive mask generation:
+//             max channel of |tonemapped colour - tonemapped opaque|, 0.2 -> 0.9, else 0)
+//   exposure  1x1, the auto exposure's linear multiplier (exposure.comp) for FSR 2's tonemapping
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D depth_tex;
+layout(set = 0, binding = 1) uniform sampler2D vm_depth_tex;
+layout(set = 0, binding = 2) uniform sampler2D color_tex;
+layout(set = 0, binding = 3) uniform sampler2D opaque_tex;
+layout(set = 0, binding = 8, r32f) uniform writeonly image2D depth_out;
+layout(set = 0, binding = 9, r8) uniform writeonly image2D reactive_out;
+layout(set = 0, binding = 10, rg32f) uniform writeonly image2D exposure_out;
+layout(std430, set = 0, binding = 13) readonly buffer Exposure { float e[16]; } X;
+
+// pc.p0: x / y the viewmodel projection's near / far; pc.u0: x opaque copy bound, y viewmodel depth bound
+
+vec3 fsr_tonemap(vec3 c) { return c / (max(max(0.0, c.r), max(c.g, c.b)) + 1.0); }
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(depth_out);
+    float e = X.e[0];
+    e = (isnan(e) || isinf(e) || e <= 0.0) ? 0.0 : e;   // 0: FSR 2 takes 1
+    if (p == ivec2(0)) imageStore(exposure_out, ivec2(0), vec4(e, 0.0, 0.0, 0.0));
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    float d = texelFetch(depth_tex, p, 0).r;
+    if (pc.u0.y != 0u) {
+        float dv = texelFetch(vm_depth_tex, p, 0).r;
+        if (dv < 1.0) {
+            float n = pc.p0.x, f = pc.p0.y;
+            float dist = n * f / (f - dv * (f - n));                 // the viewmodel surface's view depth
+            float wn = U.depthp.x, wf = U.depthp.y;
+            dist = max(dist, wn * 1.001);
+            float dw = wf * (dist - wn) / (dist * (wf - wn));         // the same depth in the world projection
+            d = min(d, dw);
+        }
+    }
+    imageStore(depth_out, p, vec4(d));
+    float r = 0.0;
+    if (pc.u0.x != 0u) {
+        float ex = e > 0.0 ? e : 1.0;
+        vec3 c = fsr_tonemap(sanitize(texelFetch(color_tex, p, 0).rgb) * ex);
+        vec3 o = fsr_tonemap(sanitize(texelFetch(opaque_tex, p, 0).rgb) * ex);
+        vec3 dl = abs(c - o);
+        r = max(dl.x, max(dl.y, dl.z)) < 0.2 ? 0.0 : 0.9;
+    }
+    imageStore(reactive_out, p, vec4(r));
+}

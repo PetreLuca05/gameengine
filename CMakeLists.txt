@@ -243,6 +243,32 @@ foreach(src ${DG_SHADER_SOURCES})
     COMMENT "GLSL ${name}" VERBATIM)
   list(APPEND DG_SPV_FILES ${out})
 endforeach()
+# AMD FidelityFX FSR 2.2 (third_party/fsr2, MIT): the passes src/render/post/post_fsr2.c dispatches, one
+# permutation each (HDR input, render-resolution unjittered motion vectors, standard depth, no RCAS, FP32;
+# the Lanczos reprojection the SDK picks on wave32 GPUs).
+set(DG_FSR2_PASSES compute_luminance_pyramid reconstruct_previous_depth depth_clip lock accumulate)
+set(DG_FSR2_DEFS -DFFX_GPU=1 -DFFX_GLSL=1 -DFFX_HALF=0
+  -DFFX_FSR2_OPTION_UPSAMPLE_SAMPLERS_USE_DATA_HALF=0 -DFFX_FSR2_OPTION_ACCUMULATE_SAMPLERS_USE_DATA_HALF=0
+  -DFFX_FSR2_OPTION_REPROJECT_SAMPLERS_USE_DATA_HALF=0 -DFFX_FSR2_OPTION_POSTPROCESSLOCKSTATUS_SAMPLERS_USE_DATA_HALF=0
+  -DFFX_FSR2_OPTION_UPSAMPLE_USE_LANCZOS_TYPE=2 -DFFX_FSR2_OPTION_REPROJECT_USE_LANCZOS_TYPE=0
+  -DFFX_FSR2_OPTION_HDR_COLOR_INPUT=1 -DFFX_FSR2_OPTION_LOW_RESOLUTION_MOTION_VECTORS=1
+  -DFFX_FSR2_OPTION_JITTERED_MOTION_VECTORS=0 -DFFX_FSR2_OPTION_INVERTED_DEPTH=0 -DFFX_FSR2_OPTION_APPLY_SHARPENING=0)
+file(GLOB DG_FSR2_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/third_party/fsr2/*.h)
+foreach(pass ${DG_FSR2_PASSES})
+  set(src ${CMAKE_SOURCE_DIR}/third_party/fsr2/ffx_fsr2_${pass}_pass.glsl)
+  set(out ${DG_SHADER_OUT}/fsr2/${pass}.comp.spv)
+  if(DG_SHADER_COMPILER_KIND STREQUAL "glslc")
+    set(cmd ${DG_SHADER_COMPILER} --target-env=vulkan1.3 -O -fshader-stage=compute ${DG_FSR2_DEFS} -I ${CMAKE_SOURCE_DIR}/third_party/fsr2 -o ${out} ${src})
+  else()
+    set(cmd ${DG_SHADER_COMPILER} -V --target-env vulkan1.3 -S comp ${DG_FSR2_DEFS} -I${CMAKE_SOURCE_DIR}/third_party/fsr2 -o ${out} ${src})
+  endif()
+  add_custom_command(OUTPUT ${out}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}/fsr2
+    COMMAND ${cmd}
+    DEPENDS ${src} ${DG_FSR2_INCLUDES}
+    COMMENT "GLSL fsr2/${pass}" VERBATIM)
+  list(APPEND DG_SPV_FILES ${out})
+endforeach()
 add_custom_target(dg_shaders DEPENDS ${DG_SPV_FILES})
 
 # ---------------------------------------------------------------- game
@@ -572,6 +598,16 @@ else()
   target_link_libraries(test_bc_codec PRIVATE m)
 endif()
 add_test(NAME bc_codec COMMAND test_bc_codec WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# SPIR-V reflection (the FSR 2 passes' descriptor layouts, src/render/post/post_fsr2.c): a fixture and the
+# built FSR 2 shaders (run in the bin dir).
+add_executable(test_spv_reflect tests/test_spv_reflect.c src/render/spv_reflect.c)
+set_target_properties(test_spv_reflect PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_spv_reflect PRIVATE src tests)
+add_dependencies(test_spv_reflect dg_shaders)
+if(MSVC)
+  target_compile_options(test_spv_reflect PRIVATE /W3 /wd4201 /utf-8)
+endif()
+add_test(NAME spv_reflect COMMAND test_spv_reflect WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # Foliage wind (docs/FOLIAGE_WIND.md): the wind field (gust fronts, tile, springs, sources), the Crysis
 # vegetation WPO CPU mirror (trunk length, layer linearity, phase decorrelation, bounds), the Tree It

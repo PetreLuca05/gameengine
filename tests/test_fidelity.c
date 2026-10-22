@@ -191,7 +191,9 @@ static void test_lower_raise(void) {
     fid_apply(FID_MEDIUM);
     CHECK(val(FF_UPSCALER) == 2, "Medium keeps the chosen FSR 1 (allowed)");
     set(FF_UPSCALER, 3);
-    CHECK(val(FF_UPSCALER) != 3, "Medium: the FSR 2 slot greyed");
+    CHECK(val(FF_UPSCALER) == 3, "Medium allows FSR 2");
+    set(FF_UPSCALER, 4);
+    CHECK(val(FF_UPSCALER) != 4, "Medium: the DLSS slot greyed");
     set(FF_UPSCALER, 0);
     // The user's choices persist (r_fidelity_custom) and come back after a restart.
     fid_apply(FID_MODERN);

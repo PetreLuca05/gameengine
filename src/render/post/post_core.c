@@ -92,12 +92,13 @@ float post_halton(u32 index, u32 base) {
     return r;
 }
 
-bool post_wants_jitter(void) { return P.ok && !P.set.direct_output && (P.set.aa == POST_AA_TAA || P.set.upscaler == POST_UP_TAAU); }
+static bool fsr2_on(const PostSettings *s) { return s->upscaler == POST_UP_FSR2 || s->upscaler == POST_UP_DLSS; }   // DLSS: not integrated, FSR 2 runs
+bool post_wants_jitter(void) { return P.ok && !P.set.direct_output && (P.set.aa == POST_AA_TAA || P.set.upscaler == POST_UP_TAAU || fsr2_on(&P.set)); }
 
 bool post_direct(void) { return P.ok && P.set.direct_output; }
 
 // Asked while the graph is built, before post_begin_frame: this frame's settings are P.pending.
-static bool temporal_aa(const PostSettings *s) { return s->aa == POST_AA_TAA || s->upscaler == POST_UP_TAAU; }
+static bool temporal_aa(const PostSettings *s) { return s->aa == POST_AA_TAA || s->upscaler == POST_UP_TAAU; }   // reads last frame's depth
 bool post_needs_depth_history(void) {
     const PostSettings *s = &P.pending;
     return P.ok && !s->direct_output && (s->ao || s->ssr || s->ssgi || temporal_aa(s));
@@ -106,7 +107,7 @@ bool post_needs_velocity(void) {
     const PostSettings *s = &P.pending;
     if (!P.ok || !R->has_unused_attachments) return true;   // no null attachments: always written
     if (s->direct_output) return false;
-    return post_needs_depth_history() || s->motion_blur > 0 || s->debug_view == 5;
+    return post_needs_depth_history() || fsr2_on(s) || s->motion_blur > 0 || s->debug_view == 5;
 }
 
 // Off has no histogram: a fixed exposure metered from the light (sun illuminance on the ground plus
@@ -125,7 +126,9 @@ static float direct_exposure(const PostFrameIn *in, const PostSettings *s) {
 float post_direct_exposure(void) { return P.direct_exposure; }
 
 vec2 post_jitter_pixels(u32 frame) {
-    u32 i = (frame % 8) + 1;   // Halton(2,3), 8 phases
+    // Halton(2,3): 8 phases, FSR 2 its own count (8 x the upscale ratio squared: ffxFsr2GetJitterOffset).
+    u32 phases = fsr2_on(&P.set) ? (u32)post_fsr2_jitter_phases(R->hdr.w, R->swap_extent.width) : 8u;
+    u32 i = (frame % phases) + 1;
     return v2(post_halton(i, 2) - 0.5f, post_halton(i, 3) - 0.5f);
 }
 
@@ -449,6 +452,7 @@ void post_shutdown(void) {
     vkr_buffer_destroy_now(&P.histogram_buf);
     post_sights_shutdown();
     post_weather_shutdown();
+    post_fsr2_shutdown();
     post_looks_shutdown();
     post_textures_shutdown();
     vkDestroySampler(R->device, P.linear, NULL);

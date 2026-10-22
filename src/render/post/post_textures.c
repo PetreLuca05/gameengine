@@ -303,6 +303,10 @@ static void make_dirt(void) {
     free(px);
 }
 
+void post_texture_make(VkImage *img, VmaAllocation *alloc, VkImageView *view, VkFormat fmt, u32 w, u32 h, const void *data, size_t bytes) {
+    make_image(img, alloc, view, fmt, w, h, 1, data, bytes);
+}
+
 void post_textures_init(void) {
     u32 white = 0xFFFFFFFFu, black = 0xFF000000u;
     make_image(&P.white_img, &P.white_alloc, &P.white, VK_FORMAT_R8G8B8A8_UNORM, 1, 1, 1, &white, 4);

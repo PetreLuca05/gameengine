@@ -133,6 +133,14 @@ void post_buffer_barrier(VkCommandBuffer cmd);
 void post_ss_build(PostLitInputs *out);       // post_screen_space.c: hi-z, contact, gtao, ssgi, ssr
 void post_vol_build(void);                     // post_volumetrics.c
 FgRes post_aa_build(FgRes color);              // post_aa.c: TAA / TAA-U / FXAA / SMAA / FSR1 (-> output res)
+// post_fsr2.c: AMD FidelityFX FSR 2.2 (r_upscaler 3) from the jittered HDR colour to the output
+// resolution; FG_NONE when its passes are unavailable (post_aa falls back to TAA-U).
+FgRes post_fsr2_build(FgRes color);
+bool post_fsr2_available(void);
+void post_fsr2_shutdown(void);
+int post_fsr2_jitter_phases(u32 render_w, u32 display_w);   // ffxFsr2GetJitterPhaseCount
+// A small sampled texture from pixels (LUTs; post_textures.c).
+void post_texture_make(VkImage *img, VmaAllocation *alloc, VkImageView *view, VkFormat fmt, u32 w, u32 h, const void *data, size_t bytes);
 FgRes post_mb_build(FgRes color);              // post_camera.c: motion blur
 FgRes post_dof_build(FgRes color);             // post_camera.c: depth of field
 FgRes post_sights_build(FgRes color);          // post_sights.c: red dot / scope (after DoF, before bloom)

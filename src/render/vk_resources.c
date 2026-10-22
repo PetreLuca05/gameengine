@@ -186,8 +186,8 @@ float vkr_material_mip_bias(void) {
     static Cvar *aa, *up;
     if (!aa) aa = cvar_find("r_aa");
     if (!up) up = cvar_find("r_upscaler");
-    // temporal resolves only: TAA, TAA-U (r_upscaler 3 / 4 are slots that run FSR 1's spatial EASU for now)
-    bool temporal = (aa && aa->i == 3) || (up && up->i == 1);
+    // temporal resolves only: TAA, TAA-U, FSR 2 (r_upscaler 4, DLSS, runs FSR 2)
+    bool temporal = (aa && aa->i == 3) || (up && (up->i == 1 || up->i == 3 || up->i == 4));
     float ratio = (float)R->hdr.w / (float)R->swap_extent.width;
     if (!temporal || ratio >= 0.999f) return 0.0f;
     return fmaxf(log2f(ratio), -1.0f);
