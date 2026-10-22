@@ -283,7 +283,7 @@ bool lobby_host(TransportKind kind) {
     const char *sel = mainmenu_selected_map();
     if (sel && sel[0] && maplist_find(&S->maps, sel)) dg_strcpy(s.map, sizeof(s.map), sel);
     if (!maplist_find(&S->maps, s.map) && S->maps.count) dg_strcpy(s.map, sizeof(s.map), S->maps.maps[0].id);
-    if (kind == TRANSPORT_LAN && s.privacy == LP_FRIENDS) s.privacy = LP_PUBLIC;   // no friends on a LAN
+    if (kind == TRANSPORT_LAN && s.privacy == LP_FRIENDS) s.privacy = LP_INVITE;   // no friends on a LAN: private
     if (!settings_weather_ok(&s)) s.weather[0] = 0;
     S->kind = kind;
     set_state(LE_HOST);

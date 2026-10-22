@@ -81,7 +81,6 @@ static void load_layouts(void) {
     mm_layout_load(&M->maps, "mainmenu_maps");
     mm_layout_load(&M->settings, "mainmenu_settings");
     mm_layout_load(&M->credits, "mainmenu_credits");
-    mm_layout_load(&M->lobby, "mainmenu_lobby");
     mm_layout_load(&M->loading, "mainmenu_loading");
     mm_layout_load(&M->chat, "mainmenu_chat");
     mm_layout_load(&M->phone_card, "mainmenu_phone_card");
@@ -255,12 +254,36 @@ static bool draw_closed(void) {
 // ------------------------------------------------------------------ tabs
 
 static bool tab_allowed(int tab, const char **why) {
-    LobbyState st = lobby_state();
-    bool in_lobby = st == LS_CREATING || st == LS_JOINING || st == LS_LOBBY || st == LS_COUNTDOWN || st == LS_MIGRATING;
-    if (in_lobby && tab == MT_MAPS) { if (why) *why = "In a lobby: the host picks the map in the lobby"; return false; }
-    if (in_lobby && tab == MT_CREDITS) { if (why) *why = "Leave the lobby first"; return false; }
+    // A guest can't pick the map: the party's host does.
+    if (tab == MT_MAPS && lobby_active() && !lobby_is_host()) { if (why) *why = "In someone else's party: the host picks the map"; return false; }
     if (why) *why = NULL;
     return true;
+}
+
+// ------------------------------------------------------------------ the party
+
+// The menu always has a party: our own lobby (Steam when it runs, else LAN) opens on its own; a failure
+// (no Steam lobby, the port taken) is quiet and retried every 15 s.
+static void party_keep(void) {
+    LobbyState st = lobby_state();
+    if (M->party_auto && st == LS_CLOSED) {
+        dg_strcpy(M->party_err, sizeof(M->party_err), lobby_closed_reason());
+        lobby_ack_closed();
+        M->party_auto = false;
+        return;
+    }
+    if (st == LS_LOBBY || st == LS_COUNTDOWN) { M->party_auto = false; M->party_err[0] = 0; }
+    if (st == LS_IDLE && gui_time() >= M->party_retry) {
+        M->party_auto = true;
+        M->party_retry = gui_time() + 15.0;
+        lobby_host(lobby_steam_running() ? TRANSPORT_STEAM : TRANSPORT_LAN);
+    }
+}
+
+const char *mm_lobby_offline_text(void) {
+    static char t[192];
+    snprintf(t, sizeof(t), "No party: %s (trying again)", M->party_err[0] ? M->party_err : "creating it");
+    return t;
 }
 
 static void set_tab(int tab) {
@@ -277,18 +300,16 @@ static void draw_tabbar(GuiRect bar) {
     const char *labels[MT_COUNT];
     bool en[MT_COUNT];
     const char *why[MT_COUNT];
-    bool in_lobby = lobby_active();
     for (int i = 0; i < MT_COUNT; i++) {
         labels[i] = k_tab_names[i];
         en[i] = tab_allowed(i, &why[i]);
     }
-    if (in_lobby) labels[MT_PLAY] = "Lobby";
     int t = gw_tabbar(gui_id("mm_tabbar"), tabs, labels, en, why, MT_COUNT, M->tab, false);
     if (t != M->tab) set_tab(t);
     // Power: quit to desktop (confirm). Centred vertically in its column.
     float ps = TOK("mm_power");
     GuiRect pr = { power.x + power.w - ps, bar.y + (bar.h - ps) * 0.5f, ps, ps };
-    if (gw_power(gui_id("mm_power"), pr, "Quit to desktop")) screens_confirm(CONFIRM_QUIT, "Quit to desktop?", in_lobby ? "You will leave the lobby." : "Your settings and profile are saved.", 0);
+    if (gw_power(gui_id("mm_power"), pr, "Quit to desktop")) screens_confirm(CONFIRM_QUIT, "Quit to desktop?", lobby_active() && lobby_count(lobby_get()) > 1 ? "You will leave the party." : "Your settings and profile are saved.", 0);
 }
 
 static void tab_keys(void) {
@@ -310,6 +331,7 @@ static void tab_keys(void) {
 bool mainmenu_draw(bool top) {
     if (!M->active) return false;
     if (M->env_dirty) mm_scene_apply_environment();
+    if (!M->splash && lobby_state() != LS_LOADING && lobby_state() != LS_IN_GAME) party_keep();
     M->preview_rect = gui_rect(0, 0, 0, 0);
     gui_push_input(top && !M->splash);
     LobbyState st = lobby_state();
@@ -341,8 +363,7 @@ bool mainmenu_draw(bool top) {
     gd_alpha_push(tin);
     switch (M->tab) {
     case MT_PLAY:
-        if (lobby_active()) mm_lobby_draw(content);
-        else mm_play_draw(content);
+        mm_play_draw(content);
         break;
     case MT_PLAYER: mm_player_draw(content); break;
     case MT_COSMETICS: mm_cosmetics_draw(content); break;

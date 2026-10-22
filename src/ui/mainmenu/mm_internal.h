@@ -42,7 +42,10 @@ typedef struct MainMenu {
     bool show_dev_maps;
     bool cos_items;                // Cosmetics: the Items sub-tab (else Player)
     float items_t;                 // 0..1 towards the Items close-up (the background's camera)
-    bool bg_played;                // a session ran since the menu world was made (the next menu loads a fresh one)
+    bool bg_played;
+    bool party_auto;               // the menu is opening our own party (a failure is quiet: retried)
+    double party_retry;            // gui_time of the next attempt
+    char party_err[128];                // a session ran since the menu world was made (the next menu loads a fresh one)
     bool env_dirty;                // the background must take the selection's look
     // player preview (scene camera)
     float orbit_yaw, orbit_pitch, orbit_zoom;
@@ -52,7 +55,7 @@ typedef struct MainMenu {
     int cos_slot;
     int cos_selected;              // item index, -1 none
     // layouts
-    MmLayout shell, play, browser, player, cosmetics, maps, settings, credits, lobby, loading, chat, phone_card, phone_portal;
+    MmLayout shell, play, browser, player, cosmetics, maps, settings, credits, loading, chat, phone_card, phone_portal;
     // Steam avatar
     TextureId avatar;
     u64 avatar_id;
@@ -68,8 +71,11 @@ void mm_cosmetics_draw(GuiRect content);
 void mm_maps_draw(GuiRect content);
 void mm_maps_background(GuiRect content, float alpha);   // the globe, before the shading and the panels
 void mm_credits_draw(GuiRect content);
+void mm_play_start(void);
+void mm_party_sync(void);              // the host's party takes the menu's map / season / time / weather (mm_scene.c)              // the party's game (host): ready, then start / the countdown
+void mm_lobby_players(GuiRect r);      // the party's player rows (mm_lobby.c)
+const char *mm_lobby_offline_text(void);   // why there is no party right now (mainmenu.c)
 void mm_news_draw(GuiRect content);     // Patch notes tab (assets/ui/news.txt)
-void mm_lobby_draw(GuiRect content);
 void mm_loading_draw(void);
 
 // scene (mm_scene.c)

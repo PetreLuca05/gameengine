@@ -28,7 +28,7 @@ static int map_group(const MapInfo *m) { return m->chapter[0] ? MG_CHAPTER1 : MG
 // Story chapter maps start their chapter (docs/STORY.md); every other map hosts a lobby.
 static void host_map(const MapInfo *m) {
     if (m && m->chapter[0]) story_start(m->chapter, NULL);
-    else lobby_host(lobby_steam_running() ? TRANSPORT_STEAM : TRANSPORT_LAN);
+    else if (m) { mm_select_map(m->id); mm_play_start(); }   // the party's game on this map
 }
 
 static void season_summary(const SeasonDef *sd, char *out, int size) {
@@ -243,6 +243,7 @@ void mm_maps_draw(GuiRect content) {
         p->lobby.start_hour = s.start_hour;
         dg_strcpy(p->lobby.weather, sizeof(p->lobby.weather), s.weather);
         p->lobby.dynamic_weather = s.dynamic_weather;
+        mm_party_sync();
     }
     GuiRect br = { in.x, in.y + in.h - TOK("mm_button_h"), in.w, TOK("mm_button_h") };
     const MapInfo *sel = lobby_map_info(M->map);

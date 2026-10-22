@@ -33,11 +33,13 @@ launch ── splash (1.6 s, any key / click skips) ──▶ MAIN MENU
             Q / E · LB / RB · 1-7 · mouse                         ⏻ ─▶ CONFIRM "Quit to desktop?"
             account: avatar · name · phone glyph + status (click: the Connect portal) · Online /
             Offline (LAN only) / LAN build · relay ping · version
-  ├─ Play ──┬─ Continue  (the last story checkpoint, docs/STORY.md; else the last session; greyed without)
+  ├─ Play ──┬─ Continue  (the last story checkpoint, docs/STORY.md; else the party's game; greyed without)
   │         ├─ Story: 10th Floor (starts chapter 1, story_chapter 1)
-  │         ├─ Host game ─────────────────────────────────────▶ LOBBY (host)
-  │         ├─ Join ─▶ SERVER BROWSER [Steam lobbies | Friends | LAN | Direct IP] ─▶ LOBBY
-  │         └─ Host on: Steam / LAN
+  │         ├─ Start game (host: ready + start, or the 10 s countdown when not all are ready;
+  │         │             Cancel start) / Ready · Unready (a guest)
+  │         ├─ Join ─▶ SERVER BROWSER [Steam lobbies | Friends | LAN | Direct IP] ─▶ their party
+  │         ├─ Leave party (in someone else's: back to a party of your own)
+  │         └─ PARTY panel (right): the lock + privacy · the players · the map · game settings
   ├─ Player     a drag over the character turns it (eases back),
   │             name (LAN name field offline), stats (stubs), loadout,
   │             the Phone card (Connect ─▶ CONNECT PORTAL modal; docs/PHONE.md "Phone flow")
@@ -55,16 +57,21 @@ launch ── splash (1.6 s, any key / click skips) ──▶ MAIN MENU
                 content area)
   footer: key hints
 
-LOBBY (the Play tab while in a session; Maps and Credits are locked, the tab reads "Lobby")
+PARTY (no lobby screen: the Play tab is the lobby; mm_play.c draw_party, mainmenu.c party_keep)
+  the menu opens your own lobby on start (Steam when it runs, else LAN); a failure (no Steam lobby,
+  the port taken) is quiet and retried every 15 s ("No party: <reason>")
+  header: "Party  n / max" · privacy in words · the lock (closed: Friends / Invite only, open:
+          Public; the host clicks it: Public <-> Invite only, saved in the profile); a LAN party
+          made from "Friends only" becomes Invite only (private)
   players (avatar, name colour, HOST, ready, phone icon (a paired real phone), mic stub, ping;
            host: Kick, Make host)
-  | map (host: selector, the map's season / time / weather come with it; others: Vote stub)
-  | game settings (difficulty, max players, privacy, join a running game, PvP stub,
-  |                season, start time, start weather, dynamic weather)   host edits, others read
-  | chat (timestamps, system lines, name colours, /ready /unready /map /kick /promote /start /cancel)
-  [Ready] [Start | Start in 10 s | Cancel start] [Invite friends] status [Leave]
+  map: thumbnail, name, season · time (the Maps tab picks them: mm_party_sync; a guest can't
+       open Maps)
+  game settings (difficulty, max players, join a running game)   host edits, others read
+  [Invite friends] (Steam party); "Starting in n" during the countdown
        ── start ──▶ LOADING (thumbnail, season / time / weather, progress, tip) ──▶ IN GAME
-  closed (kicked, rejected, host left): "Session ended" + reason + OK
+  chat: the pause menu's Lobby page and the in-game chat line (Enter)
+  closed (kicked, rejected, host left): "Session ended" + reason + OK, then a party of your own
 
 IN GAME
   Esc ▶ PAUSE: Resume · Inventory · Settings · Lobby ▸ (players, chat, invite, kick)

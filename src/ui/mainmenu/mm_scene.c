@@ -177,4 +177,19 @@ void mm_select_map(const char *id) {
     M->env_dirty = true;
     Profile *p = lobby_profile();
     dg_strcpy(p->last_map, sizeof(p->last_map), id);
+    mm_party_sync();
+}
+
+// The host's party follows the menu's selection: the map and its start look (season, time, weather).
+void mm_party_sync(void) {
+    MainMenu *M = mm();
+    LobbyState st = lobby_state();
+    if (!lobby_is_host() || (st != LS_LOBBY && st != LS_COUNTDOWN)) return;
+    LobbySettings s = lobby_get()->settings;
+    dg_strcpy(s.map, sizeof(s.map), M->map);
+    s.season = (u8)DG_CLAMP(M->season, 0, SEASON_COUNT - 1);
+    s.start_hour = (u8)DG_CLAMP(M->hour, 0, 23);
+    dg_strcpy(s.weather, sizeof(s.weather), M->weather);
+    s.dynamic_weather = M->dynamic_weather;
+    lobby_set_settings(&s);
 }
